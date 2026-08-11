@@ -34,6 +34,11 @@
             <option value="">All modules</option>
             <option value="drawing_register">Drawing Register</option>
             <option value="material_submittal">Material Submittal Log</option>
+            <!-- Privilege changes (migration 0007). Only admins can read these —
+                 engineering_audit_read gates table_name='users' on is_admin() — so
+                 the option is removed below for everyone else rather than offering
+                 a filter that always returns nothing. -->
+            <option value="users" id="f-module-users">User &amp; access</option>
           </select>
           <select class="pd-select" id="f-action">
             <option value="">All actions</option>
@@ -67,7 +72,7 @@
   <script src="assets/js/icons.js?v=20260811a"></script>
   <script src="assets/js/perm.js?v=20260811a"></script>
   <script src="assets/js/nav.js?v=20260811a"></script>
-  <script src="assets/js/engdata.js?v=20260811a"></script>
+  <script src="assets/js/engdata.js?v=20260811b"></script>
   <script>
   (function () {
     var PAGE = 40;
@@ -79,6 +84,12 @@
       UI.renderUserBar(prof);
       Nav.render(prof, 'notifications');
       if (window.Icons) Icons.hydrate(document.body);
+      // Privilege entries are admin-only at the policy level; drop the option for
+      // everyone else. (Cosmetic — RLS is what actually protects them.)
+      if (!Perm.isAdmin(prof)) {
+        var uOpt = document.getElementById('f-module-users');
+        if (uOpt) uOpt.remove();
+      }
       ['f-module', 'f-action', 'f-scope'].forEach(function (id) {
         document.getElementById(id).onchange = reload;
       });
@@ -115,7 +126,10 @@
         .range(offset, offset + PAGE - 1);
       if (mod) q = q.eq('table_name', mod);
       if (act) q = q.eq('action', act);
-      if (scope === 'project' && pid) q = q.eq('project_id', pid);
+      // Privilege entries are not project-scoped (project_id is null), so applying
+      // the project filter to them would always return nothing and read as "no
+      // privilege changes have ever happened". Skip the scope filter for them.
+      if (scope === 'project' && pid && mod !== 'users') q = q.eq('project_id', pid);
 
       var res = await q;
       if (res.error) {

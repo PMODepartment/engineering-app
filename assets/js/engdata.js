@@ -211,7 +211,15 @@
     },
 
     activityRowHTML: function (a) {
-      var MOD = { drawing_register: 'Drawing', material_submittal: 'Submittal' };
+      // 'users' entries come from migration 0007 (privilege changes). Without an
+      // entry here the feed printed the raw table name — "updated users
+      // fmlozano@…". "access for" makes the sentence read properly:
+      //   "Fernando Miguel Lozano updated access for fmlozano@… / role: admin → super_admin"
+      var MOD = {
+        drawing_register: 'Drawing',
+        material_submittal: 'Submittal',
+        users: 'access for'
+      };
       var when = a.at ? new Date(a.at) : null;
       var ico = a.action === 'DELETE' ? 'trash' : (a.action === 'INSERT' ? 'plus' : 'pencil');
       var verb = a.action === 'INSERT' ? 'created' : a.action === 'DELETE' ? 'deleted' : 'updated';
