@@ -123,7 +123,14 @@ const TABLES = [
   { name: 'material_submittal', key: 'id', reown: true },
 ];
 
+// Bucket → the table whose rows point into it. The table is used to cross-check
+// "0 objects": that is only good news if no row references a file. See
+// reportOrphanRefs().
 const BUCKETS = ['drawing-register', 'material-submittal'];
+const BUCKET_TABLE = {
+  'drawing-register':   'drawing_register',
+  'material-submittal': 'material_submittal',
+};
 
 const PAGE = 500;
 
@@ -202,9 +209,38 @@ async function listAllObjects(bucket, prefix = '') {
   return found;
 }
 
+// "0 objects" is ambiguous and the two meanings matter very differently:
+//   • nothing was ever uploaded            → fine, nothing to migrate
+//   • the listing missed them / wrong name → every attachment is about to be
+//                                            silently left behind
+// The rows themselves settle it: if any source row has a file_url, there MUST be
+// objects. Called on both dry and real runs so the discrepancy cannot slip past.
+async function reportFileRefs(bucket, objectCount) {
+  const table = BUCKET_TABLE[bucket];
+  if (!table) return;
+  const { count, error } = await src.from(table)
+    .select('*', { count: 'exact', head: true })
+    .not('file_url', 'is', null);
+  if (error) { console.log(`      (could not count file_url refs: ${error.message})`); return; }
+
+  if (!count && !objectCount) {
+    console.log(`      ✓ consistent: no row references a file, and none exist`);
+  } else if (count && !objectCount) {
+    console.log(`      ✗ ${count} row(s) have file_url set but the bucket lists 0 objects.`);
+    console.log(`        Those attachments would be LOST. Check the bucket name and`);
+    console.log(`        that the source key can read storage before importing.`);
+  } else if (!count && objectCount) {
+    console.log(`      ⚠️ ${objectCount} object(s) exist but no row references one`);
+    console.log(`         (orphans — harmless, they will be copied anyway)`);
+  } else {
+    console.log(`      ${count} row(s) reference a file; ${objectCount} object(s) present`);
+  }
+}
+
 async function copyBucket(bucket) {
   const paths = await listAllObjects(bucket);
   console.log(`  ${bucket}: ${paths.length} object(s)`);
+  await reportFileRefs(bucket, paths.length);
   if (!paths.length || DRY) return;
 
   let ok = 0, failed = [];
