@@ -187,11 +187,17 @@
       try {
         var d = await EngData.drawingStats(pid);
         document.getElementById('dr-kpis').innerHTML =
+          // ⚠️ "% of drawings", NOT "% of register". These tiles count DRAWINGS by
+          // status; the module's own Overview counts SHEETS (approved_sheets /
+          // no_of_sheets). On GPR101 that is 42% here versus 81% there — both
+          // correct, 39 points apart. Labelled "of register" they read as a
+          // contradiction and one of them looks broken, so the unit is now
+          // explicit on both counts.
           kpi('Total Drawings',   d.total,        null,   DR, d.sheets ? d.sheets + (d.sheets === 1 ? ' sheet' : ' sheets') : '') +
           kpi('Active',           d.active,       'info', DR, 'not approved or cancelled') +
-          kpi('Under Review',     d.underReview,  'warn', DR, 'submitted or resubmit') +
-          kpi('Approved',         d.approved,     'good', DR, d.pctApproved + '% of register') +
-          kpi('For Revision',     d.forRevision,  'bad',  DR, 'resubmit') +
+          kpi('Under Review',     d.underReview,  'warn', DR, 'submitted or for review') +
+          kpi('Approved',         d.approved,     'good', DR, d.pctApproved + '% of drawings') +
+          kpi('For Revision',     d.forRevision,  'bad',  DR, 'resubmit or revise') +
           kpi('Not Started',      d.notStarted,   null,   DR, '');
         bars('dr-bars', d.byStatus, d.total);
         document.getElementById('dr-latest').innerHTML = d.latest.length
