@@ -50,9 +50,13 @@ grant select on workspaces to anon, authenticated;
 -- These run as the function owner and ignore RLS, so revoking EXECUTE is the only
 -- way to stop them. Nothing in the Engineering App calls them after this; the
 -- Planners Dashboard has its own copies, unaffected.
-revoke execute on function admin_archive_project(text, boolean) from anon, authenticated;
-revoke execute on function admin_delete_project(text)           from anon, authenticated;
-revoke execute on function admin_delete_workspace(text)         from anon, authenticated;
+-- ⚠️ THESE THREE LINES ARE NOT SUFFICIENT — see 0010, which must also be applied.
+-- PostgreSQL grants EXECUTE on every new function to PUBLIC by default, so
+-- `authenticated` keeps EXECUTE *via PUBLIC* and these revokes have no effect.
+-- Verified the hard way: after 0009 alone, an admin still archived a live project.
+revoke execute on function admin_archive_project(text, boolean) from public, anon, authenticated;
+revoke execute on function admin_delete_project(text)           from public, anon, authenticated;
+revoke execute on function admin_delete_workspace(text)         from public, anon, authenticated;
 
 
 -- ---- 3. keep user↔project ASSIGNMENT working ------------------------------
