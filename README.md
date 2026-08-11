@@ -58,6 +58,8 @@ migrations/0006-guards-exempt-trusted-sessions.sql      keeps SQL editor / servi
 migrations/0007-audit-privilege-changes.sql     audit role/status/project changes
 migrations/0008-fix-audit-array-append.sql      fixes a 0007 bug that broke Administration
 migrations/0009-projects-read-only.sql          projects sourced from the Planners Dashboard
+
+.github/workflows/sync-projects.yml   daily project/workspace sync from the Planners Dashboard
 migrations/migrate-data.mjs                     data + file copy from the Planning App
 ```
 
@@ -227,6 +229,14 @@ navigation, launcher and permission filter all follow. See
 
 - **Accounts are not shared with the Planners Dashboard.** A direct consequence
   of using a separate Supabase project. Users register once here.
+- **The scheduled project sync stops itself after 60 days of repo inactivity.**
+  This repo is **public**, and GitHub disables `schedule` triggers in public
+  repos once there have been no commits for 60 days. The Engineering App is
+  meant to become stable, so this *will* happen — and the failure is silent: no
+  run, therefore no failure email. GitHub notifies repo admins when it disables
+  a workflow, so do not ignore that mail. Check the **Actions** tab if a new
+  project has not appeared, and re-enable the workflow there. Any commit resets
+  the 60-day clock.
 - **Projects and workspaces are read-only here** (`0009`). The Planners Dashboard
   is the single place they are created and maintained; this app sources them via
   `migrate-data.mjs --only=workspaces,projects`. Nothing propagates
