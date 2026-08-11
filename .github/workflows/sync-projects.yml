@@ -66,7 +66,13 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # ⚠️ MUST be 22 or newer. supabase-js v2 builds a realtime client inside
+          # createClient(), which needs a native global WebSocket — added in Node
+          # 22. On Node 20 the script dies before it does anything at all:
+          #   Error: Node.js 20 detected without native WebSocket support
+          # (Pinning '20' here is how this workflow failed on its first run. It
+          # worked locally only because that machine runs Node 24.)
+          node-version: '24'
 
       # This repo deliberately has NO package.json (no build step, by design), and
       # `npm i -g` does not work for ESM — Node will not resolve imports from the
@@ -109,11 +115,16 @@ jobs:
       # migrate-data.mjs sets a non-zero exit code on failure, so a failed sync
       # fails the job and GitHub emails the repo admins. Without this note someone
       # will eventually "fix" the script to swallow errors.
+      # ⚠️ Do NOT assert a cause here. The first version of this step confidently
+      # blamed an expired key, when the actual failure was a Node version too old
+      # for supabase-js — sending the reader looking in the wrong place. Point at
+      # the real log instead and list possibilities without ranking them.
       - name: Result
         if: failure()
         run: |
-          echo "::error::Project sync FAILED. New projects in the Planners Dashboard"
+          echo "::error::Project sync FAILED — new projects in the Planners Dashboard"
           echo "::error::will NOT appear in the Engineering App until this succeeds."
-          echo "::error::Check the preflight step first — an expired or rotated"
-          echo "::error::sb_secret_ key is the most likely cause."
+          echo "::error::Read the failing step's own output above; common causes are a"
+          echo "::error::rotated sb_secret_ key, a missing repo secret, or a Supabase"
+          echo "::error::outage. Re-run with 'Dry run' ticked to test safely."
           exit 1

@@ -5,8 +5,15 @@
 // Engineering App's own project, PRESERVING ids, timestamps, revision history
 // (the `submissions` jsonb) and uploaded files.
 //
-//   Usage (Node 18+). ⚠️ `npm i -g` does NOT work: Node does not resolve ESM
-//   imports from the global npm root, so a global install still fails with
+//   ⚠️ REQUIRES NODE 22 OR NEWER. supabase-js v2 builds a realtime client inside
+//   createClient(), which needs a native global WebSocket — that landed in Node
+//   22. On Node 20 this script dies before doing any work at all:
+//       Error: Node.js 20 detected without native WebSocket support
+//   (The GitHub Actions workflow pinned Node 20 on its first run and failed
+//   exactly this way; it passed locally only because that machine had Node 24.)
+//
+//   ⚠️ `npm i -g` does NOT work either: Node does not resolve ESM imports from
+//   the global npm root, so a global install still fails with
 //   ERR_MODULE_NOT_FOUND. Install into a scratch folder and run the script from
 //   THERE, so `node_modules` is found by walking up from the script's location:
 //
