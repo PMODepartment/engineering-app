@@ -5,8 +5,19 @@
 // Engineering App's own project, PRESERVING ids, timestamps, revision history
 // (the `submissions` jsonb) and uploaded files.
 //
-//   Usage (Node 18+, no npm install into the repo needed):
-//     npm i -g @supabase/supabase-js        # or run from a scratch folder
+//   Usage (Node 18+). ⚠️ `npm i -g` does NOT work: Node does not resolve ESM
+//   imports from the global npm root, so a global install still fails with
+//   ERR_MODULE_NOT_FOUND. Install into a scratch folder and run the script from
+//   THERE, so `node_modules` is found by walking up from the script's location:
+//
+//     mkdir eng-import && cd eng-import
+//     npm init -y && npm pkg set type=module
+//     npm i @supabase/supabase-js
+//     cp /path/to/migrations/migrate-data.mjs .
+//
+//   This repo deliberately has no package.json — do not create one here just to
+//   run this script.
+//
 //     node migrate-data.mjs --dry-run       # report only, writes nothing
 //     node migrate-data.mjs                 # perform the copy
 //     node migrate-data.mjs --only=projects,drawing_register
