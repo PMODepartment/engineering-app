@@ -89,6 +89,7 @@ const args     = process.argv.slice(2);
 const DRY      = args.includes('--dry-run');
 const SKIPFILE = args.includes('--skip-files');
 const RELINK   = args.includes('--relink-users');
+const PREFLIGHT = args.includes('--preflight');
 const onlyArg  = args.find(a => a.startsWith('--only='));
 const ONLY     = onlyArg ? onlyArg.split('=')[1].split(',').map(s => s.trim()) : null;
 
@@ -313,11 +314,84 @@ async function verify() {
   }
 }
 
+// Tests BOTH connections independently and reports which side is misconfigured,
+// without copying anything. Added because a bad key surfaced as a bare
+// "FAILED: users: Invalid API key" that did not say WHICH project rejected it —
+// and with two URLs and two keys in play, that is the first thing you need.
+//
+// Never prints key material: only a length and a format classification, which is
+// enough to tell a service_role key from an anon key pasted by mistake.
+async function preflight() {
+  const shape = (k) => {
+    if (!k) return 'unset';
+    if (/^sb_secret_/.test(k))      return 'sb_secret_… (new-style secret — OK)';
+    if (/^sb_publishable_/.test(k)) return 'sb_publishable_… ⚠️ PUBLISHABLE, NOT service_role';
+    if (/^eyJ/.test(k)) {
+      try {
+        const role = JSON.parse(Buffer.from(k.split('.')[1], 'base64').toString()).role;
+        return `legacy JWT, role="${role}"` + (role === 'service_role' ? ' — OK' : ' ⚠️ NOT service_role');
+      } catch { return 'legacy JWT (unreadable payload)'; }
+    }
+    return 'unrecognised format';
+  };
+
+  const sides = [
+    { label: 'SOURCE      (planning app)', client: src, url: process.env.SRC_URL, key: process.env.SRC_SERVICE_KEY },
+    { label: 'DESTINATION (engineering)',  client: dst, url: process.env.DST_URL, key: process.env.DST_SERVICE_KEY },
+  ];
+
+  let bad = 0;
+  for (const s of sides) {
+    const desc = s.key ? s.key.length + ' chars, ' + shape(s.key) : 'UNSET';
+    console.log(`${s.label}`);
+    console.log(`  url:  ${s.url}`);
+    console.log(`  key:  ${desc}`);
+
+    // A wrong-privilege key must FAIL preflight even if the read technically
+    // succeeds. An anon/publishable key returns 200 with 0 rows (RLS filtered
+    // everything out), which would otherwise print a reassuring ✓ and then
+    // silently "migrate" nothing at all — the worst possible outcome here.
+    if (!s.key || /⚠️|unset|unrecognised/.test(desc)) {
+      console.log(`  read: ✗ skipped — key is not a service_role key\n`);
+      bad++;
+      continue;
+    }
+
+    // `users` exists in both projects and is RLS-protected, so it only reads
+    // back for a key that genuinely bypasses RLS.
+    const { count, error } = await s.client.from('users').select('*', { count: 'exact', head: true });
+    if (error) {
+      // error.message is sometimes empty on an auth rejection; fall back to
+      // whatever the client did give us rather than printing a bare "✗".
+      const why = error.message || error.code || error.hint ||
+                  JSON.stringify(error) || 'unknown error';
+      console.log(`  read: ✗ ${why}\n`);
+      bad++;
+    } else if (!count) {
+      // Reached the API but saw nothing. On the SOURCE that means the wrong
+      // project or a key without real access — the planning app has users.
+      console.log(`  read: ⚠️ connected, but users is EMPTY (0 rows).`);
+      console.log(`        On the source that means the wrong project or a key`);
+      console.log(`        that cannot bypass RLS. Expected on a fresh destination.\n`);
+    } else {
+      console.log(`  read: ✓ users readable (${count} rows) — RLS genuinely bypassed\n`);
+    }
+  }
+
+  if (bad) {
+    console.log(`${bad} side(s) failed. Fix those before running the import.`);
+    process.exitCode = 1;
+  } else {
+    console.log('Both connections OK. Re-run with --dry-run to see what would be copied.');
+  }
+}
+
 async function main() {
   console.log(`Engineering App data migration${DRY ? ' — DRY RUN (nothing is written)' : ''}`);
   console.log(`  source:      ${process.env.SRC_URL}`);
   console.log(`  destination: ${process.env.DST_URL}\n`);
 
+  if (PREFLIGHT) { await preflight(); return; }
   if (RELINK) { console.log('Relinking users by email:'); await relinkUsers(); return; }
 
   console.log('Legacy attribution:');
@@ -346,4 +420,27 @@ Next steps:
 `);
 }
 
-main().catch(e => { console.error('\nFAILED:', e.message); process.exit(1); });
+// ⚠️ process.exitCode, NOT process.exit(). process.exit() tears the process down
+// while supabase-js still holds open keep-alive sockets, which trips a libuv
+// assertion on Windows —
+//   Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), src\win\async.c:94
+// — printing a scary crash immediately after the real error message and making
+// it look like the script itself blew up. Setting exitCode lets Node drain its
+// handles and exit cleanly with the same status.
+main().catch(e => {
+  console.error('\nFAILED:', e.message);
+  if (/Invalid API key|JWT|401|apikey/i.test(e.message)) {
+    console.error(`
+  That is an authentication failure, not a data problem. Check:
+
+    • Both keys must be the SERVICE_ROLE key (Settings → API → service_role),
+      not the publishable/anon key. The anon key cannot read other users' rows,
+      so it typically fails exactly like this.
+    • Each key must belong to the project its URL points at. A valid key from
+      the WRONG project also reports "Invalid API key".
+        SRC_URL = ${process.env.SRC_URL || '(unset)'}
+        DST_URL = ${process.env.DST_URL || '(unset)'}
+    • Run with --preflight to test both connections without copying anything.`);
+  }
+  process.exitCode = 1;
+});
