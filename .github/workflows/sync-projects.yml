@@ -91,18 +91,28 @@ jobs:
       - name: Preflight both connections
         working-directory: /tmp/sync
         env:
-          SRC_URL: ${{ secrets.SRC_URL }}
+          # ⚠️ URLs are VARIABLES, not secrets. Storing them as secrets got them
+          # masked as *** in the log, which hid the actual fault: preflight
+          # reported "fetch failed" on the source and there was no way to see that
+          # its URL was wrong. A project URL is not sensitive — the publishable key
+          # already ships in assets/js/config.js. Keep only the KEYS secret.
+          SRC_URL: ${{ vars.SRC_URL }}
           SRC_SERVICE_KEY: ${{ secrets.SRC_SERVICE_KEY }}
-          DST_URL: ${{ secrets.DST_URL }}
+          DST_URL: ${{ vars.DST_URL }}
           DST_SERVICE_KEY: ${{ secrets.DST_SERVICE_KEY }}
         run: node migrate-data.mjs --preflight
 
       - name: Sync workspaces + projects
         working-directory: /tmp/sync
         env:
-          SRC_URL: ${{ secrets.SRC_URL }}
+          # ⚠️ URLs are VARIABLES, not secrets. Storing them as secrets got them
+          # masked as *** in the log, which hid the actual fault: preflight
+          # reported "fetch failed" on the source and there was no way to see that
+          # its URL was wrong. A project URL is not sensitive — the publishable key
+          # already ships in assets/js/config.js. Keep only the KEYS secret.
+          SRC_URL: ${{ vars.SRC_URL }}
           SRC_SERVICE_KEY: ${{ secrets.SRC_SERVICE_KEY }}
-          DST_URL: ${{ secrets.DST_URL }}
+          DST_URL: ${{ vars.DST_URL }}
           DST_SERVICE_KEY: ${{ secrets.DST_SERVICE_KEY }}
         run: |
           # See the banner at the top of this file before touching --only.

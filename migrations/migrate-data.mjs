@@ -526,7 +526,18 @@ async function preflight() {
       // whatever the client did give us rather than printing a bare "✗".
       const why = error.message || error.code || error.hint ||
                   JSON.stringify(error) || 'unknown error';
-      console.log(`  read: ✗ ${why}\n`);
+      console.log(`  read: ✗ ${why}`);
+      // "fetch failed" is a TRANSPORT failure — the host was never reached — so it
+      // is almost always a bad URL, not a bad key. Say that, because the instinct
+      // is to go and re-copy the key, which cannot possibly help.
+      if (/fetch failed|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|getaddrinfo/i.test(why)) {
+        console.log(`        ⚠️ This is a NETWORK/DNS failure, not authentication —`);
+        console.log(`        the key was never even sent. Check the URL above for a`);
+        console.log(`        typo, stray whitespace, a trailing slash or path, or a`);
+        console.log(`        missing https://. Expected exactly:`);
+        console.log(`            https://<project-ref>.supabase.co`);
+      }
+      console.log('');
       bad++;
     } else if (!count) {
       // Reached the API but saw nothing. On the SOURCE that means the wrong
