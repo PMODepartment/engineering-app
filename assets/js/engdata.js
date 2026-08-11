@@ -23,8 +23,13 @@
   function sb() { return window.getSB(); }
 
   // ---- Drawing Register vocabulary (mirrors module.js) ---------------------
+  // Display order for the status chart. The first seven mirror module.js's own
+  // STATUSES (what the UI offers). The last three are NOT offered by the UI but
+  // are present in years of migrated Planning App data, so they must be declared
+  // here or they fall outside the chart's ordering.
   var DR_STATUSES = ['Not Started', 'In Progress', 'Submitted', 'Resubmit',
-                     'Approved w/ comments', 'Approved', 'Cancelled'];
+                     'Approved w/ comments', 'Approved', 'Cancelled',
+                     'For Review', 'Revise & Resubmit', 'Superseded'];
   var DR_LEGACY = { 'Ongoing': 'In Progress', 'Pending': 'Submitted',
                     'Approved w/o comments': 'Approved' };
   function drStatus(s) { return (s && DR_LEGACY[s]) || s || 'Not Started'; }
@@ -32,6 +37,39 @@
     s = drStatus(s);
     return s === 'Approved' || s === 'Approved w/ comments';
   }
+
+  // ⚠️ KPI BUCKETS — the migrated Planning App data contains statuses that are in
+  // NEITHER DR_STATUSES above NOR the module's own LEGACY_STATUS map, because both
+  // lists describe the vocabulary the UI offers, not the vocabulary years of real
+  // data actually contain. On BAU101 the real values include:
+  //
+  //     For Review (12)   Revise & Resubmit (2)   Superseded (2)
+  //
+  // drStatus() passes an unrecognised value straight through, so those rendered
+  // correctly in the chart but matched none of the KPI conditions — the dashboard
+  // reported "0 Under Review" and "0 For Revision" while 14 drawings sat in
+  // exactly those states. Silently wrong, which is worse than visibly broken.
+  //
+  // Buckets are kept SEPARATE from labels on purpose. Folding 'For Review' into
+  // 'Submitted' via DR_LEGACY would fix the counts but relabel the user's own
+  // data in the chart — people recognise their register by its own words. So the
+  // label is preserved and only the bucketing is normalised.
+  var DR_BUCKET = {
+    'Approved':             'approved',
+    'Approved w/ comments': 'approved',
+    'Submitted':            'underReview',
+    'For Review':           'underReview',   // real data; same meaning as Submitted
+    'Resubmit':             'forRevision',
+    'Revise & Resubmit':    'forRevision',   // real data; same meaning as Resubmit
+    'In Progress':          'inProgress',
+    'Not Started':          'notStarted',
+    'Cancelled':            'cancelled',
+    'Superseded':           'cancelled'      // replaced by a newer drawing — not live work
+  };
+  // 'Resubmit' is deliberately in forRevision only, not also underReview: a
+  // drawing sent back for rework is owed by US, not awaiting someone else's
+  // review, and counting it twice made the two tiles sum past the total.
+  function drBucket(s) { return DR_BUCKET[drStatus(s)] || null; }
   // Colour by MEANING, not by module. The available tokens are only ok/warn/bad
   // plus the brand reds, so the mapping is: grey = nothing owed yet, neutral =
   // we are working on it, amber = waiting on someone else, red = rejected/rework,
@@ -42,10 +80,10 @@
     s = drStatus(s);
     if (s === 'Approved') return 'eng-c-ok';
     if (s === 'Approved w/ comments') return 'eng-c-okc';
-    if (s === 'Submitted') return 'eng-c-warn';
-    if (s === 'Resubmit') return 'eng-c-bad';
+    if (s === 'Submitted' || s === 'For Review') return 'eng-c-warn';
+    if (s === 'Resubmit' || s === 'Revise & Resubmit') return 'eng-c-bad';
     if (s === 'In Progress') return 'eng-c-wip';
-    if (s === 'Cancelled') return 'eng-c-off';
+    if (s === 'Cancelled' || s === 'Superseded') return 'eng-c-off';
     return 'eng-c-ns';
   }
 
@@ -122,15 +160,28 @@
       var draw   = rows.filter(function (r) { return (r.node_kind || 'drawing') === 'drawing' && !r.parent_id; });
       var sheets = rows.filter(function (r) { return (r.node_kind || 'drawing') === 'drawing' && !!r.parent_id; });
 
-      var approved = 0, underReview = 0, forRevision = 0, notStarted = 0, cancelled = 0;
+      // Bucketed via drBucket so real-world statuses ('For Review',
+      // 'Revise & Resubmit', 'Superseded') land in a tile instead of vanishing.
+      var approved = 0, underReview = 0, forRevision = 0, notStarted = 0,
+          cancelled = 0, inProgress = 0, unbucketed = [];
       draw.forEach(function (r) {
-        var s = drStatus(r.status);
-        if (drApproved(s)) approved++;
-        if (s === 'Submitted' || s === 'Resubmit') underReview++;
-        if (s === 'Resubmit') forRevision++;
-        if (s === 'Not Started') notStarted++;
-        if (s === 'Cancelled') cancelled++;
+        switch (drBucket(r.status)) {
+          case 'approved':    approved++;    break;
+          case 'underReview': underReview++; break;
+          case 'forRevision': forRevision++; break;
+          case 'notStarted':  notStarted++;  break;
+          case 'cancelled':   cancelled++;   break;
+          case 'inProgress':  inProgress++;  break;
+          default: unbucketed.push(drStatus(r.status));
+        }
       });
+      // A status nobody has bucketed is counted in `total` but in no tile, so the
+      // tiles silently under-report. Surface it rather than let it hide.
+      if (unbucketed.length) {
+        console.warn('[EngData] drawing statuses in no KPI bucket — dashboard tiles ' +
+          'will under-report. Add them to DR_BUCKET in engdata.js:',
+          Array.from(new Set(unbucketed)));
+      }
 
       // Most recently touched drawings, with the revision actually reached.
       var latest = draw.slice().sort(function (a, b) {
@@ -243,20 +294,47 @@
     // Guards the duplicated vocabulary above. Call from the console after
     // changing a module's status list: EngData.selfTest() logs any status
     // present in the data that this file does not know about.
+    // ⚠️ Checks TWO different things, because they fail differently:
+    //
+    //   unrecognised — the status is not in DR_STATUSES/MS_STATUSES, so it is not
+    //     in the chart's declared display order. Cosmetic: it still renders.
+    //   UNBUCKETED — the status maps to no KPI bucket, so it is counted in
+    //     `total` but in none of the tiles. This is the one that makes the
+    //     dashboard silently WRONG, and the original selfTest did not check it:
+    //     it only tested label membership. That is how "0 Under Review" shipped
+    //     while 12 'For Review' drawings existed.
+    //
+    // Uses console.warn (not log) when something is wrong, so it survives a
+    // console filtered to warnings and is not mistaken for routine output.
     async selfTest(pid) {
       var d = await fetchAll('drawing_register', 'status', pid);
       var m = await fetchAll('material_submittal', 'status', pid);
-      var unknownDR = {}, unknownMS = {};
+      var unknownDR = {}, unknownMS = {}, unbucketedDR = {};
       d.forEach(function (r) {
         var s = drStatus(r.status);
         if (DR_STATUSES.indexOf(s) === -1) unknownDR[s] = (unknownDR[s] || 0) + 1;
+        if (!drBucket(r.status)) unbucketedDR[s] = (unbucketedDR[s] || 0) + 1;
       });
       m.forEach(function (r) {
         var s = msStatus(r.status);
         if (MS_STATUSES.indexOf(s) === -1) unknownMS[s] = (unknownMS[s] || 0) + 1;
       });
-      var out = { drawing_register: unknownDR, material_submittal: unknownMS };
-      console.log('[EngData.selfTest] statuses this file does not recognise:', out);
+
+      var out = {
+        unrecognised: { drawing_register: unknownDR, material_submittal: unknownMS },
+        unbucketed:   { drawing_register: unbucketedDR },
+        ok: !Object.keys(unknownDR).length && !Object.keys(unknownMS).length &&
+            !Object.keys(unbucketedDR).length,
+      };
+      if (Object.keys(unbucketedDR).length) {
+        console.warn('[EngData.selfTest] ✗ statuses in NO KPI bucket — the dashboard ' +
+          'tiles UNDER-REPORT. Add to DR_BUCKET in engdata.js:', unbucketedDR);
+      }
+      if (Object.keys(unknownDR).length || Object.keys(unknownMS).length) {
+        console.warn('[EngData.selfTest] ⚠️ statuses missing from the declared ' +
+          'display order (cosmetic — they still render):', out.unrecognised);
+      }
+      if (out.ok) console.log('[EngData.selfTest] ✓ every status recognised and bucketed');
       return out;
     },
   };
