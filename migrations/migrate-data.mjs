@@ -23,10 +23,19 @@
 //     node migrate-data.mjs --only=projects,drawing_register
 //     node migrate-data.mjs --skip-files    # rows only, no storage objects
 //
-//   Required environment variables — SERVICE ROLE keys, because this must
-//   bypass RLS on both sides and read every project's rows:
+//   Required environment variables — a key that BYPASSES RLS on each side, so it
+//   can read every project's rows:
 //     SRC_URL   SRC_SERVICE_KEY     (planning app: bgupuqnkqhixpuctyder)
 //     DST_URL   DST_SERVICE_KEY     (engineering app: zkxzaijznutmiueeurbb)
+//
+//   ⚠️ USE THE NEW-STYLE SECRET KEY: `sb_secret_…`, from
+//   Settings → API Keys → Secret keys. BOTH Megawide projects have "Legacy API
+//   keys" DISABLED, so the old `service_role` JWT (eyJ…) is rejected outright
+//   with "Legacy API keys are disabled" — it is not a permissions problem and no
+//   amount of re-copying that JWT will fix it. The `sb_publishable_…` key is the
+//   wrong one too: it cannot bypass RLS, so it "succeeds" while copying nothing.
+//
+//   Check both before importing:  node migrate-data.mjs --preflight
 //
 // ⚠️ NEVER commit a service_role key, and never put one in assets/js/config.js.
 // Export them in the shell for the length of this run and then forget them.
@@ -326,11 +335,15 @@ async function preflight() {
     if (!k) return 'unset';
     if (/^sb_secret_/.test(k))      return 'sb_secret_… (new-style secret — OK)';
     if (/^sb_publishable_/.test(k)) return 'sb_publishable_… ⚠️ PUBLISHABLE, NOT service_role';
+    // ⚠️ A legacy JWT is NOT automatically usable. Both Megawide projects have
+    // "Legacy API keys" DISABLED, so even a correct service_role JWT is rejected
+    // with "Legacy API keys are disabled". Treat it as a failure and say why —
+    // the fix is a new-style sb_secret_ key, not a different JWT.
     if (/^eyJ/.test(k)) {
-      try {
-        const role = JSON.parse(Buffer.from(k.split('.')[1], 'base64').toString()).role;
-        return `legacy JWT, role="${role}"` + (role === 'service_role' ? ' — OK' : ' ⚠️ NOT service_role');
-      } catch { return 'legacy JWT (unreadable payload)'; }
+      let role = 'unreadable';
+      try { role = JSON.parse(Buffer.from(k.split('.')[1], 'base64').toString()).role; } catch {}
+      return `legacy JWT (role="${role}") ⚠️ LEGACY KEYS ARE DISABLED on these ` +
+             `projects — use the sb_secret_… key from Settings → API Keys → Secret keys`;
     }
     return 'unrecognised format';
   };
@@ -433,9 +446,10 @@ main().catch(e => {
     console.error(`
   That is an authentication failure, not a data problem. Check:
 
-    • Both keys must be the SERVICE_ROLE key (Settings → API → service_role),
-      not the publishable/anon key. The anon key cannot read other users' rows,
-      so it typically fails exactly like this.
+    • "Legacy API keys are disabled" means you used an old eyJ… JWT. BOTH
+      Megawide projects are on the new key system. Use the SECRET key —
+      Settings → API Keys → Secret keys → sb_secret_… — not the JWT, and not
+      the sb_publishable_ key (which cannot bypass RLS).
     • Each key must belong to the project its URL points at. A valid key from
       the WRONG project also reports "Invalid API key".
         SRC_URL = ${process.env.SRC_URL || '(unset)'}
