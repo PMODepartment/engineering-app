@@ -354,6 +354,39 @@ async function preflight() {
   ];
 
   let bad = 0;
+
+  // ⚠️ THE SAME KEY IN BOTH FIELDS IS THE DANGEROUS MISTAKE. If SRC and DST both
+  // authenticate against the same project, a real run copies that project's
+  // tables over themselves — or, with the URLs the other way round, writes the
+  // empty destination over the live source. Two legacy JWTs are the same length
+  // regardless of project, so this cannot be spotted by eye. Fail hard.
+  if (process.env.SRC_SERVICE_KEY && process.env.SRC_SERVICE_KEY === process.env.DST_SERVICE_KEY) {
+    console.log('✗ SRC_SERVICE_KEY and DST_SERVICE_KEY are IDENTICAL.\n');
+    console.log('  Each key must come from its own project. With one key in both');
+    console.log('  fields the import would read and write the same database —');
+    console.log('  potentially overwriting live Planning App data with empty tables.\n');
+    process.exitCode = 1;
+    return;
+  }
+
+  // For legacy JWTs the payload carries the project ref, so a key/URL mismatch
+  // (right key, wrong side) can be caught before any data moves. sb_secret_ keys
+  // are opaque, so this check simply does not apply to them.
+  const refOf = (k) => {
+    if (!k || !/^eyJ/.test(k)) return null;
+    try { return JSON.parse(Buffer.from(k.split('.')[1], 'base64').toString()).ref || null; }
+    catch { return null; }
+  };
+  for (const s of sides) {
+    const ref = refOf(s.key);
+    const urlRef = (s.url || '').match(/https:\/\/([a-z0-9]+)\.supabase\.co/)?.[1];
+    if (ref && urlRef && ref !== urlRef) {
+      console.log(`✗ ${s.label}: key belongs to project "${ref}" but the URL points at "${urlRef}".`);
+      console.log('  SRC and DST are almost certainly swapped.\n');
+      bad++;
+    }
+  }
+
   for (const s of sides) {
     const desc = s.key ? s.key.length + ' chars, ' + shape(s.key) : 'UNSET';
     console.log(`${s.label}`);
