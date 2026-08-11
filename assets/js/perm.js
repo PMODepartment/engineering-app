@@ -113,5 +113,33 @@
     isPlanner: function (p) { return has(PLANNERS, p); },
     isViewer:  function (p) { return role(p) === 'viewer'; },
     ROLES: { ADMINS: ADMINS, PLANNERS: PLANNERS, WRITERS: WRITERS },
+
+    // ---- Projects and workspaces are SOURCED, not authored, here -----------
+    // The Planners Dashboard is the single place projects and workspaces are
+    // created and maintained. This app reads them, and a scheduled
+    //     migrate-data.mjs --only=workspaces,projects
+    // refreshes the copy.
+    //
+    // Deliberately role-INDEPENDENT: this returns false even for super_admin,
+    // because the constraint is architectural, not a privilege level. The two
+    // apps are on separate Supabase projects, so a project created here would be
+    // invisible in the Planners Dashboard, and the re-sync (upsert keyed on id)
+    // would overwrite local edits while never removing local additions. The
+    // divergence would be silent and would surface weeks later as "my project is
+    // missing".
+    //
+    // Enforced in the database by migrations/0009-projects-read-only.sql, which
+    // drops the write policies AND revokes execute on the archive/delete RPCs —
+    // those are SECURITY DEFINER and bypass RLS, so policies alone would leave
+    // them working. This function only decides what to SHOW.
+    //
+    // To reverse the decision: return true here and roll back 0009.
+    canEditProjects: function () { return false; },
+
+    // Where to send someone who needs a project created or changed.
+    PROJECT_SOURCE: {
+      name: 'Planners Dashboard',
+      url:  'https://pmodepartment.github.io/planning-app/projects.html',
+    },
   };
 })();

@@ -57,6 +57,7 @@ migrations/0005-fix-privilege-escalation-and-guard.sql  SECURITY: self-promotion
 migrations/0006-guards-exempt-trusted-sessions.sql      keeps SQL editor / service_role working
 migrations/0007-audit-privilege-changes.sql     audit role/status/project changes
 migrations/0008-fix-audit-array-append.sql      fixes a 0007 bug that broke Administration
+migrations/0009-projects-read-only.sql          projects sourced from the Planners Dashboard
 migrations/migrate-data.mjs                     data + file copy from the Planning App
 ```
 
@@ -68,7 +69,7 @@ divergence here would double the maintenance cost): `dashboard.css`, `auth.js`,
 module folders, and the Megawide logo/icon assets.
 
 **Newly built**: `perm.js`, `nav.js`, `engdata.js`, `engineering.css`,
-`dashboard.html`, `notifications.html`, and the eight SQL migrations.
+`dashboard.html`, `notifications.html`, and the nine SQL migrations.
 
 **Changed from the Planning App**: the sidebar is now rendered from one
 config-driven function (`Nav.render`) instead of being copy-pasted into every
@@ -106,6 +107,7 @@ The Engineering App runs on its **own** Supabase project
    | 7 | `migrations/0006-guards-exempt-trusted-sessions.sql` | **required with 0005** — lets the SQL editor / service_role administer again |
    | 8 | `migrations/0007-audit-privilege-changes.sql` | records role/status/project changes in the audit trail |
    | 9 | `migrations/0008-fix-audit-array-append.sql` | **required with 0007** — 0007 alone blocks every privilege change |
+   | 10 | `migrations/0009-projects-read-only.sql` | projects/workspaces become read-only — the Planners Dashboard owns them |
 
    > ⚠️ **0002 ideally goes after the data import.** It installs an audit trigger;
    > with it live, the import logs every one of the ~1,500 imported drawings as a
@@ -225,6 +227,13 @@ navigation, launcher and permission filter all follow. See
 
 - **Accounts are not shared with the Planners Dashboard.** A direct consequence
   of using a separate Supabase project. Users register once here.
+- **Projects and workspaces are read-only here** (`0009`). The Planners Dashboard
+  is the single place they are created and maintained; this app sources them via
+  `migrate-data.mjs --only=workspaces,projects`. Nothing propagates
+  automatically, so **that sync has to be run** — on a schedule, or whenever a
+  project is added. Until it runs, a new project is invisible here.
+  The sync is one-way and **overwrites** local edits; it never deletes, so a
+  project removed in the Planners Dashboard lingers here until removed by hand.
 - **`0005`/`0006` fix a privilege-escalation hole inherited from the Planners
   Dashboard.** The `users_admin_update` policy allowed any approved user to set
   their own `role` to `super_admin`, because it had no `WITH CHECK` and no column

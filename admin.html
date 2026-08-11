@@ -52,7 +52,7 @@
   <script src="assets/js/db.js?v=20260724a"></script>
   <script src="assets/js/ui.js?v=20260724a"></script>
   <script src="assets/js/icons.js?v=20260811a"></script>
-  <script src="assets/js/perm.js?v=20260811a"></script>
+  <script src="assets/js/perm.js?v=20260811b"></script>
   <script src="assets/js/nav.js?v=20260811a"></script>
   <script>
     var ME = null, ALL_PROJECTS = [];
@@ -75,7 +75,25 @@
           document.getElementById('pane-' + t.dataset.tab).classList.add('active');
         };
       });
-      document.getElementById('btn-add-project').onclick = function () { editProject(null); };
+      // Projects are created in the Planners Dashboard, not here — replace the
+      // button with a pointer to it rather than leaving a dead control or a bare
+      // gap that reads like a missing feature. Backed by 0009 in the database.
+      if (Perm.canEditProjects()) {
+        document.getElementById('btn-add-project').onclick = function () { editProject(null); };
+      } else {
+        var src = Perm.PROJECT_SOURCE;
+        var wrap = document.getElementById('btn-add-project').parentNode;
+        wrap.innerHTML =
+          '<div class="pd-card" style="padding:10px 12px;font-size:12.5px;color:var(--pd-muted);' +
+            'display:flex;gap:8px;align-items:center;">' +
+            '<span data-ico="bulb" data-ico-size="15"></span>' +
+            '<span>Projects are maintained in the <strong>' + Fmt.esc(src.name) +
+            '</strong> and synced into this app. ' +
+            '<a href="' + Fmt.esc(src.url) + '" target="_blank" rel="noopener">Open it there</a> ' +
+            'to add, edit, archive or delete one.</span>' +
+          '</div>';
+        if (window.Icons) Icons.hydrate(wrap);
+      }
     }
 
     // -------- Users --------
@@ -162,10 +180,16 @@
             '<td>'+Fmt.esc(p.location)+'</td>' +
             '<td>'+Fmt.esc(p.status)+'</td>' +
             '<td>'+Fmt.date(p.start_date)+' – '+Fmt.date(p.end_date)+'</td>' +
-            '<td><button class="pd-btn" data-edit="'+p.id+'">Edit</button></td>' +
+            // Projects are sourced from the Planners Dashboard, so there is
+            // nothing to edit here. See Perm.canEditProjects().
+            (Perm.canEditProjects()
+              ? '<td><button class="pd-btn" data-edit="'+p.id+'">Edit</button></td>'
+              : '<td></td>') +
           '</tr>';
         }).join('') : '<tr><td style="padding:24px;color:var(--pd-muted);">No projects yet.</td></tr>') + '</tbody>';
-      t.querySelectorAll('[data-edit]').forEach(function(b){ b.onclick = function(){ editProject(ps.find(function(x){return x.id===b.dataset.edit;})); }; });
+      if (Perm.canEditProjects()) {
+        t.querySelectorAll('[data-edit]').forEach(function(b){ b.onclick = function(){ editProject(ps.find(function(x){return x.id===b.dataset.edit;})); }; });
+      }
     }
 
     // Hard delete, no undo — the id must be typed to arm the button. The DB

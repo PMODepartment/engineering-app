@@ -68,7 +68,7 @@
   <script src="assets/js/db.js?v=20260724a"></script>
   <script src="assets/js/ui.js?v=20260724a"></script>
   <script src="assets/js/icons.js?v=20260811a"></script>
-  <script src="assets/js/perm.js?v=20260811a"></script>
+  <script src="assets/js/perm.js?v=20260811b"></script>
   <script src="assets/js/nav.js?v=20260811a"></script>
   <script>
   (function () {
@@ -81,16 +81,44 @@
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);
       Nav.render(profile, 'projects');
-      canWrite = Perm.isPlanner(profile);
-      IS_ADMIN = Perm.isAdmin(profile);
+      // Projects and workspaces are SOURCED from the Planners Dashboard, never
+      // authored here — see Perm.canEditProjects(). This is why an admin sees no
+      // Add or Edit control on this page: the restriction is architectural, not
+      // about their role. Enforced in the database by 0009.
+      canWrite = Perm.canEditProjects() && Perm.isPlanner(profile);
+      IS_ADMIN = Perm.canEditProjects() && Perm.isAdmin(profile);
       // The Administration link is emitted by Nav.render only when the role
       // allows it, so there is nothing to unhide here.
       if (canWrite) {
         document.getElementById('add-wrap').style.display = '';
         document.getElementById('add-ws').style.display = '';
       }
+      // Say WHERE to go instead. Without this the page just looks broken to a
+      // planner who has always been able to add a project.
+      if (!Perm.canEditProjects() && Perm.isPlanner(profile)) showSourceNotice();
       boot();
     });
+
+    // A one-line explanation above the project list, shown only to people who
+    // WOULD otherwise have had the Add/Edit controls (planner and up). A viewer
+    // never had them, so telling them where projects come from is just noise.
+    function showSourceNotice() {
+      var src = Perm.PROJECT_SOURCE;
+      var area = document.getElementById('proj-area');
+      if (!area || document.getElementById('proj-source-note')) return;
+      var n = document.createElement('div');
+      n.id = 'proj-source-note';
+      n.className = 'pd-card';
+      n.style.cssText = 'margin-bottom:12px;padding:10px 12px;font-size:12.5px;' +
+        'color:var(--pd-muted);display:flex;gap:8px;align-items:center;';
+      n.innerHTML =
+        '<span data-ico="bulb" data-ico-size="15"></span>' +
+        '<span>Projects and workspaces are maintained in the <strong>' + Fmt.esc(src.name) +
+        '</strong> and synced here. To add or change one, ' +
+        '<a href="' + Fmt.esc(src.url) + '" target="_blank" rel="noopener">open it there</a>.</span>';
+      area.parentNode.insertBefore(n, area);
+      if (window.Icons) Icons.hydrate(n);
+    }
 
     async function boot() {
       try {
