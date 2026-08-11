@@ -56,6 +56,7 @@ migrations/0004-harden-audit-grants.sql         audit table append-only at the g
 migrations/0005-fix-privilege-escalation-and-guard.sql  SECURITY: self-promotion + approval guard
 migrations/0006-guards-exempt-trusted-sessions.sql      keeps SQL editor / service_role working
 migrations/0007-audit-privilege-changes.sql     audit role/status/project changes
+migrations/0008-fix-audit-array-append.sql      fixes a 0007 bug that broke Administration
 migrations/migrate-data.mjs                     data + file copy from the Planning App
 ```
 
@@ -67,7 +68,7 @@ divergence here would double the maintenance cost): `dashboard.css`, `auth.js`,
 module folders, and the Megawide logo/icon assets.
 
 **Newly built**: `perm.js`, `nav.js`, `engdata.js`, `engineering.css`,
-`dashboard.html`, `notifications.html`, and the seven SQL migrations.
+`dashboard.html`, `notifications.html`, and the eight SQL migrations.
 
 **Changed from the Planning App**: the sidebar is now rendered from one
 config-driven function (`Nav.render`) instead of being copy-pasted into every
@@ -104,6 +105,7 @@ The Engineering App runs on its **own** Supabase project
    | 6 | `migrations/0005-fix-privilege-escalation-and-guard.sql` | **security fix** — closes self-promotion to super_admin; repairs the approval guard |
    | 7 | `migrations/0006-guards-exempt-trusted-sessions.sql` | **required with 0005** — lets the SQL editor / service_role administer again |
    | 8 | `migrations/0007-audit-privilege-changes.sql` | records role/status/project changes in the audit trail |
+   | 9 | `migrations/0008-fix-audit-array-append.sql` | **required with 0007** — 0007 alone blocks every privilege change |
 
    > ⚠️ **0002 ideally goes after the data import.** It installs an audit trigger;
    > with it live, the import logs every one of the ~1,500 imported drawings as a
