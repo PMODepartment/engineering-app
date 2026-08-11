@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/img/icon.png" />
+  <script src="assets/js/theme.js?v=20260726d"></script>
+  <title>Projects — Engineering App</title>
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260806b" />
+</head>
+<body>
+  <div class="pd-app">
+    <aside class="pd-sidebar" id="nav"></aside>
+
+    <div class="pd-content">
+      <div class="pd-topbar">
+        <img class="pd-topbar-mark" src="assets/img/favicon.png" alt="Megawide" />
+        <h1>Projects</h1>
+        <button class="pd-ws-context" id="ws-context" type="button" title="Current workspace scope">
+          <span class="pd-ws-context-ic" data-ico="org" data-ico-size="18"></span>
+          <span class="pd-ws-context-txt"><strong id="ws-context-name">Corporate Root</strong><small id="ws-context-sub">All workspaces</small></span>
+        </button>
+        <div id="user-bar"></div>
+      </div>
+
+      <div class="pd-main pd-proj-shell">
+        <!-- Left: workspace tree -->
+        <aside class="pd-tree-pane">
+          <div class="pd-tree-head">
+            <span>Workspaces</span>
+            <button class="pd-icon-btn" id="add-ws" title="Add workspace / program" style="display:none;"><span data-ico="plus" data-ico-size="18"></span></button>
+          </div>
+          <div class="pd-tree-search"><input class="pd-input pd-input-sm" id="tree-search" placeholder="Search workspaces…" /></div>
+          <div class="pd-tree" id="ws-tree"></div>
+        </aside>
+
+        <!-- Right: projects -->
+        <section class="pd-proj-pane">
+          <div class="pd-toolbar">
+            <div class="pd-toolbar-left">
+              <div class="pd-add-wrap" id="add-wrap" style="display:none;">
+                <button class="pd-btn pd-btn-primary" id="add-btn"><span data-ico="plus" data-ico-size="16"></span> Add <span data-ico="chevronDown" data-ico-size="14"></span></button>
+                <div class="pd-add-menu" id="add-menu">
+                  <button data-add="project">New Project</button>
+                  <button data-add="workspace">New Workspace / Program</button>
+                </div>
+              </div>
+              <span class="pd-proj-count" id="proj-count"></span>
+            </div>
+            <div class="pd-toolbar-right">
+              <input class="pd-input pd-input-sm" id="proj-search" placeholder="Search projects…" />
+              <div class="pd-viewtoggle" role="group" aria-label="View">
+                <button class="pd-vt active" id="vt-list" title="List view"><span data-ico="listView" data-ico-size="16"></span></button>
+                <button class="pd-vt" id="vt-cards" title="Card view"><span data-ico="gridView" data-ico-size="16"></span></button>
+              </div>
+            </div>
+          </div>
+          <div class="pd-proj-area" id="proj-area"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="assets/js/config.js?v=20260724a"></script>
+  <script src="assets/js/auth.js?v=20260724a"></script>
+  <script src="assets/js/db.js?v=20260724a"></script>
+  <script src="assets/js/ui.js?v=20260724a"></script>
+  <script src="assets/js/icons.js?v=20260811a"></script>
+  <script src="assets/js/perm.js?v=20260811a"></script>
+  <script src="assets/js/nav.js?v=20260811a"></script>
+  <script>
+  (function () {
+    var WS = [], PROJ = [], wsById = {}, childrenMap = {};
+    var selectedWs = null;          // current workspace scope (null = all)
+    var view = 'list';
+    var canWrite = false;
+    var IS_ADMIN = false;           // archive/delete are admin-only (also enforced in DB)
+
+    AppAuth.requireLogin(function (user, profile) {
+      UI.renderUserBar(profile);
+      Nav.render(profile, 'projects');
+      canWrite = Perm.isPlanner(profile);
+      IS_ADMIN = Perm.isAdmin(profile);
+      // The Administration link is emitted by Nav.render only when the role
+      // allows it, so there is nothing to unhide here.
+      if (canWrite) {
+        document.getElementById('add-wrap').style.display = '';
+        document.getElementById('add-ws').style.display = '';
+      }
+      boot();
+    });
+
+    async function boot() {
+      try {
+        var res = await Promise.all([PDb.getWorkspaces(), PDb.getProjects()]);
+        WS = res[0]; PROJ = res[1];
+      } catch (e) { UI.toast('Load failed: ' + e.message, 'error'); return; }
+      WS.forEach(function (w) {
+        wsById[w.id] = w;
+        (childrenMap[w.parent_id] = childrenMap[w.parent_id] || []).push(w);
+      });
+      renderTree();
+      render();
+      wireToolbar();
+    }
+
+    // ---- Workspace tree helpers ----
+    function rootNodes() { return childrenMap['null'] || childrenMap[null] || WS.filter(function (w) { return !w.parent_id; }); }
+    function childrenOf(id) { return childrenMap[id] || []; }
+    function descendantIds(id) {
+      var out = [id], stack = [id];
+      while (stack.length) {
+        var cur = stack.pop();
+        childrenOf(cur).forEach(function (c) { out.push(c.id); stack.push(c.id); });
+      }
+      return out;
+    }
+    function pathOf(id) {
+      var names = [], cur = wsById[id];
+      while (cur) { names.unshift(cur.name); cur = cur.parent_id ? wsById[cur.parent_id] : null; }
+      return names;
+    }
+    function resolveGroupHead(p) {
+      if (p.group_head) return p.group_head;
+      var cur = p.workspace_id ? wsById[p.workspace_id] : null;
+      while (cur) { if (cur.group_head) return cur.group_head; cur = cur.parent_id ? wsById[cur.parent_id] : null; }
+      return null;
+    }
+
+    function renderTree() {
+      var q = (document.getElementById('tree-search').value || '').toLowerCase();
+      var host = document.getElementById('ws-tree');
+      function nodeHtml(w, depth) {
+        var kids = childrenOf(w.id);
+        var typeIc = Icons.svg(w.node_type === 'group' ? 'group' : (w.node_type === 'program' ? 'program' : 'workspace'), 15);
+        var match = !q || w.name.toLowerCase().indexOf(q) !== -1;
+        var kidHtml = kids.map(function (k) { return nodeHtml(k, depth + 1); }).join('');
+        if (q && !match && kidHtml.indexOf('pd-tree-node') === -1) return '';
+        var cls = 'pd-tree-node' + (selectedWs === w.id ? ' active' : '') + (match ? '' : ' dim');
+        return '<div class="' + cls + '" data-ws="' + w.id + '" style="padding-left:' + (8 + depth * 14) + 'px;">' +
+          '<span class="pd-tree-ic">' + typeIc + '</span>' +
+          '<span class="pd-tree-name">' + Fmt.esc(w.name) + '</span>' +
+          // Until now nothing opened workspaceModal with an existing node, so there was no way to
+          // edit — or delete — a workspace/program once created. Gear reveals on hover/selection.
+          (canWrite ? '<button class="pd-tree-edit" data-wsedit="' + Fmt.esc(w.id) + '" title="Edit ' + Fmt.esc(w.node_type || 'workspace') + ' (rename, move, delete)">' + Icons.svg('settings', 13) + '</button>' : '') +
+          '<span class="pd-tree-count">' + countInScope(w.id) + '</span></div>' + kidHtml;
+      }
+      var html = '<div class="pd-tree-node' + (selectedWs === null ? ' active' : '') + '" data-ws="__all__" style="padding-left:8px;">' +
+        '<span class="pd-tree-ic">' + Icons.svg('org', 15) + '</span><span class="pd-tree-name">All Projects</span>' +
+        '<span class="pd-tree-count">' + PROJ.length + '</span></div>';
+      html += rootNodes().map(function (w) { return nodeHtml(w, 0); }).join('');
+      host.innerHTML = html;
+      host.querySelectorAll('[data-ws]').forEach(function (el) {
+        el.onclick = function () {
+          var id = el.dataset.ws;
+          selectedWs = (id === '__all__') ? null : id;
+          updateContext();
+          renderTree(); render();
+        };
+      });
+      // Must stop propagation — the gear sits inside the [data-ws] row, whose click selects.
+      host.querySelectorAll('[data-wsedit]').forEach(function (b) {
+        b.onclick = function (e) { e.stopPropagation(); workspaceModal(wsById[b.dataset.wsedit]); };
+      });
+    }
+    function countInScope(wsId) {
+      var ids = descendantIds(wsId);
+      return PROJ.filter(function (p) { return ids.indexOf(p.workspace_id) !== -1; }).length;
+    }
+    function updateContext() {
+      var n = document.getElementById('ws-context-name'), s = document.getElementById('ws-context-sub');
+      if (selectedWs === null) { n.textContent = 'Corporate Root'; s.textContent = 'All workspaces'; }
+      else { var w = wsById[selectedWs]; n.textContent = w.name; s.textContent = pathOf(w.id).slice(0, -1).join(' › ') || w.node_type; }
+    }
+
+    // ---- Projects in current scope + search ----
+    function projectsInScope() {
+      var q = (document.getElementById('proj-search').value || '').toLowerCase();
+      var list = PROJ.slice();
+      if (selectedWs !== null) {
+        var ids = descendantIds(selectedWs);
+        list = list.filter(function (p) { return ids.indexOf(p.workspace_id) !== -1; });
+      }
+      if (q) list = list.filter(function (p) {
+        return (p.name || '').toLowerCase().indexOf(q) !== -1 || (p.id || '').toLowerCase().indexOf(q) !== -1;
+      });
+      return list;
+    }
+
+    function statusPill(s) {
+      s = (s || 'active').toLowerCase();
+      var cls = s === 'archived' ? 'pd-pill-muted' : 'pd-pill-ok';
+      return '<span class="pd-pill ' + cls + '">' + Fmt.esc(s.charAt(0).toUpperCase() + s.slice(1)) + '</span>';
+    }
+
+    function render() {
+      var list = projectsInScope();
+      document.getElementById('proj-count').textContent = list.length + (list.length === 1 ? ' project' : ' projects');
+      var area = document.getElementById('proj-area');
+      if (!list.length) { area.innerHTML = '<div class="pd-empty">No projects in this workspace yet.' + (canWrite ? ' Use <strong>+ Add</strong> to create one.' : '') + '</div>'; return; }
+      view === 'cards' ? renderCards(area, list) : renderList(area, list);
+      area.querySelectorAll('[data-open]').forEach(function (el) {
+        el.onclick = function () { openProject(el.dataset.open); };
+      });
+    }
+
+    function renderList(area, list) {
+      // group by workspace
+      var groups = {};
+      list.forEach(function (p) { (groups[p.workspace_id || '__none__'] = groups[p.workspace_id || '__none__'] || []).push(p); });
+      var keys = Object.keys(groups).sort(function (a, b) {
+        return (pathOf(a).join('/') || 'zzz').localeCompare(pathOf(b).join('/') || 'zzz');
+      });
+      var rows = '<table class="pd-table pd-proj-table"><thead><tr>' +
+        '<th>Name</th><th>ID</th><th>Status</th><th>Group Head</th><th>Forecast Start</th><th>Forecast Finish</th><th class="num">Original Budget</th>' +
+        (canWrite ? '<th></th>' : '') + '</tr></thead><tbody>';
+      keys.forEach(function (k) {
+        var w = wsById[k];
+        var label = w ? ((w.code ? w.code + ' - ' : '') + w.name) : 'Unassigned';
+        rows += '<tr class="pd-group-row"><td colspan="' + (canWrite ? 8 : 7) + '">' + Fmt.esc(label) + '</td></tr>';
+        groups[k].forEach(function (p) {
+          rows += '<tr class="pd-proj-row" data-open="' + Fmt.esc(p.id) + '">' +
+            '<td class="pd-proj-name"><span class="pd-proj-ic">' + Icons.svg('project', 16) + '</span>' + Fmt.esc(p.name) + '</td>' +
+            '<td><code>' + Fmt.esc(p.id) + '</code></td>' +
+            '<td>' + statusPill(p.status) + '</td>' +
+            '<td>' + Fmt.esc(resolveGroupHead(p) || '—') + '</td>' +
+            '<td>' + Fmt.date(p.forecast_start || p.start_date) + '</td>' +
+            '<td>' + Fmt.date(p.forecast_finish || p.end_date) + '</td>' +
+            '<td class="num">' + (p.original_budget != null ? Fmt.moneyShort(p.original_budget) : '—') + '</td>' +
+            (canWrite ? '<td><button class="pd-btn pd-btn-sm" data-edit="' + Fmt.esc(p.id) + '">Edit</button></td>' : '') +
+          '</tr>';
+        });
+      });
+      rows += '</tbody></table>';
+      area.innerHTML = rows;
+      if (canWrite) area.querySelectorAll('[data-edit]').forEach(function (b) {
+        b.onclick = function (e) { e.stopPropagation(); projectModal(PROJ.find(function (x) { return x.id === b.dataset.edit; })); };
+      });
+    }
+
+    function renderCards(area, list) {
+      area.innerHTML = '<div class="pd-proj-cards">' + list.map(function (p) {
+        var gh = resolveGroupHead(p);
+        var w = p.workspace_id ? wsById[p.workspace_id] : null;
+        return '<div class="pd-proj-card" data-open="' + Fmt.esc(p.id) + '">' +
+          '<div class="pd-proj-card-top"><span class="pd-proj-ic">' + Icons.svg('project', 22) + '</span>' + statusPill(p.status) + '</div>' +
+          '<div class="pd-proj-card-title">' + Fmt.esc(p.name) + '</div>' +
+          '<div class="pd-proj-card-id"><code>' + Fmt.esc(p.id) + '</code></div>' +
+          '<div class="pd-proj-card-meta">' +
+            '<div><span>Group Head</span>' + Fmt.esc(gh || '—') + '</div>' +
+            '<div><span>Workspace</span>' + Fmt.esc(w ? w.name : '—') + '</div>' +
+          '</div>' +
+          (p.location ? '<div class="pd-proj-card-loc">' + Icons.svg('mapPin', 13) + ' ' + Fmt.esc(p.location) + '</div>' : '') +
+        '</div>';
+      }).join('') + '</div>';
+    }
+
+    function openProject(id) {
+      var p = PROJ.find(function (x) { return x.id === id; });
+      if (!p) return;
+      sessionStorage.setItem('pd_project', p.id);
+      sessionStorage.setItem('pd_project_name', p.name || p.id);
+      sessionStorage.setItem('pd_workspace', p.workspace_id || '');
+      location.href = 'dashboard.html';
+    }
+
+    // ---- Toolbar wiring ----
+    function wireToolbar() {
+      document.getElementById('proj-search').oninput = render;
+      document.getElementById('tree-search').oninput = renderTree;
+      document.getElementById('vt-list').onclick = function () { view = 'list'; setVt(); render(); };
+      document.getElementById('vt-cards').onclick = function () { view = 'cards'; setVt(); render(); };
+      if (canWrite) {
+        var menu = document.getElementById('add-menu'), btn = document.getElementById('add-btn');
+        btn.onclick = function (e) { e.stopPropagation(); menu.classList.toggle('open'); };
+        document.addEventListener('click', function (e) { if (!menu.contains(e.target) && e.target !== btn) menu.classList.remove('open'); });
+        menu.querySelectorAll('[data-add]').forEach(function (b) {
+          b.onclick = function () { menu.classList.remove('open'); b.dataset.add === 'project' ? projectModal(null) : workspaceModal(null); };
+        });
+        document.getElementById('add-ws').onclick = function () { workspaceModal(null); };
+      }
+    }
+    function setVt() {
+      document.getElementById('vt-list').classList.toggle('active', view === 'list');
+      document.getElementById('vt-cards').classList.toggle('active', view === 'cards');
+    }
+
+    // ---- Add / edit Project ----
+    function wsOptions(sel) {
+      return WS.map(function (w) {
+        var indent = pathOf(w.id).length - 1;
+        return '<option value="' + Fmt.esc(w.id) + '"' + (sel === w.id ? ' selected' : '') + '>' +
+          (Array(indent + 1).join('— ')) + Fmt.esc(w.name) + (w.node_type !== 'workspace' ? ' (' + w.node_type + ')' : '') + '</option>';
+      }).join('');
+    }
+    function projectModal(p) {
+      var isNew = !p; p = p || {};
+      var m = UI.modal(
+        '<h2 style="margin-top:0;">' + (isNew ? 'New Project' : 'Edit Project') + '</h2>' +
+        '<div style="display:flex;gap:10px;"><div class="pd-field" style="flex:1;"><label>Project ID' + (isNew ? ' (e.g. AVR101)' : '') + '</label><input class="pd-input" id="p-id" value="' + Fmt.esc(p.id) + '"' + (isNew ? '' : ' disabled') + '></div>' +
+        '<div class="pd-field" style="flex:1;"><label>Status</label><select class="pd-select" id="p-status">' + ['active', 'archived'].map(function (s) { return '<option' + (p.status === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></div></div>' +
+        '<div class="pd-field"><label>Name</label><input class="pd-input" id="p-name" value="' + Fmt.esc(p.name) + '"></div>' +
+        '<div class="pd-field"><label>Workspace / Program</label><select class="pd-select" id="p-ws"><option value="">— Unassigned —</option>' + wsOptions(p.workspace_id || selectedWs) + '</select></div>' +
+        '<div style="display:flex;gap:10px;"><div class="pd-field" style="flex:1;"><label>Group Head <small>(blank = inherit from workspace)</small></label><input class="pd-input" id="p-gh" value="' + Fmt.esc(p.group_head) + '"></div>' +
+        '<div class="pd-field" style="flex:1;"><label>Location</label><input class="pd-input" id="p-loc" value="' + Fmt.esc(p.location) + '"></div></div>' +
+        '<div class="pd-field"><label>Description</label><input class="pd-input" id="p-desc" value="' + Fmt.esc(p.description) + '"></div>' +
+        '<div style="display:flex;gap:10px;"><div class="pd-field" style="flex:1;"><label>Forecast Start</label><input class="pd-input" type="date" id="p-fs" value="' + (p.forecast_start || '') + '"></div>' +
+        '<div class="pd-field" style="flex:1;"><label>Forecast Finish</label><input class="pd-input" type="date" id="p-ff" value="' + (p.forecast_finish || '') + '"></div></div>' +
+        '<div style="display:flex;gap:10px;"><div class="pd-field" style="flex:1;"><label>Original Budget (₱)</label><input class="pd-input" type="number" id="p-ob" value="' + (p.original_budget != null ? p.original_budget : '') + '"></div>' +
+        '<div class="pd-field" style="flex:1;"><label>Estimated Cost (₱)</label><input class="pd-input" type="number" id="p-ec" value="' + (p.estimated_cost != null ? p.estimated_cost : '') + '"></div></div>' +
+        // Admin-only destructive actions sit left, away from Save. Archive is the
+        // safe everyday action; Delete only ever succeeds on an empty project.
+        '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;">' +
+        (isNew || !IS_ADMIN ? '<div style="flex:1;"></div>' :
+          '<button class="pd-btn" id="p-arch">' + (p.status === 'archived' ? 'Restore' : 'Archive') + '</button>' +
+          '<button class="pd-btn pd-btn-danger" id="p-del">Delete…</button><div style="flex:1;"></div>') +
+        '<button class="pd-btn" id="p-cancel">Cancel</button> <button class="pd-btn pd-btn-primary" id="p-save">Save</button></div>');
+      m.el.querySelector('#p-cancel').onclick = m.close;
+      if (!isNew && IS_ADMIN) {
+        m.el.querySelector('#p-arch').onclick = async function () {
+          var toArchive = p.status !== 'archived';
+          try {
+            await PDb.archiveProject(p.id, toArchive);
+            UI.toast(toArchive ? 'Project archived' : 'Project restored', 'ok');
+            m.close(); await reloadData();
+          } catch (e) { UI.toast(e.message, 'error'); }
+        };
+        m.el.querySelector('#p-del').onclick = function () { deleteProjectModal(p, m); };
+      }
+      m.el.querySelector('#p-save').onclick = async function () {
+        var num = function (id) { var v = m.el.querySelector(id).value; return v === '' ? null : Number(v); };
+        var data = {
+          name: m.el.querySelector('#p-name').value.trim(),
+          status: m.el.querySelector('#p-status').value,
+          workspace_id: m.el.querySelector('#p-ws').value || null,
+          group_head: m.el.querySelector('#p-gh').value.trim() || null,
+          location: m.el.querySelector('#p-loc').value.trim() || null,
+          description: m.el.querySelector('#p-desc').value.trim() || null,
+          forecast_start: m.el.querySelector('#p-fs').value || null,
+          forecast_finish: m.el.querySelector('#p-ff').value || null,
+          original_budget: num('#p-ob'), estimated_cost: num('#p-ec'),
+        };
+        if (!data.name) { UI.toast('Name required', 'warn'); return; }
+        try {
+          if (isNew) {
+            var id = m.el.querySelector('#p-id').value.trim();
+            if (!id) { UI.toast('Project ID required', 'warn'); return; }
+            data.id = id; await PDb.createProject(data);
+          } else { await PDb.updateProject(p.id, data); }
+          UI.toast('Saved', 'ok'); m.close(); await reloadData();
+        } catch (e) { UI.toast(e.message, 'error'); }
+      };
+    }
+
+    // ---- Delete confirmations (admin) ----
+    // Both deletes are hard and unguarded by any undo, so the id must be typed
+    // to arm the button. The DB refuses a non-empty project / non-leaf workspace
+    // and returns a message naming what's blocking — shown verbatim.
+    function confirmDelete(opts) {
+      var m = UI.modal(
+        '<h2 style="margin-top:0;">' + Fmt.esc(opts.title) + '</h2>' +
+        '<p style="color:var(--pd-muted);">' + opts.body + '</p>' +
+        '<div class="pd-field"><label>Type <b>' + Fmt.esc(opts.id) + '</b> to confirm</label>' +
+        '<input class="pd-input" id="d-echo" autocomplete="off"></div>' +
+        '<div style="margin-top:8px;text-align:right;"><button class="pd-btn" id="d-cancel">Cancel</button> ' +
+        '<button class="pd-btn pd-btn-danger" id="d-go" disabled>Delete permanently</button></div>');
+      var echo = m.el.querySelector('#d-echo'), go = m.el.querySelector('#d-go');
+      echo.oninput = function () { go.disabled = echo.value.trim() !== opts.id; };
+      m.el.querySelector('#d-cancel').onclick = m.close;
+      go.onclick = async function () {
+        go.disabled = true;
+        try {
+          await opts.run();
+          UI.toast(opts.ok, 'ok'); m.close(); if (opts.parent) opts.parent.close();
+          await reloadData();
+        } catch (e) { UI.toast(e.message, 'error'); go.disabled = false; }
+      };
+      echo.focus();
+    }
+
+    function deleteProjectModal(p, parent) {
+      confirmDelete({
+        id: p.id, parent: parent, title: 'Delete project ' + Fmt.esc(p.id) + '?',
+        body: 'This cannot be undone. It only works if the project has <b>no module data at all</b> — ' +
+              'if any schedule, risk, cash-flow or other record exists, the delete is refused and you ' +
+              'should <b>Archive</b> instead (keeps the history, hides it from active use).',
+        ok: 'Project deleted',
+        run: function () { return PDb.deleteProject(p.id); },
+      });
+    }
+
+    function deleteWorkspaceModal(w, parent) {
+      confirmDelete({
+        id: w.id, parent: parent, title: 'Delete ' + Fmt.esc(w.node_type || 'workspace') + ' ' + Fmt.esc(w.id) + '?',
+        body: 'This cannot be undone. It only works if nothing hangs off this node — any child ' +
+              'workspace, program or project must be moved or removed first.',
+        ok: 'Workspace deleted',
+        run: function () { return PDb.deleteWorkspace(w.id); },
+      });
+    }
+
+    // ---- Add / edit Workspace ----
+    function workspaceModal(w) {
+      var isNew = !w; w = w || {};
+      var m = UI.modal(
+        '<h2 style="margin-top:0;">' + (isNew ? 'New Workspace / Program' : 'Edit Workspace') + '</h2>' +
+        '<div style="display:flex;gap:10px;"><div class="pd-field" style="flex:1;"><label>ID' + (isNew ? ' (e.g. OPS)' : '') + '</label><input class="pd-input" id="w-id" value="' + Fmt.esc(w.id) + '"' + (isNew ? '' : ' disabled') + '></div>' +
+        '<div class="pd-field" style="flex:1;"><label>Code</label><input class="pd-input" id="w-code" value="' + Fmt.esc(w.code) + '"></div></div>' +
+        '<div class="pd-field"><label>Name</label><input class="pd-input" id="w-name" value="' + Fmt.esc(w.name) + '"></div>' +
+        '<div style="display:flex;gap:10px;"><div class="pd-field" style="flex:1;"><label>Type</label><select class="pd-select" id="w-type">' + ['workspace', 'program', 'group'].map(function (t) { return '<option' + (w.node_type === t ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select></div>' +
+        '<div class="pd-field" style="flex:1;"><label>Parent</label><select class="pd-select" id="w-parent"><option value="">— Root —</option>' + wsOptions(w.parent_id) + '</select></div></div>' +
+        '<div class="pd-field"><label>Group Head <small>(for group nodes — the assignment basis)</small></label><input class="pd-input" id="w-gh" value="' + Fmt.esc(w.group_head) + '"></div>' +
+        '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;">' +
+        (isNew || !IS_ADMIN ? '<div style="flex:1;"></div>' :
+          '<button class="pd-btn pd-btn-danger" id="w-del">Delete…</button><div style="flex:1;"></div>') +
+        '<button class="pd-btn" id="w-cancel">Cancel</button> <button class="pd-btn pd-btn-primary" id="w-save">Save</button></div>');
+      m.el.querySelector('#w-cancel').onclick = m.close;
+      if (!isNew && IS_ADMIN) {
+        m.el.querySelector('#w-del').onclick = function () { deleteWorkspaceModal(w, m); };
+      }
+      m.el.querySelector('#w-save').onclick = async function () {
+        var data = {
+          name: m.el.querySelector('#w-name').value.trim(),
+          code: m.el.querySelector('#w-code').value.trim() || null,
+          node_type: m.el.querySelector('#w-type').value,
+          parent_id: m.el.querySelector('#w-parent').value || null,
+          group_head: m.el.querySelector('#w-gh').value.trim() || null,
+        };
+        if (!data.name) { UI.toast('Name required', 'warn'); return; }
+        try {
+          if (isNew) {
+            var id = m.el.querySelector('#w-id').value.trim();
+            if (!id) { UI.toast('ID required', 'warn'); return; }
+            data.id = id; await PDb.createWorkspace(data);
+          } else { await PDb.updateWorkspace(w.id, data); }
+          UI.toast('Saved', 'ok'); m.close(); await reloadData();
+        } catch (e) { UI.toast(e.message, 'error'); }
+      };
+    }
+
+    async function reloadData() {
+      WS = await PDb.getWorkspaces(); PROJ = await PDb.getProjects();
+      wsById = {}; childrenMap = {};
+      WS.forEach(function (w) { wsById[w.id] = w; (childrenMap[w.parent_id] = childrenMap[w.parent_id] || []).push(w); });
+      renderTree(); render();
+    }
+  })();
+  </script>
+</body>
+</html>

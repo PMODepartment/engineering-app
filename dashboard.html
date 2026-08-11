@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/img/icon.png" />
+  <script src="assets/js/theme.js?v=20260726d"></script>
+  <title>Engineering Dashboard — Engineering App</title>
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260806b" />
+  <link rel="stylesheet" href="assets/css/engineering.css?v=20260811a" />
+</head>
+<body>
+  <div class="pd-app">
+    <aside class="pd-sidebar" id="nav"></aside>
+
+    <div class="pd-content">
+      <div class="pd-topbar">
+        <img class="pd-topbar-mark" src="assets/img/favicon.png" alt="Megawide" />
+        <h1>Engineering Dashboard</h1>
+        <div class="pd-projsw" id="projsw">
+          <button class="pd-projsw-btn" id="projsw-btn" type="button">
+            <span class="pd-projsw-ic" data-ico="project" data-ico-size="20"></span>
+            <span class="pd-projsw-txt"><strong id="projsw-name">Project</strong><small id="projsw-path"></small></span>
+            <span class="pd-projsw-caret">▾</span>
+          </button>
+          <div class="pd-projsw-menu" id="projsw-menu"></div>
+        </div>
+        <div id="user-bar"></div>
+      </div>
+
+      <div class="pd-main">
+        <div class="eng-dash-head">
+          <h2 id="welcome">Engineering Dashboard</h2>
+          <p id="dash-sub">Document and submittal status for the selected project.</p>
+        </div>
+
+        <!-- Drawing Register ------------------------------------------------- -->
+        <section class="eng-sec" id="sec-dr">
+          <div class="eng-sec-head">
+            <span class="eng-sec-ico" data-ico="ruler" data-ico-size="18"></span>
+            <h3>Drawing Register</h3>
+            <a class="eng-sec-link" href="modules/drawing-register/index.html">Open module <span data-ico="arrowRight" data-ico-size="14"></span></a>
+          </div>
+          <div class="eng-kpis" id="dr-kpis"></div>
+          <div class="eng-split">
+            <div class="pd-card eng-bars"><div class="eng-card-title">Drawings by status</div><div id="dr-bars"></div></div>
+            <div class="pd-card eng-bars"><div class="eng-card-title">Latest revisions</div><div id="dr-latest"></div></div>
+          </div>
+        </section>
+
+        <!-- Material Submittal Log ------------------------------------------ -->
+        <section class="eng-sec" id="sec-ms">
+          <div class="eng-sec-head">
+            <span class="eng-sec-ico" data-ico="box" data-ico-size="18"></span>
+            <h3>Material Submittal Log</h3>
+            <a class="eng-sec-link" href="modules/material-submittal/index.html">Open module <span data-ico="arrowRight" data-ico-size="14"></span></a>
+          </div>
+          <div class="eng-kpis" id="ms-kpis"></div>
+          <div class="eng-split">
+            <div class="pd-card eng-bars"><div class="eng-card-title">Submittals by status</div><div id="ms-bars"></div></div>
+            <div class="pd-card eng-bars"><div class="eng-card-title">Needs attention</div><div id="ms-attn"></div></div>
+          </div>
+        </section>
+
+        <!-- Recent activity (audit trail) ----------------------------------- -->
+        <section class="eng-sec">
+          <div class="eng-sec-head">
+            <span class="eng-sec-ico" data-ico="history" data-ico-size="18"></span>
+            <h3>Recent engineering activity</h3>
+            <a class="eng-sec-link" href="notifications.html">View all <span data-ico="arrowRight" data-ico-size="14"></span></a>
+          </div>
+          <div class="pd-card"><div id="dash-activity"></div></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="assets/js/config.js?v=20260811a"></script>
+  <script src="assets/js/auth.js?v=20260724a"></script>
+  <script src="assets/js/db.js?v=20260724a"></script>
+  <script src="assets/js/ui.js?v=20260724a"></script>
+  <script src="assets/js/icons.js?v=20260811a"></script>
+  <script src="assets/js/perm.js?v=20260811a"></script>
+  <script src="assets/js/nav.js?v=20260811a"></script>
+  <script src="assets/js/engdata.js?v=20260811a"></script>
+  <script>
+  (function () {
+    var pid = sessionStorage.getItem('pd_project');
+    // Project-first entry, same as the Planners Dashboard: every engineering
+    // record is project-scoped (RLS depends on project_id), so there is nothing
+    // meaningful to show until a project is chosen.
+    if (!pid) { location.replace('projects.html'); return; }
+
+    var PROJ = [], WS = [], wsById = {}, curProj = null, profile = null;
+
+    AppAuth.requireLogin(function (user, prof) {
+      profile = prof;
+      UI.renderUserBar(prof);
+      Nav.render(prof, 'dashboard');
+      var first = (prof.name || prof.email || '').split(' ')[0];
+      document.getElementById('welcome').textContent =
+        first ? ('Welcome, ' + first) : 'Engineering Dashboard';
+      if (window.Icons) Icons.hydrate(document.body);
+      boot();
+      loadStats();
+    });
+
+    // ---- project header / switcher (same behaviour as the Planning App) ----
+    async function boot() {
+      try {
+        var res = await Promise.all([PDb.getProjects(), PDb.getWorkspaces()]);
+        PROJ = res[0]; WS = res[1];
+      } catch (e) { /* header falls back to the cached name */ }
+      WS.forEach(function (w) { wsById[w.id] = w; });
+      curProj = PROJ.filter(function (p) { return p.id === pid; })[0] ||
+                { id: pid, name: sessionStorage.getItem('pd_project_name') || pid };
+      document.getElementById('projsw-name').textContent =
+        (curProj.name || curProj.id) + ' (' + curProj.id + ')';
+      var names = [], cur = curProj.workspace_id ? wsById[curProj.workspace_id] : null;
+      while (cur) { names.unshift(cur.name); cur = cur.parent_id ? wsById[cur.parent_id] : null; }
+      document.getElementById('projsw-path').textContent = names.join(' › ');
+      renderSwitcher();
+    }
+
+    function renderSwitcher() {
+      var menu = document.getElementById('projsw-menu');
+      menu.innerHTML = '<div class="pd-projsw-menu-head">Switch project</div>' +
+        PROJ.map(function (p) {
+          var w = p.workspace_id ? wsById[p.workspace_id] : null;
+          return '<button data-pick="' + Fmt.esc(p.id) + '"' + (p.id === pid ? ' class="cur"' : '') + '>' +
+            '<strong>' + Fmt.esc(p.name || p.id) + '</strong><small>' + Fmt.esc(p.id) +
+            (w ? ' · ' + Fmt.esc(w.name) : '') + '</small></button>';
+        }).join('') +
+        '<a class="pd-projsw-all" href="projects.html">' + Icons.svg('arrowRight', 15) + ' All projects</a>';
+      menu.querySelectorAll('[data-pick]').forEach(function (b) {
+        b.onclick = function () {
+          var np = PROJ.filter(function (x) { return x.id === b.dataset.pick; })[0];
+          sessionStorage.setItem('pd_project', np.id);
+          sessionStorage.setItem('pd_project_name', np.name || np.id);
+          sessionStorage.setItem('pd_workspace', np.workspace_id || '');
+          location.reload();
+        };
+      });
+      var btn = document.getElementById('projsw-btn');
+      btn.onclick = function (e) { e.stopPropagation(); menu.classList.toggle('open'); };
+      document.addEventListener('click', function (e) {
+        if (!menu.contains(e.target) && !btn.contains(e.target)) menu.classList.remove('open');
+      });
+    }
+
+    // ---- statistics -------------------------------------------------------
+    // Every number below comes from EngData, which reads the module tables
+    // directly. Nothing on this page is hardcoded; RLS means a user only ever
+    // aggregates rows they are allowed to see.
+    function kpi(label, value, tone, href, sub) {
+      return '<a class="eng-kpi' + (tone ? ' eng-kpi-' + tone : '') + '" href="' + href + '">' +
+        '<div class="eng-kpi-val">' + value + '</div>' +
+        '<div class="eng-kpi-lbl">' + Fmt.esc(label) + '</div>' +
+        (sub ? '<div class="eng-kpi-sub">' + Fmt.esc(sub) + '</div>' : '') + '</a>';
+    }
+    function skeleton(el, n) {
+      document.getElementById(el).innerHTML =
+        new Array(n + 1).join('<div class="eng-kpi eng-kpi-skel"></div>');
+    }
+    function bars(hostId, rows, total) {
+      var host = document.getElementById(hostId);
+      if (!rows.length) { host.innerHTML = '<div class="eng-empty">No records yet.</div>'; return; }
+      host.innerHTML = rows.map(function (r) {
+        var pct = total ? Math.round(r.n / total * 100) : 0;
+        return '<div class="eng-bar-row">' +
+          '<span class="eng-bar-lbl">' + Fmt.esc(r.label) + '</span>' +
+          '<span class="eng-bar-track"><span class="eng-bar-fill ' + (r.cls || '') +
+            '" style="width:' + pct + '%"></span></span>' +
+          '<span class="eng-bar-n">' + r.n + '</span></div>';
+      }).join('');
+    }
+
+    async function loadStats() {
+      skeleton('dr-kpis', 6); skeleton('ms-kpis', 6);
+
+      var DR = 'modules/drawing-register/index.html';
+      var MS = 'modules/material-submittal/index.html';
+
+      // Drawing Register --------------------------------------------------
+      try {
+        var d = await EngData.drawingStats(pid);
+        document.getElementById('dr-kpis').innerHTML =
+          kpi('Total Drawings',   d.total,        null,   DR, d.sheets ? d.sheets + (d.sheets === 1 ? ' sheet' : ' sheets') : '') +
+          kpi('Active',           d.active,       'info', DR, 'not approved or cancelled') +
+          kpi('Under Review',     d.underReview,  'warn', DR, 'submitted or resubmit') +
+          kpi('Approved',         d.approved,     'good', DR, d.pctApproved + '% of register') +
+          kpi('For Revision',     d.forRevision,  'bad',  DR, 'resubmit') +
+          kpi('Not Started',      d.notStarted,   null,   DR, '');
+        bars('dr-bars', d.byStatus, d.total);
+        document.getElementById('dr-latest').innerHTML = d.latest.length
+          ? '<table class="pd-table eng-mini"><thead><tr><th>Drawing</th><th>Rev</th><th>Status</th></tr></thead><tbody>' +
+            d.latest.map(function (r) {
+              return '<tr><td>' + Fmt.esc(r.drawing_no || r.title || '—') + '</td>' +
+                '<td>' + Fmt.esc(r.revision == null ? '—' : String(r.revision)) + '</td>' +
+                '<td><span class="eng-chip ' + EngData.drStatusCls(r.status) + '">' +
+                Fmt.esc(r.status || 'Not Started') + '</span></td></tr>';
+            }).join('') + '</tbody></table>'
+          : '<div class="eng-empty">No drawings yet.</div>';
+      } catch (e) {
+        document.getElementById('dr-kpis').innerHTML =
+          '<div class="eng-err">Could not load drawing statistics: ' + Fmt.esc(e.message || e) + '</div>';
+      }
+
+      // Material Submittal Log -------------------------------------------
+      try {
+        var m = await EngData.submittalStats(pid);
+        document.getElementById('ms-kpis').innerHTML =
+          kpi('Total Submittals',        m.total,        null,   MS, '') +
+          kpi('For Review',              m.forReview,    'warn', MS, 'pending approval') +
+          kpi('Approved',                m.approved,     'good', MS, m.pctApproved + '% of log') +
+          kpi('Approved w/ Comments',    m.approvedC,    'good', MS, '') +
+          kpi('Rejected',                m.rejected,     'bad',  MS, '') +
+          kpi('Overdue',                 m.overdue,      'bad',  MS, 'past planned approval');
+        bars('ms-bars', m.byStatus, m.total);
+        document.getElementById('ms-attn').innerHTML = m.attention.length
+          ? '<table class="pd-table eng-mini"><thead><tr><th>Submittal</th><th>Material</th><th>Due</th></tr></thead><tbody>' +
+            m.attention.map(function (r) {
+              return '<tr><td>' + Fmt.esc(r.submittal_no || '—') + '</td>' +
+                '<td>' + Fmt.esc(r.material || '—') + '</td>' +
+                '<td class="eng-overdue">' + Fmt.esc(Fmt.date(r.plan_approval_date)) + '</td></tr>';
+            }).join('') + '</tbody></table>'
+          : '<div class="eng-empty">Nothing overdue. </div>';
+      } catch (e) {
+        document.getElementById('ms-kpis').innerHTML =
+          '<div class="eng-err">Could not load submittal statistics: ' + Fmt.esc(e.message || e) + '</div>';
+      }
+
+      // Recent activity ---------------------------------------------------
+      try {
+        var acts = await EngData.recentActivity(pid, 8);
+        document.getElementById('dash-activity').innerHTML = acts.length
+          ? '<div class="eng-feed">' + acts.map(EngData.activityRowHTML).join('') + '</div>'
+          : '<div class="eng-empty">No recorded activity yet. Changes are logged from now on.</div>';
+      } catch (e) {
+        // The audit table is created by migration 0002 — if it has not been run
+        // yet, say so plainly rather than showing a broken panel.
+        document.getElementById('dash-activity').innerHTML =
+          '<div class="eng-empty">Activity trail unavailable (' + Fmt.esc(e.message || e) + ').</div>';
+      }
+      if (window.Icons) Icons.hydrate(document.body);
+    }
+  })();
+  </script>
+</body>
+</html>

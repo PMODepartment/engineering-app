@@ -1,0 +1,389 @@
+/* Material Submittal Log — module styles (all classes prefixed .ms-)
+   Chrome (topbar / tabs / tools / filter bar) is copied from drawing-register's
+   module.css, which was verified by computed-style diff against the suite. Do not
+   re-invent it here: see the 2026-07-17 "UI uniformity pass" note in the main
+   CLAUDE.md for why divergence keeps getting reworked. */
+
+/* ------------------------------- TYPE SCALE -------------------------------
+   ⚠️ Use these, never a raw px font-size. THE SAME six steps as the Drawing
+   Register (see its module.css) — the two logs sit side by side in the same
+   suite, so a heading here must be the same size as a heading there. The two
+   modules had grown nine near-identical sizes between them, including a 9.5px
+   chart label that was well under a readable floor. `micro` is the floor. */
+:root {
+  --ms-fs-micro:11px;
+  --ms-fs-sm:12px;
+  --ms-fs-base:13px;
+  --ms-fs-lg:15px;
+  --ms-fs-xl:20px;
+  --ms-fs-kpi:32px;
+}
+
+
+/* ---- Shared topbar chrome (VERBATIM from drawing-register/module.css) -----
+   Every uniform module carries this block. Without it the topbar inherits
+   dashboard.css's `gap:14px` with no wrapping, the avatar loses its left
+   divider, and theme.js's injected toggle keeps its default size instead of
+   matching the 34x34 tool buttons — which reads as "the buttons beside the
+   profile icon are misplaced". Do not drop it when copying this module. */
+.pd-topbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; row-gap:8px; }
+.pd-topbar #user-bar { margin-left:10px; padding-left:10px; border-left:1px solid var(--pd-line); flex:none; }
+.pd-topbar #pd-theme-toggle { width:34px; height:34px; padding:0; display:inline-flex; align-items:center; justify-content:center; margin-left:4px; flex:none; }
+
+/* ---- Topbar: project selector + tabs + tools ----------------------------- */
+.ms-title-txt { white-space:nowrap; }
+@media (max-width:1150px){ .ms-title-txt { display:none; } }   /* icon-only title when tight */
+.ms-title-ico { color:var(--pd-red); vertical-align:-3px; }
+.ms-modback { height:36px; width:36px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+
+.ms-projctx { display:flex; align-items:center; min-width:0; flex:0 1 auto; }
+.ms-project { max-width:230px; min-width:120px; height:34px; font-weight:600; font-size:var(--ms-fs-base);
+  background:transparent; border-color:transparent; }
+.ms-project:hover, .ms-project:focus { background:var(--pd-card); border-color:var(--pd-line); }
+
+.ms-tabs { display:inline-flex; border:1px solid var(--pd-line); border-radius:var(--pd-radius); overflow:hidden; flex:none; }
+.ms-tab { border:0; background:var(--pd-card); color:var(--pd-ink); padding:6px 14px; font-weight:600;
+  cursor:pointer; font-size:var(--ms-fs-base); transition:background .12s; white-space:nowrap; }
+.ms-tab + .ms-tab { border-left:1px solid var(--pd-line); }
+.ms-tab:hover:not(.active) { background:var(--pd-bg); }
+.ms-tab.active { background:var(--pd-red); color:#fff; }
+
+.ms-topbar-tools { display:flex; align-items:center; gap:4px; margin-left:auto; }
+.ms-topbar-tools .pd-btn { height:34px; width:34px; padding:0; display:inline-flex; align-items:center; justify-content:center;
+  background:transparent; border-color:transparent; font-size:var(--ms-fs-base); }
+.ms-topbar-tools .pd-btn:hover { background:var(--pd-bg); border-color:var(--pd-line); }
+.ms-topbar-tools .pd-btn.ms-tb-labeled { width:auto; padding:0 12px; gap:6px; }
+.ms-topbar-tools .pd-btn.pd-btn-primary { background:var(--pd-red); border-color:var(--pd-red); color:#fff; }
+.ms-topbar-tools .pd-btn.pd-btn-primary:hover { filter:brightness(.94); }
+.ms-tb-sep { width:1px; align-self:stretch; margin:5px 3px; background:var(--pd-line); }
+.ms-clearbtn { color:var(--pd-bad,#dc2626); }
+.ms-clearbtn:hover { background:var(--pd-bad,#dc2626) !important; border-color:var(--pd-bad,#dc2626) !important; color:#fff; }
+
+/* ---- Filter bar --------------------------------------------------------- */
+.ms-filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px;
+  background:var(--pd-card); border:1px solid var(--pd-line); border-radius:var(--pd-radius); padding:8px 12px; }
+.ms-filt-ico { color:var(--pd-muted); flex:none; }
+.ms-filters .ms-search { flex:1 1 280px; min-width:170px; }
+.ms-filters .pd-select { flex:0 0 auto; max-width:190px; }
+.ms-chk { display:inline-flex; align-items:center; gap:6px; font-size:var(--ms-fs-base); color:var(--pd-ink); cursor:pointer; white-space:nowrap; }
+.ms-chk input { width:15px; height:15px; accent-color:var(--pd-red); cursor:pointer; }
+/* Ghost clear — only rendered when a filter is actually set (Progress Photos lesson:
+   a margin-left:auto button orphans itself onto a second line when the row wraps). */
+.ms-clearfilt { display:inline-flex; align-items:center; gap:5px; border:0; background:none; cursor:pointer;
+  color:var(--pd-muted); font-size:var(--ms-fs-sm); font-weight:600; padding:4px 6px; border-radius:var(--pd-radius); }
+.ms-clearfilt:hover { background:var(--pd-bg); color:var(--pd-red); }
+.ms-clearfilt[hidden] { display:none; }
+.ms-count { color:var(--pd-muted); font-size:var(--ms-fs-base); margin-left:auto; white-space:nowrap; }
+
+/* ---- Log table ---------------------------------------------------------- */
+/* Fallback only — superseded by the `body.ms-fit` block at the end of this file
+   on any viewport above the phone breakpoint. See the comment there for why a
+   hardcoded chrome height is wrong now that the topbar wraps. */
+.ms-tablecard { padding:0; overflow:auto; max-height:calc(100vh - 250px); }
+.ms-table { border-collapse:separate; border-spacing:0; width:100%; min-width:1500px; }
+.ms-table.ms-bk-table { min-width:0; }
+.ms-bk-table tbody tr.ms-bk-row { cursor:pointer; }
+/* Sortable headers — shared by the Backlog table and (UI review #3) the Registry
+   log, so the same gesture reads the same way in both. */
+.ms-bk-table th.ms-sortable, .ms-table th.ms-sortable { cursor:pointer; user-select:none; }
+.ms-bk-table th.ms-sortable:hover, .ms-table th.ms-sortable:hover { color:var(--pd-red); }
+.ms-table th.ms-sorted { color:var(--pd-red); }
+.ms-sortind { color:var(--pd-red); font-size:var(--ms-fs-micro); }
+
+/* "Sorted by X ▲ ×" chip — the one-click way back to the natural order. */
+.ms-sortchip { display:inline-flex; align-items:center; gap:5px; cursor:pointer;
+  border:1px solid var(--pd-red); background:var(--pd-red); color:#fff;
+  font:inherit; font-size:var(--ms-fs-sm); font-weight:600; padding:4px 9px; border-radius:999px; flex:none; }
+.ms-sortchip:hover { filter:brightness(1.08); }
+.ms-sortchip svg { display:block; }
+.ms-agchip { margin-left:10px; vertical-align:2px; }
+
+/* ---- Backlog: Doc column + bulk actions [UI review #8] ------------------- */
+.ms-bk-doc { width:46px; text-align:center; }
+.ms-bk-table .ms-bk-doc button, .ms-bk-table .ms-cb input { cursor:pointer; }
+.ms-bk-selbar { margin-left:0; }
+
+/* ---- Overview drill-through affordances [UI review #7] -------------------
+   Non-clickable aggregates deliberately get NO hover state, so "looks
+   clickable" always means "is clickable". */
+.ms-kpi-drill { cursor:pointer; }
+.ms-kpi-drill:hover { border-color:var(--pd-red); }
+.ms-kpi-drill:hover .ms-kpi-v { color:var(--pd-red); }
+.ms-kpi-drill:focus-visible { outline:2px solid var(--pd-red); outline-offset:2px; }
+.ms-legendrow { cursor:pointer; margin:0 -6px; padding:2px 6px; border-radius:5px; }
+.ms-legendrow:hover { background:var(--pd-bg); color:var(--pd-red); }
+.ms-legendrow:focus-visible { outline:2px solid var(--pd-red); outline-offset:1px; }
+.ms-agseg { height:100%; display:flex; align-items:center; justify-content:center;
+  color:#fff; font-size:var(--ms-fs-sm); font-weight:700; cursor:pointer; }
+.ms-agseg:hover { filter:brightness(1.12); box-shadow:inset 0 0 0 2px rgba(255,255,255,.75); }
+.ms-aglegend { display:inline-flex; align-items:center; gap:5px; font-size:var(--ms-fs-sm);
+  margin:4px 14px 0 0; padding:2px 5px; border-radius:5px; cursor:pointer; }
+.ms-aglegend:hover { background:var(--pd-bg); color:var(--pd-red); }
+.ms-drillrow { cursor:pointer; }
+.ms-drillrow:hover > td { background:var(--pd-bg); }
+.ms-drillrow:hover > td:first-child { color:var(--pd-red); }
+.ms-aging-late { color:var(--pd-red); font-weight:700; }
+/* A large backlog scrolls inside its own card instead of stretching the whole
+   page — the KPI row + card header stay put; only the table body scrolls. */
+.ms-bk-scroll { max-height:min(62vh, 640px); overflow-y:auto; border:1px solid var(--pd-line); border-radius:var(--pd-radius); }
+.ms-bk-more { margin-top:10px; font-size:var(--ms-fs-sm); color:var(--pd-muted); text-align:center; }
+.ms-linklike { background:none; border:none; padding:0; color:var(--pd-red); font-weight:600; font-size:inherit;
+  font-family:inherit; cursor:pointer; text-decoration:underline; }
+.ms-table thead th { position:sticky; top:0; z-index:2; background:var(--pd-card);
+  border-bottom:2px solid var(--pd-line); font-size:var(--ms-fs-micro); letter-spacing:.03em; text-transform:uppercase;
+  color:var(--pd-muted); padding:9px 10px; white-space:nowrap; text-align:left; }
+.ms-table td { padding:8px 10px; vertical-align:middle; border-bottom:1px solid var(--pd-line); font-size:var(--ms-fs-base); }
+.ms-table tbody tr:not(.ms-grp):hover td { background:var(--pd-bg); }
+.ms-nowrap { white-space:nowrap; }
+.ms-mut { color:var(--pd-muted); }
+.ms-mini { color:var(--pd-muted); font-size:var(--ms-fs-micro); }
+.ms-r { text-align:right; white-space:nowrap; }
+.ms-code { font-family:ui-monospace,"SF Mono",Consolas,monospace; font-weight:700; font-size:var(--ms-fs-sm); white-space:nowrap; }
+.ms-item { font-weight:600; }
+.ms-sub { color:var(--pd-muted); font-size:var(--ms-fs-sm); margin-top:2px; max-width:340px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ms-actcol { width:76px; }
+.ms-cb { width:34px; text-align:center; }
+.ms-cb input { width:15px; height:15px; cursor:pointer; accent-color:var(--pd-red); }
+.ms-selrow td { background:rgba(238,49,36,.06) !important; }
+/* Frozen first columns so the code + item stay readable while scrolling right. */
+.ms-table th.ms-fz1, .ms-table td.ms-fz1 { position:sticky; left:0;  z-index:1; background:var(--pd-card); min-width:190px; }
+.ms-table th.ms-fz2, .ms-table td.ms-fz2 { position:sticky; left:190px; z-index:1; background:var(--pd-card); min-width:230px; }
+.ms-table thead th.ms-fz1, .ms-table thead th.ms-fz2 { z-index:3; }
+.ms-table tbody tr:hover td.ms-fz1, .ms-table tbody tr:hover td.ms-fz2 { background:var(--pd-bg); }
+.ms-table tr.ms-selrow td.ms-fz1, .ms-table tr.ms-selrow td.ms-fz2 { background:#fbe9e7 !important; }
+html.pd-dark .ms-table tr.ms-selrow td.ms-fz1, html.pd-dark .ms-table tr.ms-selrow td.ms-fz2 { background:#3a2a28 !important; }
+
+/* Trade-section group rows (the workbook's 23 section headers) */
+tr.ms-grp td { background:var(--pd-red-light,rgba(238,49,36,.07)); font-weight:700; font-size:var(--ms-fs-sm);
+  letter-spacing:.02em; cursor:pointer; box-shadow:inset 3px 0 0 0 var(--pd-red); }
+tr.ms-grp td.ms-fz1, tr.ms-grp td.ms-fz2 { background:var(--pd-red-light,rgba(238,49,36,.07)); }
+html.pd-dark tr.ms-grp td, html.pd-dark tr.ms-grp td.ms-fz1, html.pd-dark tr.ms-grp td.ms-fz2 { background:rgba(238,49,36,.16); }
+/* Now an inline SVG chevron (was the ▸/▾ text glyphs) — rotated when collapsed,
+   matching drawing-register's .dr-caret. */
+.ms-grp-caret { display:inline-flex; align-items:center; width:12px; line-height:0;
+  color:var(--pd-muted); transition:transform .12s; }
+.ms-grp-caret svg { display:block; }
+.ms-caret-col { transform:rotate(-90deg); }
+.ms-grp-count { color:var(--pd-muted); font-weight:500; font-size:var(--ms-fs-sm); margin-left:6px; }
+
+/* ---- Status pills ------------------------------------------------------- */
+.ms-pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:var(--ms-fs-micro); font-weight:700;
+  white-space:nowrap; border:1px solid transparent; }
+.ms-pill.s-approved   { background:#e7f6ec; color:#12693a; border-color:#bfe4cd; }
+.ms-pill.s-approvedc  { background:#eef7e8; color:#3f6b21; border-color:#cfe6bd; }
+.ms-pill.s-pending    { background:#fff6e5; color:#8a5a00; border-color:#f3ddb0; }
+.ms-pill.s-forsub     { background:#eef1f5; color:#4a5568; border-color:#d7dde5; }
+.ms-pill.s-resubmit   { background:#fdeee7; color:#9a4a15; border-color:#f5d3bf; }
+.ms-pill.s-rejected   { background:#fdeaea; color:#9b1c1c; border-color:#f5c6c6; }
+.ms-pill.s-info       { background:#eaf2fb; color:#1e4e8c; border-color:#c6dbf2; }
+html.pd-dark .ms-pill.s-approved  { background:rgba(18,105,58,.24);  color:#7fd6a2; border-color:rgba(18,105,58,.5); }
+html.pd-dark .ms-pill.s-approvedc { background:rgba(63,107,33,.24);  color:#b3dd8c; border-color:rgba(63,107,33,.5); }
+html.pd-dark .ms-pill.s-pending   { background:rgba(138,90,0,.26);   color:#f0c469; border-color:rgba(138,90,0,.55); }
+html.pd-dark .ms-pill.s-forsub    { background:rgba(120,130,145,.24);color:#c2ccd8; border-color:rgba(120,130,145,.5); }
+html.pd-dark .ms-pill.s-resubmit  { background:rgba(154,74,21,.26);  color:#f0a877; border-color:rgba(154,74,21,.55); }
+html.pd-dark .ms-pill.s-rejected  { background:rgba(155,28,28,.26);  color:#f19a9a; border-color:rgba(155,28,28,.55); }
+html.pd-dark .ms-pill.s-info      { background:rgba(30,78,140,.26);  color:#8fbdf0; border-color:rgba(30,78,140,.55); }
+.ms-od { color:var(--pd-bad,#dc2626); font-weight:700; }
+
+/* ---- Schedule link: Need-by column + float chip ------------------------ */* ---- Schedule-activity picker (searchable by ID *and* name) ------------ */* ---- Dashboard ---------------------------------------------------------- */
+.ms-dash { display:flex; flex-direction:column; gap:14px; }
+.ms-kpi-section { margin-bottom:22px; }
+.ms-kpi-seclabel { font-size:var(--ms-fs-micro); font-weight:700; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--pd-muted); margin-bottom:10px; }
+/* Auto-fit with a wider minimum: cards claim real width on a wide screen instead
+   of staying cramped at their old 150px floor, and wrap gracefully when narrow. */
+.ms-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:18px; }
+.ms-kpi-section .ms-kpis { margin-bottom:0; }
+.ms-kpi { background:var(--pd-card); border:1px solid var(--pd-line); border-radius:var(--pd-radius);
+  padding:20px 22px; position:relative; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,.05);
+  transition:box-shadow .15s, transform .15s; }
+.ms-kpi:hover { box-shadow:0 4px 14px rgba(0,0,0,.09); transform:translateY(-1px); }
+/* Neutral by default — every metric card carrying the same red accent as its
+   neighbors read as "clashing" (a wall of red bars with no semantic meaning).
+   Red/green/amber are reserved for the .good/.warn/.bad states below. */
+.ms-kpi::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--pd-muted); opacity:.35; }
+.ms-kpi.good::before { background:#12693A; opacity:1; } html.pd-dark .ms-kpi.good::before { background:#7fd6a2; }
+.ms-kpi.bad::before  { background:var(--pd-bad,#dc2626); opacity:1; }
+.ms-kpi.warn::before { background:#b45309; opacity:1; } html.pd-dark .ms-kpi.warn::before { background:#f0c469; }
+.ms-kpi-l { color:var(--pd-muted); font-size:var(--ms-fs-sm); text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
+.ms-kpi-v { font-size:var(--ms-fs-kpi); font-weight:800; margin-top:9px; line-height:1.05; letter-spacing:-.01em; }
+.ms-kpi-s { color:var(--pd-muted); font-size:var(--ms-fs-sm); margin-top:5px; }
+.ms-kpi.good .ms-kpi-v { color:#12693a; } html.pd-dark .ms-kpi.good .ms-kpi-v { color:#7fd6a2; }
+.ms-kpi.bad  .ms-kpi-v { color:var(--pd-bad,#dc2626); }
+.ms-kpi.warn .ms-kpi-v { color:#b45309; } html.pd-dark .ms-kpi.warn .ms-kpi-v { color:#f0c469; }
+
+.ms-grid2 { display:grid; grid-template-columns:minmax(320px,1fr) minmax(340px,1.25fr); gap:14px; align-items:start; }
+@media (max-width:1100px){ .ms-grid2 { grid-template-columns:1fr; } }
+.ms-card { background:var(--pd-card); border:1px solid var(--pd-line); border-radius:var(--pd-radius); padding:14px 16px; }
+/* ⚠️ .ms-tablecard is included deliberately: the Backlog card emits a bare
+   <h3> inside `.pd-card ms-tablecard`, which matched neither of the other two
+   selectors and so rendered at the browser default (16.4px) while every other
+   heading in the module was 15px. Card headings are one size. */
+.ms-card h3, .ms-tablecard > h3 { margin:0 0 2px; font-size:var(--ms-fs-lg); }
+.ms-card .ms-cardsub { color:var(--pd-muted); font-size:var(--ms-fs-sm); margin:0 0 12px; }
+.ms-seg { display:inline-flex; border:1.5px solid var(--pd-line); border-radius:7px; overflow:hidden; font-weight:400; }
+.ms-seg-btn { border:none; background:transparent; color:var(--pd-text); padding:4px 10px; font-size:var(--ms-fs-sm); font-family:inherit; cursor:pointer; }
+.ms-seg-btn.active { background:var(--pd-red); color:#fff; }
+.ms-seg-btn:not(.active):hover { background:var(--pd-bg); }
+
+/* Single-button switch (# ⇄ %) — one control that flips, not two radio-ish buttons */
+.ms-segswitch { min-width:34px; padding:4px 10px; font-size:var(--ms-fs-sm); font-weight:700; font-family:inherit;
+  color:var(--pd-red); background:transparent; cursor:pointer; }
+.ms-segswitch:hover { background:var(--pd-bg); }
+
+/* Period chart — Chart.js needs an explicitly-sized, position:relative parent
+   because the canvas is responsive with maintainAspectRatio:false. Without a
+   fixed height here the canvas collapses to 0 or grows unbounded. */
+.ms-pc-wrap { position:relative; height:320px; width:100%; }
+.ms-pc-wrap canvas { display:block; }
+
+/* Status summary table (mirrors the workbook's Status / No. / Wt % block) */
+.ms-stat { width:100%; border-collapse:collapse; }
+.ms-stat th { text-align:left; font-size:var(--ms-fs-micro); text-transform:uppercase; letter-spacing:.03em;
+  color:var(--pd-muted); padding:6px 8px; border-bottom:1px solid var(--pd-line); }
+.ms-stat th:not(:first-child), .ms-stat td:not(:first-child) { text-align:right; }
+.ms-stat td { padding:7px 8px; border-bottom:1px solid var(--pd-line); font-size:var(--ms-fs-base); }
+.ms-stat tr:last-child td { border-bottom:0; border-top:2px solid var(--pd-line); font-weight:800; }
+.ms-stat .ms-bar { height:5px; border-radius:3px; background:var(--pd-line); overflow:hidden; margin-top:5px; }
+.ms-stat .ms-bar > i { display:block; height:100%; background:var(--pd-red); }
+.ms-stat tbody tr.ms-zero td { opacity:.5; }
+
+/* Donut + legend */
+.ms-donutwrap { display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.ms-legend { display:flex; flex-direction:column; gap:6px; font-size:var(--ms-fs-sm); min-width:170px; }
+.ms-legend div { display:flex; align-items:center; gap:8px; }
+.ms-sw { width:11px; height:11px; border-radius:3px; flex:none; }
+
+/* S-curve */
+.ms-chart { width:100%; overflow-x:auto; }
+.ms-chart svg { display:block; }
+.ms-chart text { font-size:var(--ms-fs-micro); fill:var(--pd-muted); }
+.ms-chart .ms-axis { stroke:var(--pd-line); stroke-width:1; }
+.ms-chart .ms-grid { stroke:var(--pd-line); stroke-width:1; opacity:.5; }
+
+/* Reconciliation note — explains why our totals differ from the Excel */
+.ms-note { display:flex; gap:10px; align-items:flex-start; background:rgba(180,83,9,.08);
+  border:1px solid rgba(180,83,9,.3); border-radius:var(--pd-radius); padding:10px 12px; font-size:var(--ms-fs-sm); }
+.ms-note b { color:#b45309; } html.pd-dark .ms-note b { color:#f0c469; }
+.ms-note-ico { color:#b45309; flex:none; margin-top:1px; }
+.ms-note-x { margin-left:auto; border:0; background:none; cursor:pointer; color:var(--pd-muted); padding:0 2px; }
+
+/* ---- Attachments -------------------------------------------------------- */
+.ms-doccol { width:46px; text-align:center; }
+.ms-filebtn { border:0; background:none; cursor:pointer; color:var(--pd-red); padding:3px 5px;
+  border-radius:var(--pd-radius); display:inline-flex; align-items:center; }
+.ms-filebtn:hover { background:var(--pd-bg); }
+/* Attachment block in the Add/Edit modal */
+.ms-filefield { grid-column:1/-1; display:flex; flex-direction:column; gap:8px; }
+.ms-filenow { display:flex; align-items:center; gap:8px; background:var(--pd-bg);
+  border:1px solid var(--pd-line); border-radius:var(--pd-radius); padding:7px 10px; font-size:var(--ms-fs-sm); }
+.ms-filenow > [data-ico], .ms-filenow > svg { color:var(--pd-red); flex:none; }
+.ms-filelink { border:0; background:none; cursor:pointer; color:var(--pd-red); font-weight:600;
+  font-size:var(--ms-fs-sm); text-align:left; padding:0; flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ms-filelink:hover { text-decoration:underline; }
+.ms-filerm { border:0; background:none; cursor:pointer; color:var(--pd-muted); font-size:var(--ms-fs-lg);
+  line-height:1; padding:0 4px; flex:none; }
+.ms-filerm:hover { color:var(--pd-bad,#dc2626); }
+.ms-filefield input[type=file] { font-size:var(--ms-fs-sm); }
+
+/* ---- Modal / form ------------------------------------------------------- */
+.ms-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; }
+.ms-form label { display:flex; flex-direction:column; gap:4px; font-size:var(--ms-fs-sm); font-weight:600; color:var(--pd-muted); }
+.ms-form label.ms-wide { grid-column:1/-1; }
+.ms-form input, .ms-form select, .ms-form textarea { font:inherit; font-size:var(--ms-fs-base); font-weight:400; color:var(--pd-ink);
+  background:var(--pd-card); border:1px solid var(--pd-line); border-radius:var(--pd-radius); padding:7px 9px; }
+.ms-form textarea { resize:vertical; min-height:58px; }
+.ms-sec { grid-column:1/-1; font-size:var(--ms-fs-micro); font-weight:800; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--pd-red); border-bottom:1px solid var(--pd-line); padding-bottom:5px; margin-top:4px; }
+.ms-sec:first-child { margin-top:0; }
+/* Live preview of the composed 7-part submittal number */
+.ms-codeprev { grid-column:1/-1; background:var(--pd-bg); border:1px dashed var(--pd-line); border-radius:var(--pd-radius);
+  padding:8px 10px; font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:var(--ms-fs-base); font-weight:700; }
+.ms-codeprev span { color:var(--pd-muted); font-weight:400; font-family:var(--pd-font); font-size:var(--ms-fs-sm); }
+.ms-codeparts { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:8px; grid-column:1/-1; }
+
+/* ---- Import summary ----------------------------------------------------- */
+.ms-imp { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin:12px 0; }
+.ms-imp div { background:var(--pd-bg); border:1px solid var(--pd-line); border-radius:var(--pd-radius); padding:10px; text-align:center; }
+.ms-imp b { display:block; font-size:var(--ms-fs-xl); font-weight:800; }
+.ms-imp span { color:var(--pd-muted); font-size:var(--ms-fs-micro); text-transform:uppercase; letter-spacing:.03em; }
+
+/* ---- Empty / loading ---------------------------------------------------- */
+.ms-empty { text-align:center; padding:48px 20px; color:var(--pd-muted); }
+.ms-empty h3 { margin:0 0 6px; color:var(--pd-ink); font-size:var(--ms-fs-lg); }
+.ms-spin { display:inline-block; width:13px; height:13px; vertical-align:-2px; margin-right:6px;
+  border:2px solid var(--pd-line); border-top-color:var(--pd-red); border-radius:50%; animation:ms-spin .7s linear infinite; }
+@keyframes ms-spin { to { transform:rotate(360deg); } }
+
+/* ---- Loading skeleton (mirrors drawing-register's .dr-sk*) --------------- */
+.ms-skcard { padding:14px 16px; }
+.ms-sk-head { display:flex; align-items:center; gap:8px; color:var(--pd-muted);
+  font-size:var(--ms-fs-base); font-weight:600; margin-bottom:12px; }
+.ms-sk-head .ms-spin { margin-right:0; vertical-align:0; flex:none; }
+.ms-sk-row { display:flex; gap:12px; align-items:center; padding:9px 0;
+  border-bottom:1px solid var(--pd-line); }
+.ms-sk-row:last-child { border-bottom:0; }
+.ms-sk { height:11px; border-radius:4px; background:var(--pd-line); opacity:.75;
+  animation:ms-sk-pulse 1.2s ease-in-out infinite; }
+@keyframes ms-sk-pulse { 0%,100% { opacity:.4; } 50% { opacity:.85; } }
+
+/* Row actions render inline SVG (Icons.svg) instead of the ✎ / × text glyphs,
+   which rendered at inconsistent weights across font fallbacks. */
+.ms-iconbtn { display:inline-flex; align-items:center; justify-content:center;
+  padding:4px 6px; line-height:1; }
+.ms-iconbtn svg { display:block; }
+.ms-iconbtn-del:hover { background:var(--pd-bad,#dc2626); border-color:var(--pd-bad,#dc2626); color:#fff; }
+
+/* ---- Registry: fill the viewport instead of GUESSING the chrome height ----
+   Same fix as drawing-register's `body.dr-fit` (see its module.css for the full
+   reasoning). `max-height:calc(100vh - 250px)` hardcodes a chrome height, but
+   the topbar wraps to 2–3 rows between 700 and 900px, so the guess overshot and
+   the log ran past the bottom of the window. Making the app a real
+   viewport-height flex column lets the card take whatever is left, at any width.
+   ⚠️ `body.ms-fit` is set by render() on the Registry view ONLY (Overview and
+   Backlog are multi-card documents that need normal page scroll), and the block
+   is gated to >700px so it can't beat the phone rule that releases the cap. */
+@media (min-width: 701px) {
+  body.ms-fit .pd-app { height:100dvh; min-height:0; overflow:hidden; }
+  body.ms-fit .pd-content { display:flex; flex-direction:column; min-height:0; }
+  body.ms-fit .pd-main { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+  body.ms-fit #ms-view { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+  body.ms-fit .ms-tablecard { flex:1 1 auto; min-height:0; max-height:none; }
+}
+
+/* ---- Print -------------------------------------------------------------- */
+@media print {
+  .pd-topbar, .ms-filters, .ms-actcol, .ms-cb, .ms-doccol { display:none !important; }
+  .ms-tablecard { max-height:none; overflow:visible; }
+  .ms-table { min-width:0; font-size:var(--ms-fs-micro); }
+  .ms-table th.ms-fz1, .ms-table td.ms-fz1, .ms-table th.ms-fz2, .ms-table td.ms-fz2 { position:static; }
+}
+
+/* ---- Mobile & tablet (2026-07-23) ----------------------------------------
+   Shared chrome (topbar wrap, sheet modals, 16px inputs, 44px targets) comes
+   from dashboard.css.
+
+   The log is a ~1500px-wide table and stays a horizontal scroller here — it is
+   an EDITABLE, wide register (selection, bulk actions, inline status), so
+   card-stacking it the way issues-lessons does would break how it is used.
+   What actually broke on a phone was the FREEZE: ms-fz1 (190px) + ms-fz2
+   (230px) = 420px of sticky columns on a 375px viewport, leaving no room for
+   the data you scroll to. Below 700px only the code column stays frozen.
+   -------------------------------------------------------------------------- */
+@media (max-width: 700px) {
+  /* Release the second frozen column; keep the code as the identity anchor. */
+  .ms-table th.ms-fz2, .ms-table td.ms-fz2 { position: static; min-width: 150px; }
+  .ms-table th.ms-fz1, .ms-table td.ms-fz1 { min-width: 132px; }
+  .ms-table { min-width: 1100px; }
+  .ms-tablecard { max-height: none; }
+  .ms-sub { max-width: 180px; }
+
+  .ms-filters { flex-wrap: wrap; gap: 8px; }
+  .ms-filters > * { flex: 1 1 100%; min-width: 0; }
+  .ms-count { margin-left: 0; }
+  .ms-kpis { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .ms-form, .ms-imp { grid-template-columns: 1fr; }
+  .ms-codeparts { grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); }
+  .ms-legend { min-width: 0; }
+}

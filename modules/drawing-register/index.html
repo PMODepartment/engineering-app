@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="../../assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="../../assets/img/icon.png" />
+  <script src="../../assets/js/theme.js?v=20260726d"></script>
+  <title>Drawing Register · Engineering App</title>
+  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260806b" />
+  <link rel="stylesheet" href="module.css?v=20260811c" />
+</head>
+<body>
+  <div class="pd-app">
+    <!-- Sidebar removed (matches Project Schedule / Cash Flow): the back button returns to the module selector. -->
+    <div class="pd-content">
+      <div class="pd-topbar">
+        <a class="pd-btn dr-modback" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
+        <h1 class="dr-title" style="margin:0;"><span class="dr-title-ico" data-ico="ruler" data-ico-size="20"></span> <span class="dr-title-txt">Drawing Register</span></h1>
+        <div class="dr-projctx">
+          <select class="pd-select dr-project" id="dr-project" title="Project"></select>
+        </div>
+        <div class="dr-tabs" role="tablist">
+          <button class="dr-tab active" data-view="overview">Overview</button>
+          <button class="dr-tab" data-view="backlog">Backlog</button>
+          <button class="dr-tab" data-view="registry">Registry</button>
+        </div>
+        <!-- Global tools sit beside the profile (theme.js injects the dark-mode toggle before #user-bar) -->
+        <div class="dr-topbar-tools" id="dr-topbar-tools">
+          <button class="pd-btn dr-tb-labeled pd-btn-primary" id="dr-add" data-perm="create" title="Add a drawing under the selected level (Enter)">+ Add</button>
+          <div class="dr-menuwrap">
+            <button class="pd-btn dr-tb-labeled" id="dr-addlevel" data-perm="create" style="display:none;">+ Level <span data-ico="chevronDown" data-ico-size="13"></span></button>
+            <div class="dr-menu" id="dr-addlevel-menu" hidden>
+              <button data-add="phase">Drawing Type</button>
+              <button data-add="discipline">Discipline</button>
+              <button data-add="category">Category</button>
+            </div>
+          </div>
+          <span class="dr-tb-sep"></span>
+          <button class="pd-btn" id="dr-import" data-perm="create" title="Import from Excel"><span data-ico="upload" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="dr-export" title="Export to Excel"><span data-ico="download" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="dr-print" title="Print / PDF (with an approval top sheet)"><span data-ico="printer" data-ico-size="16"></span></button>
+          <button class="pd-btn dr-clearbtn" id="dr-clear" title="Clear all drawings for this project" style="display:none;"><span data-ico="trash" data-ico-size="16"></span></button>
+        </div>
+        <div id="dr-presence" title="People viewing this project"></div>
+        <div id="user-bar"></div>
+      </div>
+      <div class="pd-main">
+        <div class="dr-filters">
+          <span class="dr-filt-ico" data-ico="filter" data-ico-size="15"></span>
+          <input class="pd-input dr-search" id="dr-f-search" placeholder="Search code, title, description…" />
+          <select class="pd-select" id="dr-f-phase"><option value="">All drawing types</option></select>
+          <select class="pd-select" id="dr-f-discipline"><option value="">All disciplines</option></select>
+          <select class="pd-select" id="dr-f-scope">
+            <option value="">All scopes</option>
+            <option>Main Contract</option>
+            <option>Change Order</option>
+          </select>
+          <select class="pd-select" id="dr-f-status">
+            <option value="">All statuses</option>
+            <option>Not Started</option><option>In Progress</option>
+            <option>Submitted</option><option>Resubmit</option>
+            <option>Approved w/ comments</option>
+            <option>Approved</option><option>Cancelled</option>
+          </select>
+          <div class="dr-menuwrap dr-views-wrap">
+            <button class="pd-btn dr-views-btn" id="dr-viewsbtn" title="Saved filter views">Views <span data-ico="chevronDown" data-ico-size="12"></span></button>
+            <div class="dr-menu dr-views-menu" id="dr-views-menu" hidden></div>
+          </div>
+          <!-- Ghost clear-filters button (matches Material Submittal / Progress Photos):
+               only visible when a filter is actually set, so it never sits in dead space. -->
+          <button class="dr-clearfilt" id="dr-f-clear" title="Clear all filters" hidden><span data-ico="x" data-ico-size="13"></span> Clear</button>
+        </div>
+
+        <!-- Print-only approval top sheet, generated fresh each Print click and
+             injected here so it prints as page 1, ahead of the register table
+             below (see the "@media print" block in module.css). -->
+        <div id="dr-topsheet" class="dr-topsheet"></div>
+        <div id="dr-view"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- Charting: same stack the Procurement (WPM) dashboard uses, so the period
+       chart's sizing, tooltips and data labels behave identically there and here. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+  <script src="../../assets/js/config.js?v=20260724a"></script>
+  <script src="../../assets/js/auth.js?v=20260724a"></script>
+  <script src="../../assets/js/db.js?v=20260724a"></script>
+  <script src="../../assets/js/ui.js?v=20260724a"></script>
+  <script src="../../assets/js/icons.js?v=20260811a"></script>
+  <script src="../../assets/js/perm.js?v=20260811a"></script>
+  <script src="../../assets/js/offline.js?v=20260726d"></script>
+  <script src="../../assets/js/collab.js?v=20260727b"></script>
+  <script src="../../assets/js/autosave.js?v=20260806a"></script>
+  <script src="module.js?v=20260811c"></script>
+  <script>
+    AppAuth.requireLogin(function (user, profile) {
+      UI.renderUserBar(profile);
+      DrawingRegister.init(user, profile);
+      // Hide write actions this role may not perform. The DB enforces the
+      // same rules via RLS + the approval-guard trigger — this is only UX.
+      Perm.applyReadonly(document, profile);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/img/icon.png" />
+  <script src="assets/js/theme.js?v=20260726d"></script>
+  <title>Request access · Engineering App</title>
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260806b" />
+</head>
+<body>
+  <div class="pd-auth-wrap">
+    <div class="pd-auth-card">
+      <div class="pd-auth-logo">
+        <img class="pd-auth-mark" src="assets/img/favicon.png" alt="Megawide">
+        <div class="pd-brand">Engineering App</div>
+        <small>Request access</small>
+      </div>
+      <div class="pd-card">
+        <form id="reg-form">
+          <div style="display:flex;gap:10px;">
+            <div class="pd-field" style="flex:1;">
+              <label for="first-name">First name</label>
+              <input class="pd-input" type="text" id="first-name" required autocomplete="given-name" />
+            </div>
+            <div class="pd-field" style="flex:1;">
+              <label for="last-name">Last name</label>
+              <input class="pd-input" type="text" id="last-name" required autocomplete="family-name" />
+            </div>
+          </div>
+          <div class="pd-field">
+            <label for="email">Email</label>
+            <input class="pd-input" type="email" id="email" required autocomplete="email" />
+          </div>
+          <div class="pd-field">
+            <label for="password">Password</label>
+            <input class="pd-input" type="password" id="password" required minlength="6" autocomplete="new-password" />
+          </div>
+          <button class="pd-btn pd-btn-primary" type="submit" style="width:100%;justify-content:center;">Create account</button>
+          <p id="msg" style="font-size:13px;margin:12px 0 0;"></p>
+        </form>
+        <p style="text-align:center;margin:16px 0 0;font-size:13px;color:var(--pd-muted);">
+          Already have an account? <a href="index.html">Sign in</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="assets/js/config.js?v=20260724a"></script>
+  <script src="assets/js/auth.js?v=20260724a"></script>
+  <script>
+    // This page loads only config.js + auth.js (it has no data to read), so
+    // db.js — and with it Fmt.esc — is not available. The typed email is echoed
+    // back into innerHTML below, so it still must be escaped.
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    document.getElementById('reg-form').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var msg = document.getElementById('msg');
+      msg.style.color = 'var(--pd-bad)'; msg.textContent = '';
+      var first = document.getElementById('first-name').value.trim();
+      var last = document.getElementById('last-name').value.trim();
+      var name = (first + ' ' + last).trim();
+      var email = document.getElementById('email').value.trim();
+      var pw = document.getElementById('password').value;
+      var res = await AppAuth.register(email, pw, name);
+      if (res.error) { msg.textContent = res.error.message; return; }
+
+      // ⚠️ Whether signUp() returns a SESSION depends on the Supabase project's
+      // "Confirm email" setting, and the two cases need different instructions.
+      // This project currently has confirmation ON, so there is no session yet.
+      //
+      // That has a consequence worth being explicit about: AppAuth.register()
+      // tries to insert the `users` profile row straight after signUp, but with
+      // no session `auth.uid()` is NULL and the users_self_insert RLS policy
+      // (auth.uid() = id) rejects it. So the profile row does NOT exist yet, and
+      // an administrator will NOT see this person in Administration until they
+      // confirm their email and sign in once — at which point auth.js's
+      // ensureProfile() self-heal creates the pending row.
+      //
+      // Telling the user to "wait for approval" here would therefore be wrong:
+      // nobody can approve them until they click the email first.
+      var confirmed = !!(res.data && res.data.session);
+      msg.style.color = 'var(--pd-ok)';
+
+      if (confirmed) {
+        msg.textContent = 'Account created. An administrator must approve your access before you can sign in.';
+        setTimeout(function () { location.href = 'pending.html'; }, 1800);
+        return;
+      }
+
+      // Confirmation required — keep them on this page with the actual next step,
+      // rather than bouncing to a screen that says the opposite.
+      //
+      // ⚠️ The confirmation text is written into the CARD, not into #msg — #msg
+      // lives inside the form, so hiding the form would hide the message too and
+      // leave the user staring at an apparently empty card.
+      var form = document.getElementById('reg-form');
+      var note = document.createElement('div');
+      note.style.cssText = 'font-size:13px;line-height:1.6;text-align:center;';
+      note.innerHTML =
+        '<div style="font-size:34px;margin-bottom:6px;">✉️</div>' +
+        '<h2 style="margin:0 0 8px;font-size:17px;">Check your email</h2>' +
+        '<p style="margin:0 0 12px;color:var(--pd-muted);">' +
+          'We sent a confirmation link to <strong>' + esc(email) + '</strong>. ' +
+          'Open it to activate your account, then sign in once.</p>' +
+        '<p style="margin:0 0 14px;color:var(--pd-muted);font-size:12.5px;">' +
+          'An administrator grants your access after that first sign-in, so you may ' +
+          'see an &ldquo;awaiting approval&rdquo; screen until they do.</p>' +
+        '<a class="pd-btn pd-btn-primary" href="index.html" ' +
+          'style="width:100%;justify-content:center;">Go to sign in</a>';
+      form.parentNode.replaceChild(note, form);
+    });
+  </script>
+</body>
+</html>

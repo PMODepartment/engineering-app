@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/img/icon.png" />
+  <script src="assets/js/theme.js?v=20260726d"></script>
+  <title>Sign in · Engineering App</title>
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260806b" />
+</head>
+<body>
+  <div class="pd-auth-wrap">
+    <div class="pd-auth-card">
+      <div class="pd-auth-logo">
+        <img class="pd-auth-mark" src="assets/img/favicon.png" alt="Megawide">
+        <div class="pd-brand">Engineering App</div>
+        <small>Megawide Construction Corporation</small>
+      </div>
+      <div class="pd-card">
+        <form id="login-form">
+          <div class="pd-field">
+            <label for="email">Email</label>
+            <input class="pd-input" type="email" id="email" required autocomplete="email" />
+          </div>
+          <div class="pd-field">
+            <label for="password">Password</label>
+            <input class="pd-input" type="password" id="password" required autocomplete="current-password" />
+          </div>
+          <button class="pd-btn pd-btn-primary" type="submit" style="width:100%;justify-content:center;">Sign in</button>
+          <p id="msg" style="color:var(--pd-bad);font-size:13px;margin:12px 0 0;"></p>
+        </form>
+        <p style="text-align:center;margin:14px 0 0;font-size:13px;">
+          <a href="forgot-password.html">Forgot password?</a>
+        </p>
+        <p style="text-align:center;margin:8px 0 0;font-size:13px;color:var(--pd-muted);">
+          No account? <a href="register.html">Request access</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="assets/js/config.js?v=20260724a"></script>
+  <script src="assets/js/auth.js?v=20260724a"></script>
+  <script src="assets/js/db.js?v=20260724a"></script>
+  <script>
+    // If already signed in, skip straight to the project selector.
+    AppAuth.getSB().auth.getSession().then(function (r) {
+      if (r.data.session) location.href = 'projects.html';
+    });
+
+    document.getElementById('login-form').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var msg = document.getElementById('msg');
+      msg.textContent = '';
+      var email = document.getElementById('email').value.trim();
+      var pw = document.getElementById('password').value;
+      var { data, error } = await AppAuth.login(email, pw);
+      if (error) { msg.textContent = error.message; return; }
+      if (data && data.user) { try { PDb.updateLastLogin(data.user.id); } catch (e) {} }
+      location.href = 'projects.html';
+    });
+  </script>
+</body>
+</html>

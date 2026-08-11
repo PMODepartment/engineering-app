@@ -1,0 +1,29 @@
+# Local QA harnesses. Both modules' CLAUDE.md files describe the convention:
+# a throwaway _ui_test.html / _qa_*.html that measures the real stylesheet in
+# sized iframes. Never commit one.
+_ui_test.html
+_qa_*.html
+*_test.html
+
+# Node — only ever used ad hoc for migrations/migrate-data.mjs and test harnesses.
+# This app itself has NO build step and no package.json by design.
+node_modules/
+package-lock.json
+
+# Secrets. migrate-data.mjs takes service_role keys from the environment; never
+# from a file in the repo.
+.env
+.env.*
+*.key
+
+# OneDrive / Windows / editor noise
+.fuse_hidden*
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Local Supabase CLI state
+supabase/.temp/

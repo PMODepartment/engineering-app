@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/img/icon.png" />
+  <script src="assets/js/theme.js?v=20260726d"></script>
+  <title>Activity &amp; Notifications — Engineering App</title>
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260806b" />
+  <link rel="stylesheet" href="assets/css/engineering.css?v=20260811a" />
+</head>
+<body>
+  <div class="pd-app">
+    <aside class="pd-sidebar" id="nav"></aside>
+
+    <div class="pd-content">
+      <div class="pd-topbar">
+        <img class="pd-topbar-mark" src="assets/img/favicon.png" alt="Megawide" />
+        <h1>Activity</h1>
+        <div id="user-bar"></div>
+      </div>
+
+      <div class="pd-main">
+        <div class="eng-dash-head">
+          <h2>Engineering activity trail</h2>
+          <p>Every create, change and deletion recorded against engineering documents,
+             with the previous and new value. This is the audit record — entries cannot
+             be edited or removed by anyone, including administrators.</p>
+        </div>
+
+        <div class="eng-filters">
+          <select class="pd-select" id="f-module">
+            <option value="">All modules</option>
+            <option value="drawing_register">Drawing Register</option>
+            <option value="material_submittal">Material Submittal Log</option>
+          </select>
+          <select class="pd-select" id="f-action">
+            <option value="">All actions</option>
+            <option value="INSERT">Created</option>
+            <option value="UPDATE">Updated</option>
+            <option value="DELETE">Deleted</option>
+          </select>
+          <select class="pd-select" id="f-scope">
+            <option value="project">This project only</option>
+            <option value="all">All my projects</option>
+          </select>
+          <input class="pd-input" id="f-q" placeholder="Search record or user…" />
+          <button class="pd-btn" id="f-reset" type="button">Reset</button>
+          <span class="eng-bar-n" id="f-count" style="margin-left:auto;"></span>
+        </div>
+
+        <div class="pd-card" style="padding:14px;"><div id="feed"></div></div>
+
+        <div style="text-align:center;margin:14px 0;">
+          <button class="pd-btn" id="more" type="button" style="display:none;">Load more</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="assets/js/config.js?v=20260811a"></script>
+  <script src="assets/js/auth.js?v=20260724a"></script>
+  <script src="assets/js/db.js?v=20260724a"></script>
+  <script src="assets/js/ui.js?v=20260724a"></script>
+  <script src="assets/js/icons.js?v=20260811a"></script>
+  <script src="assets/js/perm.js?v=20260811a"></script>
+  <script src="assets/js/nav.js?v=20260811a"></script>
+  <script src="assets/js/engdata.js?v=20260811a"></script>
+  <script>
+  (function () {
+    var PAGE = 40;
+    var pid = sessionStorage.getItem('pd_project');
+    var rows = [], offset = 0, exhausted = false, profile = null;
+
+    AppAuth.requireLogin(function (user, prof) {
+      profile = prof;
+      UI.renderUserBar(prof);
+      Nav.render(prof, 'notifications');
+      if (window.Icons) Icons.hydrate(document.body);
+      ['f-module', 'f-action', 'f-scope'].forEach(function (id) {
+        document.getElementById(id).onchange = reload;
+      });
+      document.getElementById('f-q').oninput = debounce(render, 200);
+      document.getElementById('f-reset').onclick = function () {
+        ['f-module', 'f-action'].forEach(function (id) { document.getElementById(id).value = ''; });
+        document.getElementById('f-scope').value = 'project';
+        document.getElementById('f-q').value = '';
+        reload();
+      };
+      document.getElementById('more').onclick = function () { load(); };
+      reload();
+    });
+
+    function debounce(fn, ms) {
+      var t; return function () { clearTimeout(t); t = setTimeout(fn, ms); };
+    }
+
+    function reload() { rows = []; offset = 0; exhausted = false; load(); }
+
+    // Filtering is server-side (module / action / project scope + paging) so a
+    // large trail never has to be pulled down in full. Only the free-text box
+    // filters client-side, over what is already loaded.
+    async function load() {
+      var feed = document.getElementById('feed');
+      if (!rows.length) feed.innerHTML = '<div class="eng-empty">Loading…</div>';
+      var mod = document.getElementById('f-module').value;
+      var act = document.getElementById('f-action').value;
+      var scope = document.getElementById('f-scope').value;
+
+      var q = AppAuth.getSB().from('engineering_activity')
+        .select('id,at,table_name,record_id,project_id,action,actor,record_label,summary,changed_fields')
+        .order('at', { ascending: false })
+        .range(offset, offset + PAGE - 1);
+      if (mod) q = q.eq('table_name', mod);
+      if (act) q = q.eq('action', act);
+      if (scope === 'project' && pid) q = q.eq('project_id', pid);
+
+      var res = await q;
+      if (res.error) {
+        // engineering_activity ships in migration 0002. Be explicit rather than
+        // rendering an empty page that looks like "no activity".
+        feed.innerHTML = '<div class="eng-err">Could not read the activity trail: ' +
+          Fmt.esc(res.error.message) +
+          '<br><small>If this mentions a missing relation, run ' +
+          'migrations/0002-engineering-audit-and-approval.sql on the Supabase project.</small></div>';
+        document.getElementById('more').style.display = 'none';
+        return;
+      }
+      var batch = res.data || [];
+      rows = rows.concat(batch);
+      offset += batch.length;
+      exhausted = batch.length < PAGE;
+      render();
+    }
+
+    function render() {
+      var term = document.getElementById('f-q').value.trim().toLowerCase();
+      var view = term ? rows.filter(function (r) {
+        return (r.record_label || '').toLowerCase().indexOf(term) !== -1 ||
+               (r.actor || '').toLowerCase().indexOf(term) !== -1 ||
+               (r.summary || '').toLowerCase().indexOf(term) !== -1;
+      }) : rows;
+
+      document.getElementById('feed').innerHTML = view.length
+        ? '<div class="eng-feed">' + view.map(EngData.activityRowHTML).join('') + '</div>'
+        : '<div class="eng-empty">' +
+          (rows.length ? 'No entries match this search.'
+                       : 'No activity recorded yet. Changes are logged from the moment ' +
+                         'migration 0002 is applied.') + '</div>';
+
+      document.getElementById('f-count').textContent =
+        view.length + (term ? ' of ' + rows.length : '') + ' entr' + (view.length === 1 ? 'y' : 'ies');
+      document.getElementById('more').style.display = exhausted ? 'none' : '';
+      if (window.Icons) Icons.hydrate(document.getElementById('feed'));
+    }
+  })();
+  </script>
+</body>
+</html>

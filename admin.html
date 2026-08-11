@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/img/icon.png" />
+  <script src="assets/js/theme.js?v=20260726d"></script>
+  <title>Admin · Engineering App</title>
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260806b" />
+  <style>
+    .pd-tabs { display:flex; gap:4px; border-bottom:1px solid var(--pd-line); margin-bottom:18px; }
+    .pd-tab { padding:10px 16px; cursor:pointer; border-bottom:2px solid transparent; color:var(--pd-muted); font-weight:600; }
+    .pd-tab.active { color:var(--pd-red); border-bottom-color:var(--pd-red); }
+    .pd-tabpane { display:none; } .pd-tabpane.active { display:block; }
+    .pd-chip { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; background:var(--pd-bg); margin:2px 3px 2px 0; }
+    .pd-status-pending { color:var(--pd-warn); font-weight:600; }
+    .pd-status-approved { color:var(--pd-ok); font-weight:600; }
+    .pd-status-rejected { color:var(--pd-bad); font-weight:600; }
+  </style>
+</head>
+<body>
+  <div class="pd-app">
+    <aside class="pd-sidebar" id="nav"></aside>
+    <div class="pd-content">
+      <div class="pd-topbar"><h1>Admin</h1><div id="user-bar"></div></div>
+      <div class="pd-main">
+        <div class="pd-tabs">
+          <div class="pd-tab active" data-tab="users">Users</div>
+          <div class="pd-tab" data-tab="projects">Projects</div>
+        </div>
+
+        <div class="pd-tabpane active" id="pane-users">
+          <div class="pd-card" style="padding:0;overflow:auto;">
+            <table class="pd-table" id="users-table"></table>
+          </div>
+        </div>
+
+        <div class="pd-tabpane" id="pane-projects">
+          <div style="margin-bottom:14px;"><button class="pd-btn pd-btn-primary" id="btn-add-project">+ New project</button></div>
+          <div class="pd-card" style="padding:0;overflow:auto;">
+            <table class="pd-table" id="projects-table"></table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="assets/js/config.js?v=20260724a"></script>
+  <script src="assets/js/auth.js?v=20260724a"></script>
+  <script src="assets/js/db.js?v=20260724a"></script>
+  <script src="assets/js/ui.js?v=20260724a"></script>
+  <script src="assets/js/icons.js?v=20260811a"></script>
+  <script src="assets/js/perm.js?v=20260811a"></script>
+  <script src="assets/js/nav.js?v=20260811a"></script>
+  <script>
+    var ME = null, ALL_PROJECTS = [];
+
+    AppAuth.requireAdmin(function (user, profile) {
+      ME = profile;
+      UI.renderUserBar(profile);
+      Nav.render(profile, 'admin');
+      wireTabs();
+      loadUsers();
+      loadProjects();
+    });
+
+    function wireTabs() {
+      document.querySelectorAll('.pd-tab').forEach(function (t) {
+        t.onclick = function () {
+          document.querySelectorAll('.pd-tab').forEach(function (x){ x.classList.remove('active'); });
+          document.querySelectorAll('.pd-tabpane').forEach(function (x){ x.classList.remove('active'); });
+          t.classList.add('active');
+          document.getElementById('pane-' + t.dataset.tab).classList.add('active');
+        };
+      });
+      document.getElementById('btn-add-project').onclick = function () { editProject(null); };
+    }
+
+    // -------- Users --------
+    async function loadUsers() {
+      var users = await PDb.getAllUsers();
+      ALL_PROJECTS = await PDb.getProjects();
+      var t = document.getElementById('users-table');
+      t.innerHTML = '<thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Projects</th><th>Actions</th></tr></thead><tbody>' +
+        users.map(function (u) {
+          var canSuper = ME.role === 'super_admin';
+          var roleOpts = AppAuth.ROLES
+            .filter(function (r){ return r !== 'super_admin' || canSuper; })
+            .map(function (r){ return '<option value="'+r+'"'+(u.role===r?' selected':'')+'>'+r+'</option>'; }).join('');
+          var projChips = (u.projects||[]).map(function(p){ return '<span class="pd-chip">'+Fmt.esc(p)+'</span>'; }).join('') || '<span style="color:var(--pd-muted);">—</span>';
+          return '<tr>' +
+            '<td>'+Fmt.esc(u.name)+'</td>' +
+            '<td>'+Fmt.esc(u.email)+'</td>' +
+            '<td><select class="pd-select" style="min-width:130px;" data-role="'+u.id+'">'+roleOpts+'</select></td>' +
+            '<td class="pd-status-'+u.status+'">'+u.status+'</td>' +
+            '<td>'+projChips+'</td>' +
+            '<td style="white-space:nowrap;">' +
+              (u.status!=='approved' ? '<button class="pd-btn pd-btn-primary" data-approve="'+u.id+'">Approve</button> ' : '') +
+              (u.status!=='rejected' ? '<button class="pd-btn" data-reject="'+u.id+'">Reject</button> ' : '') +
+              '<button class="pd-btn" data-projects="'+u.id+'">Projects</button>' +
+              (u.id!==ME.id ? ' <button class="pd-btn pd-btn-danger" data-del="'+u.id+'">Delete</button>' : '') +
+            '</td>' +
+          '</tr>';
+        }).join('') + '</tbody>';
+
+      t.querySelectorAll('[data-role]').forEach(function(s){ s.onchange = function(){ setUser(s.dataset.role, { role: s.value }); }; });
+      t.querySelectorAll('[data-approve]').forEach(function(b){ b.onclick = function(){ setUser(b.dataset.approve, { status:'approved' }); }; });
+      t.querySelectorAll('[data-reject]').forEach(function(b){ b.onclick = function(){ setUser(b.dataset.reject, { status:'rejected' }); }; });
+      t.querySelectorAll('[data-projects]').forEach(function(b){ b.onclick = function(){ assignProjects(users.find(function(x){return x.id===b.dataset.projects;})); }; });
+      t.querySelectorAll('[data-del]').forEach(function(b){ b.onclick = function(){ deleteUser(users.find(function(x){return x.id===b.dataset.del;})); }; });
+    }
+
+    function deleteUser(u) {
+      var m = UI.modal(
+        '<h2 style="margin-top:0;">Delete user</h2>' +
+        '<p>Permanently delete <strong>'+Fmt.esc(u.name||u.email)+'</strong> ('+Fmt.esc(u.email)+')?</p>' +
+        '<p style="color:var(--pd-muted);font-size:13px;">This removes their account completely. Their email is freed, so they can <strong>Request Access again</strong> in the future. Records they created are kept (their authorship is cleared). This cannot be undone.</p>' +
+        '<div style="margin-top:16px;text-align:right;"><button class="pd-btn" id="du-cancel">Cancel</button> ' +
+        '<button class="pd-btn pd-btn-danger" id="du-confirm">Delete permanently</button></div>');
+      m.el.querySelector('#du-cancel').onclick = m.close;
+      m.el.querySelector('#du-confirm').onclick = async function () {
+        var btn = m.el.querySelector('#du-confirm'); btn.disabled = true; btn.textContent = 'Deleting…';
+        try { await PDb.deleteUser(u.id); UI.toast('User deleted','ok'); m.close(); loadUsers(); }
+        catch (e) { UI.toast(e.message,'error'); btn.disabled = false; btn.textContent = 'Delete permanently'; }
+      };
+    }
+
+    async function setUser(id, patch) {
+      try { await PDb.updateUser(id, patch); UI.toast('Saved','ok'); loadUsers(); }
+      catch (e) { UI.toast(e.message,'error'); }
+    }
+
+    function assignProjects(u) {
+      var checks = ALL_PROJECTS.map(function(p){
+        var on = (u.projects||[]).indexOf(p.id) !== -1;
+        return '<label style="display:block;padding:5px 0;"><input type="checkbox" value="'+p.id+'"'+(on?' checked':'')+'> '+Fmt.esc(p.name)+' <span style="color:var(--pd-muted);">('+p.id+')</span></label>';
+      }).join('') || '<p style="color:var(--pd-muted);">No projects yet — create one in the Projects tab.</p>';
+      var m = UI.modal(
+        '<h2 style="margin-top:0;">Assign projects — '+Fmt.esc(u.name)+'</h2>' +
+        '<div style="max-height:50vh;overflow:auto;">'+checks+'</div>' +
+        '<div style="margin-top:16px;text-align:right;"><button class="pd-btn" id="ap-cancel">Cancel</button> ' +
+        '<button class="pd-btn pd-btn-primary" id="ap-save">Save</button></div>');
+      m.el.querySelector('#ap-cancel').onclick = m.close;
+      m.el.querySelector('#ap-save').onclick = async function () {
+        var ids = Array.prototype.slice.call(m.el.querySelectorAll('input:checked')).map(function(c){return c.value;});
+        try { await PDb.updateUser(u.id, { projects: ids }); UI.toast('Projects updated','ok'); m.close(); loadUsers(); }
+        catch (e) { UI.toast(e.message,'error'); }
+      };
+    }
+
+    // -------- Projects --------
+    async function loadProjects() {
+      var ps = await PDb.getProjects();
+      var t = document.getElementById('projects-table');
+      t.innerHTML = '<thead><tr><th>ID</th><th>Name</th><th>Location</th><th>Status</th><th>Dates</th><th></th></tr></thead><tbody>' +
+        (ps.length ? ps.map(function(p){
+          return '<tr>' +
+            '<td><strong>'+Fmt.esc(p.id)+'</strong></td>' +
+            '<td>'+Fmt.esc(p.name)+'</td>' +
+            '<td>'+Fmt.esc(p.location)+'</td>' +
+            '<td>'+Fmt.esc(p.status)+'</td>' +
+            '<td>'+Fmt.date(p.start_date)+' – '+Fmt.date(p.end_date)+'</td>' +
+            '<td><button class="pd-btn" data-edit="'+p.id+'">Edit</button></td>' +
+          '</tr>';
+        }).join('') : '<tr><td style="padding:24px;color:var(--pd-muted);">No projects yet.</td></tr>') + '</tbody>';
+      t.querySelectorAll('[data-edit]').forEach(function(b){ b.onclick = function(){ editProject(ps.find(function(x){return x.id===b.dataset.edit;})); }; });
+    }
+
+    // Hard delete, no undo — the id must be typed to arm the button. The DB
+    // refuses a project that still has module data and names what's blocking.
+    function confirmDeleteProject(p, parent) {
+      var m = UI.modal(
+        '<h2 style="margin-top:0;">Delete project '+Fmt.esc(p.id)+'?</h2>' +
+        '<p style="color:var(--pd-muted);">This cannot be undone. It only works if the project has ' +
+        '<b>no module data at all</b> — if any schedule, risk, cash-flow or other record exists the ' +
+        'delete is refused, and you should <b>Archive</b> instead (keeps the history).</p>' +
+        '<div class="pd-field"><label>Type <b>'+Fmt.esc(p.id)+'</b> to confirm</label>' +
+        '<input class="pd-input" id="d-echo" autocomplete="off"></div>' +
+        '<div style="margin-top:8px;text-align:right;"><button class="pd-btn" id="d-cancel">Cancel</button> ' +
+        '<button class="pd-btn pd-btn-danger" id="d-go" disabled>Delete permanently</button></div>');
+      var echo = m.el.querySelector('#d-echo'), go = m.el.querySelector('#d-go');
+      echo.oninput = function () { go.disabled = echo.value.trim() !== p.id; };
+      m.el.querySelector('#d-cancel').onclick = m.close;
+      go.onclick = async function () {
+        go.disabled = true;
+        try {
+          await PDb.deleteProject(p.id);
+          UI.toast('Project deleted','ok'); m.close(); parent.close(); loadProjects();
+        } catch (e) { UI.toast(e.message,'error'); go.disabled = false; }
+      };
+      echo.focus();
+    }
+
+    function editProject(p) {
+      var isNew = !p; p = p || {};
+      var m = UI.modal(
+        '<h2 style="margin-top:0;">'+(isNew?'New project':'Edit project')+'</h2>' +
+        '<div class="pd-field"><label>Project ID '+(isNew?'(e.g. AVR101)':'')+'</label><input class="pd-input" id="p-id" value="'+Fmt.esc(p.id)+'"'+(isNew?'':' disabled')+'></div>' +
+        '<div class="pd-field"><label>Name</label><input class="pd-input" id="p-name" value="'+Fmt.esc(p.name)+'"></div>' +
+        '<div class="pd-field"><label>Location</label><input class="pd-input" id="p-loc" value="'+Fmt.esc(p.location)+'"></div>' +
+        '<div class="pd-field"><label>Status</label><select class="pd-select" id="p-status">' +
+          ['active','archived'].map(function(s){return '<option'+(p.status===s?' selected':'')+'>'+s+'</option>';}).join('') + '</select></div>' +
+        '<div style="display:flex;gap:10px;"><div class="pd-field" style="flex:1;"><label>Start</label><input class="pd-input" type="date" id="p-start" value="'+(p.start_date||'')+'"></div>' +
+        '<div class="pd-field" style="flex:1;"><label>End</label><input class="pd-input" type="date" id="p-end" value="'+(p.end_date||'')+'"></div></div>' +
+        // Page is requireAdmin-gated, so no extra role check on these.
+        '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;">' +
+        (isNew ? '<div style="flex:1;"></div>' :
+          '<button class="pd-btn" id="p-arch">'+(p.status==='archived'?'Restore':'Archive')+'</button>' +
+          '<button class="pd-btn pd-btn-danger" id="p-del">Delete…</button><div style="flex:1;"></div>') +
+        '<button class="pd-btn" id="p-cancel">Cancel</button> ' +
+        '<button class="pd-btn pd-btn-primary" id="p-save">Save</button></div>');
+      m.el.querySelector('#p-cancel').onclick = m.close;
+      if (!isNew) {
+        m.el.querySelector('#p-arch').onclick = async function () {
+          var toArchive = p.status !== 'archived';
+          try {
+            await PDb.archiveProject(p.id, toArchive);
+            UI.toast(toArchive ? 'Project archived' : 'Project restored','ok');
+            m.close(); loadProjects();
+          } catch (e) { UI.toast(e.message,'error'); }
+        };
+        m.el.querySelector('#p-del').onclick = function () { confirmDeleteProject(p, m); };
+      }
+      m.el.querySelector('#p-save').onclick = async function () {
+        var data = {
+          name: m.el.querySelector('#p-name').value.trim(),
+          location: m.el.querySelector('#p-loc').value.trim(),
+          status: m.el.querySelector('#p-status').value,
+          start_date: m.el.querySelector('#p-start').value || null,
+          end_date: m.el.querySelector('#p-end').value || null,
+        };
+        try {
+          if (isNew) {
+            var id = m.el.querySelector('#p-id').value.trim();
+            if (!id) { UI.toast('Project ID required','warn'); return; }
+            data.id = id; await PDb.createProject(data);
+          } else { await PDb.updateProject(p.id, data); }
+          UI.toast('Saved','ok'); m.close(); loadProjects();
+        } catch (e) { UI.toast(e.message,'error'); }
+      };
+    }
+  </script>
+</body>
+</html>

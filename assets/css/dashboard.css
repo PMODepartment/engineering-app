@@ -1,0 +1,905 @@
+/* ==========================================================================
+   Planners Dashboard — Global styles & design tokens
+   Aligned to the Megawide Brand Guidelines (Brandbook 2026):
+     Megawide Red #EE3124 · Dark Red #C42127 · Dark Gray #2B2C2B ·
+     Construction Gray #DCDBDB · Black #231F20 · White #FFFFFF
+     Typeface: Gotham (primary) → Montserrat web fallback.
+   Use the CSS variables below instead of hard-coded colors so the whole
+   dashboard stays on-brand and consistent.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+
+:root {
+  /* Brand palette */
+  --pd-red: #EE3124;          /* Megawide Red (primary) */
+  --pd-red-dark: #C42127;     /* Dark Red */
+  --pd-red-light: #FDECEA;    /* red tint — icon tiles, soft backgrounds */
+  --pd-red-mid: #F4A9A2;      /* red border tint — hover */
+  --pd-dark: #2B2C2B;         /* Dark Gray — dark surfaces (sidebar/topbar dark) */
+  --pd-ink: #231F20;          /* Black — primary text */
+  --pd-muted: #5A5858;        /* secondary text */
+  --pd-line: #DCDBDB;         /* Construction Gray — borders/dividers */
+  --pd-bg: #F4F4F4;           /* app background */
+  --pd-card: #FFFFFF;         /* White — surfaces */
+  /* Status (kept distinct from brand red so "error" ≠ "brand") */
+  --pd-ok: #1f8f4e;
+  --pd-warn: #C77700;
+  --pd-bad: #C42127;
+  /* Type + shape */
+  --pd-font: 'Gotham', 'Montserrat', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --pd-radius: 4px;
+  --pd-shadow: 0 1px 3px rgba(35,31,32,.08), 0 1px 2px rgba(35,31,32,.04);
+  --pd-sidebar-w: 240px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--pd-font);
+  background: var(--pd-bg);
+  color: var(--pd-ink);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--pd-red); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---- Layout: sidebar + content ---- */
+.pd-app { display: flex; min-height: 100vh; }
+.pd-sidebar {
+  width: var(--pd-sidebar-w); flex: 0 0 var(--pd-sidebar-w);
+  background: var(--pd-dark); color: #fff; padding: 18px 16px;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  transition: width .2s ease, flex-basis .2s ease, padding .2s ease;
+}
+/* Brand block: white Megawide wordmark filling the width + red app label,
+   with a divider beneath — matches the PRC-App sidebar header. */
+.pd-sidebar .pd-brand {
+  font-size: 0;                                  /* hides the inline text node beside the logo */
+  display: block; margin: -4px -4px 14px; padding: 4px 4px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.09);
+}
+.pd-brand-logo {
+  display: block; width: 100%; max-width: 188px; height: auto;
+  margin: 0 0 9px; object-fit: contain; object-position: left center;
+}
+.pd-sidebar .pd-brand small {
+  display: block; font-size: 9px; font-weight: 700; letter-spacing: .14em;
+  color: var(--pd-red); text-transform: uppercase; opacity: 1;
+}
+.pd-sidebar nav { margin-top: 18px; display: flex; flex-direction: column; gap: 2px; }
+.pd-sidebar nav a {
+  color: #cbd2dd; padding: 10px 12px; border-radius: 8px; font-size: 13.5px;
+  display: flex; align-items: center; gap: 10px; white-space: nowrap;
+}
+.pd-sidebar nav a:hover { background: rgba(255,255,255,.08); color: #fff; text-decoration: none; }
+.pd-sidebar nav a.active { background: var(--pd-red); color: #fff; }
+.pd-content { flex: 1; min-width: 0; }
+/* Section labels grouping the nav by scope (Portfolio / Project / System) */
+.pd-sidebar .pd-navsec {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: #7c8698; padding: 15px 12px 5px;
+}
+.pd-sidebar nav .pd-navsec:first-child { padding-top: 2px; }
+/* Stacked label + optional sub-caption (e.g. current project under Project Home) */
+.pd-sidebar .pd-navtxt { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.pd-sidebar .pd-nav-sub { font-size: 10.5px; font-weight: 400; color: #96a0b0; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+.pd-sidebar nav a.active .pd-nav-sub { color: rgba(255,255,255,.82); }
+
+/* Collapsible sidebar (desktop): the toggle adds .pd-collapsed on .pd-app, which
+   shrinks the sidebar to a slim ICON RAIL (labels/sections hide; hover title = tooltip)
+   instead of hiding it entirely. font-size:0 collapses the bare-text labels while the
+   fixed-size SVG icons stay, so it works whether or not a label is wrapped in a span. */
+.pd-app.pd-collapsed .pd-sidebar { width: 64px; flex-basis: 64px; padding-left: 8px; padding-right: 8px; }
+.pd-app.pd-collapsed .pd-sidebar nav a { justify-content: center; padding: 11px 0; gap: 0; font-size: 0; }
+.pd-app.pd-collapsed .pd-navtxt { display: none; }   /* wrapped labels (with sub-captions whose own font-size ignores the font-size:0 trick) */
+.pd-app.pd-collapsed .pd-navico { margin-right: 0; }
+.pd-app.pd-collapsed .pd-navsec { display: none; }
+.pd-app.pd-collapsed .pd-brand-logo, .pd-app.pd-collapsed .pd-brand small { display: none; }
+.pd-app.pd-collapsed .pd-brand { margin-bottom: 8px; padding-bottom: 8px; }
+.pd-sidebar-toggle {
+  display: inline-flex; flex-direction: column; justify-content: center; gap: 4px;
+  width: 40px; height: 40px; padding: 0 10px; flex: 0 0 40px;
+  border: 1px solid var(--pd-line); border-radius: 9px; background: var(--pd-card); cursor: pointer;
+}
+.pd-sidebar-toggle span { display: block; height: 2px; background: var(--pd-ink); border-radius: 2px; transition: .15s; }
+.pd-sidebar-toggle:hover { background: var(--pd-bg); }
+.pd-sidebar-toggle:hover span { background: var(--pd-red); }
+
+/* ---- Top bar ---- */
+.pd-topbar {
+  background: var(--pd-card); border-bottom: 1px solid var(--pd-line);
+  padding: 12px 22px; display: flex; align-items: center; gap: 14px;
+  position: sticky; top: 0; z-index: 20;
+}
+.pd-topbar h1 { font-size: 18px; margin: 0; font-weight: 800; letter-spacing: -.01em; }
+.pd-topbar-mark { height: 30px; width: auto; display: block; }
+#user-bar { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.pd-userbar-name { font-weight: 600; }
+.pd-userbar-role {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  background: var(--pd-bg); color: var(--pd-muted); padding: 2px 8px; border-radius: 999px;
+}
+.pd-userbar-logout {
+  border: 1px solid var(--pd-line); background: var(--pd-card); color: var(--pd-ink);
+  padding: 5px 12px; border-radius: 8px; cursor: pointer; font-size: 13px;
+}
+.pd-userbar-logout:hover { background: var(--pd-bg); }
+
+/* Avatar + account dropdown (top-right) */
+.pd-user { position: relative; }
+.pd-avatar {
+  width: 36px; height: 36px; border-radius: 50%; background: var(--pd-red); color: #fff;
+  border: none; cursor: pointer; font-size: 13px; font-weight: 700; font-family: inherit;
+  display: flex; align-items: center; justify-content: center;
+}
+.pd-avatar:hover { background: var(--pd-red-dark); }
+.pd-usermenu {
+  display: none; position: absolute; right: 0; top: 46px; width: 224px; z-index: 9999;
+  background: var(--pd-card); border: 1px solid var(--pd-line); border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.18); overflow: hidden;
+}
+.pd-usermenu.open { display: block; }
+.pd-usermenu-head { padding: 14px 16px; border-bottom: 1px solid var(--pd-line); }
+.pd-usermenu-name { font-size: 13px; font-weight: 600; color: var(--pd-ink); }
+.pd-usermenu-role { font-size: 11px; color: var(--pd-muted); margin-top: 2px; text-transform: capitalize; }
+.pd-usermenu-signout {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 16px;
+  font-size: 13px; font-weight: 600; font-family: inherit; color: var(--pd-red);
+  background: none; border: none; cursor: pointer; text-align: left;
+}
+.pd-usermenu-signout:hover { background: var(--pd-bg); }
+.pd-main { padding: 22px; }
+
+/* ---- Cards ---- */
+.pd-card { background: var(--pd-card); border: 1px solid var(--pd-line);
+  border-radius: var(--pd-radius); box-shadow: var(--pd-shadow); padding: 18px; }
+
+/* ---- Home / module launcher ---- */
+.pd-home-head { margin: 4px 0 22px; }
+.pd-home-head h2 { margin: 0 0 4px; font-size: 22px; font-weight: 800; letter-spacing: -.01em; }
+.pd-home-head p { margin: 0; color: var(--pd-muted); }
+
+/* Big, evenly distributed tiles. 4 across on wide screens → 7 cards = 4 + 3. */
+.pd-module-grid {
+  display: grid; gap: 20px;
+  grid-template-columns: repeat(4, 1fr);
+}
+@media (max-width: 1280px) { .pd-module-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 900px)  { .pd-module-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px)  { .pd-module-grid { grid-template-columns: 1fr; } }
+
+.pd-module-card {
+  position: relative; background: var(--pd-card); border: 1px solid var(--pd-line);
+  border-radius: 14px; box-shadow: var(--pd-shadow); padding: 24px 22px;
+  display: flex; flex-direction: column; gap: 14px; min-height: 168px;
+  transition: transform .1s ease, box-shadow .15s ease, border-color .15s ease; cursor: pointer;
+  overflow: hidden;
+}
+.pd-module-card::before {   /* brand red accent strip on the left */
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+  background: var(--pd-red); opacity: 0; transition: opacity .15s ease;
+}
+.pd-module-card:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(35,31,32,.12);
+  border-color: var(--pd-red-mid); text-decoration: none; }
+.pd-module-card:hover::before { opacity: 1; }
+.pd-module-card.disabled { cursor: not-allowed; background: var(--pd-bg); }
+.pd-module-card.disabled:hover { transform: none; box-shadow: var(--pd-shadow); border-color: var(--pd-line); }
+.pd-module-card.disabled:hover::before { opacity: 0; }
+.pd-module-card.disabled .pd-module-icon { filter: grayscale(1); opacity: .6; }
+.pd-module-card.disabled .pd-module-title { color: var(--pd-muted); }
+
+.pd-module-icon {
+  width: 56px; height: 56px; border-radius: 14px; background: var(--pd-red-light);
+  display: flex; align-items: center; justify-content: center; font-size: 28px; line-height: 1;
+}
+.pd-module-body { margin-top: auto; }
+.pd-module-title { font-weight: 700; font-size: 16px; color: var(--pd-ink); margin-bottom: 4px; line-height: 1.25; }
+.pd-module-sub { color: var(--pd-red); font-size: 13px; font-weight: 600; }
+.pd-module-card.disabled .pd-module-sub { color: var(--pd-muted); font-weight: 500; }
+.pd-badge-soon {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+  background: var(--pd-bg); color: var(--pd-muted); padding: 3px 9px; border-radius: 999px;
+}
+
+/* ---- Buttons ---- */
+.pd-btn { display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  border: 1px solid var(--pd-line); background: var(--pd-card); color: var(--pd-ink);
+  padding: 9px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; }
+.pd-btn:hover { background: var(--pd-bg); text-decoration: none; }
+.pd-btn-primary { background: var(--pd-red); border-color: var(--pd-red); color: #fff; }
+.pd-btn-primary:hover { background: var(--pd-red-dark); }
+.pd-btn-danger { background: transparent; border-color: var(--pd-bad); color: var(--pd-bad); }
+.pd-btn-danger:hover { background: var(--pd-bad); border-color: var(--pd-bad); color: #fff; }
+
+/* ---- Forms ---- */
+.pd-field { margin-bottom: 14px; }
+.pd-field label { display: block; font-size: 12px; font-weight: 600; color: var(--pd-muted); margin-bottom: 5px; }
+.pd-input, .pd-select, .pd-textarea {
+  width: 100%; padding: 9px 11px; border: 1px solid var(--pd-line); border-radius: 8px;
+  font-size: 14px; font-family: inherit; background: var(--pd-card); color: var(--pd-ink);
+}
+.pd-input:focus, .pd-select:focus, .pd-textarea:focus { outline: 2px solid var(--pd-red); outline-offset: -1px; }
+
+/* ---- Project selector (UI.enhanceProjectSelect) ----
+   Shared across every module: the Project-Schedule-style OPC folder browser —
+   drill Workspace → Program → Group one level at a time (scales to 100s of
+   projects), with a breadcrumb and a search box that flattens across the tree.
+   The trigger button copies the native <select>'s classes/inline style, so a
+   module's per-topbar look (borderless, max-width) carries over unchanged. */
+.pd-psel { position: relative; display: inline-flex; vertical-align: middle; }
+.pd-psel-native { display: none !important; }
+.pd-psel-btn { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; text-align: left; }
+.pd-psel-btn .pd-psel-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-psel-txt.pd-psel-ph { color: var(--pd-muted); }
+.pd-psel-caret { flex: none; color: var(--pd-muted); }
+.pd-psel-pop {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 1000;
+  min-width: 320px; max-width: 460px; max-height: 72vh; overflow: auto;
+  background: var(--pd-card); border: 1px solid var(--pd-line); border-radius: var(--pd-radius);
+  box-shadow: 0 10px 28px rgba(0,0,0,.16); padding: 0;
+}
+/* Folder-browser internals (ported from Project Schedule's .ps-pss-*) */
+.pd-pss-search { position: sticky; top: 0; background: var(--pd-card); padding: 8px; border-bottom: 1px solid var(--pd-line); z-index: 1; }
+.pd-pss-search input { width: 100%; box-sizing: border-box; padding: 6px 9px; border: 1px solid var(--pd-line); border-radius: 6px; font: inherit; background: var(--pd-bg); color: var(--pd-ink); }
+.pd-pss-search input:focus { outline: 2px solid var(--pd-red); outline-offset: -1px; }
+.pd-pss-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-top: 8px; font-size: 11.5px; }
+.pd-pss-crumb { cursor: pointer; color: var(--pd-muted); padding: 2px 5px; border-radius: 5px; white-space: nowrap; }
+.pd-pss-crumb:hover { background: var(--pd-bg); color: var(--pd-ink); }
+.pd-pss-crumb:last-child { color: var(--pd-ink); font-weight: 700; }
+.pd-pss-sep { color: var(--pd-muted); opacity: .6; }
+.pd-pss-tree { padding: 4px 0; }
+.pd-pss-folder { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--pd-ink); border-bottom: 1px solid var(--pd-line); }
+.pd-pss-folder:hover { background: var(--pd-bg); }
+.pd-pss-folder [data-ico], .pd-pss-folder svg { color: var(--pd-red); flex: none; }
+.pd-pss-count { font-size: 11px; font-weight: 700; color: var(--pd-muted); background: var(--pd-bg); border: 1px solid var(--pd-line); border-radius: 999px; padding: 1px 8px; flex: none; }
+.pd-pss-chev { color: var(--pd-muted); font-size: 16px; flex: none; }
+.pd-pss-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pd-pss-badge { font-size: 9px; text-transform: uppercase; letter-spacing: .03em; font-weight: 700; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--pd-line); color: var(--pd-muted); }
+.pd-pss-badge.pd-pss-program { color: #2563EB; border-color: rgba(37,99,235,.35); }
+.pd-pss-badge.pd-pss-group { color: var(--pd-red); border-color: rgba(238,49,36,.35); }
+.pd-pss-proj { display: flex; align-items: center; gap: 7px; padding: 7px 10px; cursor: pointer; font-size: 13px; color: var(--pd-ink); }
+.pd-pss-proj svg { color: var(--pd-muted); flex: none; }
+.pd-pss-proj:hover { background: var(--pd-red-light); }
+.pd-pss-proj.sel { background: var(--pd-red); color: #fff; }
+.pd-pss-proj.sel svg { color: #fff; }
+.pd-pss-empty { padding: 20px 12px; text-align: center; color: var(--pd-muted); font-size: 12.5px; }
+
+/* ---- Tables ---- */
+.pd-table { width: 100%; border-collapse: collapse; background: var(--pd-card); }
+.pd-table th, .pd-table td { padding: 10px 12px; border-bottom: 1px solid var(--pd-line); text-align: left; }
+.pd-table th { background: var(--pd-bg); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--pd-muted); }
+.pd-table tr:hover td { background: var(--pd-bg); }
+
+/* ---- Auth pages ---- */
+.pd-auth-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.pd-auth-card { width: 100%; max-width: 380px; }
+.pd-auth-logo { text-align: center; margin-bottom: 18px; }
+.pd-auth-mark { display: block; height: 56px; width: auto; margin: 0 auto 12px; }
+.pd-auth-logo .pd-brand { font-size: 22px; font-weight: 800; color: var(--pd-red); }
+.pd-auth-logo small { color: var(--pd-muted); }
+
+/* ---- Toast ---- */
+.pd-toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translate(-50%, 20px);
+  background: var(--pd-dark); color: #fff; padding: 11px 18px; border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.2); opacity: 0; transition: all .25s ease; z-index: 1000; font-size: 14px;
+}
+.pd-toast.show { opacity: 1; transform: translate(-50%, 0); }
+.pd-toast-ok { background: var(--pd-ok); }
+.pd-toast-error { background: var(--pd-bad); }
+.pd-toast-warn { background: var(--pd-warn); }
+
+/* ---- Modal ---- */
+.pd-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center; z-index: 900; padding: 20px; }
+.pd-modal { background: var(--pd-card); color: var(--pd-ink); border-radius: 12px; max-width: 520px; width: 100%;
+  max-height: 90vh; overflow-y: auto; padding: 22px; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+/* Header/body/footer sub-structure (used by resource-loading, cash-flow, project-schedule's
+   activity modal). Header/footer escape the modal's own 22px padding via negative margins so
+   they can span full-width with their own border, while modals that dump raw HTML straight
+   into .pd-modal (no header/footer wrapper) keep using that 22px padding untouched. */
+.pd-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  margin: -22px -22px 18px; padding: 14px 20px; border-bottom: 1px solid var(--pd-line);
+  font-size: 16px; font-weight: 700; border-radius: 12px 12px 0 0; }
+.pd-modal-close { border: none; background: none; font-size: 20px; line-height: 1; color: var(--pd-muted);
+  cursor: pointer; width: 30px; height: 30px; border-radius: 6px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center; }
+.pd-modal-close:hover { background: var(--pd-bg); color: var(--pd-ink); }
+.pd-modal-footer { display: flex; justify-content: flex-end; gap: 10px;
+  margin: 18px -22px -22px; padding: 14px 20px; border-top: 1px solid var(--pd-line); }
+
+/* Autosave status badge (assets/js/autosave.js), placed beside an Edit modal's title. */
+.pd-autosave { font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 20px;
+  white-space: nowrap; color: var(--pd-muted); background: var(--pd-bg); border: 1px solid var(--pd-line); }
+.pd-autosave-idle { opacity: .7; }
+.pd-autosave-busy { color: var(--pd-red); border-color: var(--pd-red); }
+.pd-autosave-ok { color: #1a7f37; border-color: #1a7f37; }
+.pd-autosave-err { color: var(--pd-red); background: rgba(238,49,36,.08); border-color: var(--pd-red); }
+
+/* ---- Theme toggle button (injected by theme.js) ---- */
+.pd-theme-toggle {
+  width: 38px; height: 38px; border-radius: 9px; border: 1px solid var(--pd-line);
+  background: var(--pd-card); cursor: pointer; font-size: 17px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pd-theme-toggle:hover { background: var(--pd-bg); }
+.pd-theme-toggle-float {
+  position: fixed; top: 16px; right: 16px; z-index: 60; border-radius: 50%;
+  box-shadow: 0 1px 6px rgba(0,0,0,.18);
+}
+
+/* ---- Responsive ---- */
+/* NOTE: the full mobile/tablet layer lives in the "MOBILE & TABLET" section at the
+   end of this file. This block is the historical base rule, kept so the off-canvas
+   sidebar still works if the later section is ever trimmed. */
+@media (max-width: 820px) {
+  .pd-sidebar { position: fixed; left: -100%; transition: left .2s ease; z-index: 50; }
+  .pd-sidebar.open { left: 0; }
+  .pd-main { padding: 16px; }
+}
+
+/* ==========================================================================
+   DARK MODE — token remap on <html.pd-dark> (set by theme.js before paint).
+   Every element that uses the --pd-* variables adapts automatically; module
+   developers get dark mode for free as long as they use the shared tokens
+   (--pd-bg, --pd-card, --pd-ink, --pd-line, --pd-muted) instead of hard-coded
+   light colors. Avoid hard-coding #fff / #000 in module CSS.
+   ========================================================================== */
+html.pd-dark {
+  color-scheme: dark;                 /* native selects, date pickers, scrollbars */
+  --pd-ink: #F0EFEF;                  /* primary text */
+  --pd-muted: #B9B7B7;                /* secondary text */
+  --pd-line: rgba(255,255,255,0.12);  /* borders */
+  --pd-bg: #1C1C1C;                   /* app background */
+  --pd-card: #2B2C2B;                 /* surfaces (brand Dark Gray) */
+  --pd-dark: #161717;                 /* sidebar/topbar-dark/toast — darker than cards */
+  --pd-red-light: #3D1A19;            /* red tint on dark */
+  --pd-red-mid: #6E2A25;
+  --pd-ok: #34D27B; --pd-warn: #E0A008; --pd-bad: #EF5350;
+  --pd-shadow: 0 1px 3px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
+  background: #1C1C1C;
+}
+/* Modal/overlay shadows read better darker */
+html.pd-dark .pd-modal { box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+html.pd-dark .pd-module-card:hover { box-shadow: 0 10px 26px rgba(0,0,0,.5); }
+
+/* ============================================================================
+   PROJECT SELECTOR + PROJECT HOME (Primavera-style) — added 2026-06-30
+   All colors via --pd-* tokens so dark mode is automatic.
+   ============================================================================ */
+
+/* small form helpers */
+.pd-input-sm { padding: 6px 10px; font-size: 13px; height: 34px; }
+.pd-btn-sm { padding: 4px 10px; font-size: 12px; }
+.num { text-align: right !important; }
+
+/* status pills */
+.pd-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.pd-pill-ok { background: rgba(31,143,78,.12); color: var(--pd-ok); }
+.pd-pill-muted { background: var(--pd-line); color: var(--pd-muted); }
+
+/* workspace context chip (topbar) */
+.pd-ws-context { display: inline-flex; align-items: center; gap: 9px; margin-left: 14px;
+  background: var(--pd-bg); border: 1px solid var(--pd-line); border-radius: 8px;
+  padding: 6px 12px; cursor: default; color: var(--pd-ink); }
+.pd-ws-context-ic { color: var(--pd-red); font-size: 15px; }
+.pd-ws-context-txt { display: flex; flex-direction: column; line-height: 1.15; text-align: left; }
+.pd-ws-context-txt small { color: var(--pd-muted); font-size: 11px; }
+
+/* selector two-pane shell */
+.pd-proj-shell { display: flex; gap: 16px; align-items: flex-start; padding-top: 14px; }
+.pd-tree-pane { flex: 0 0 270px; background: var(--pd-card); border: 1px solid var(--pd-line);
+  border-radius: var(--pd-radius); overflow: hidden; }
+.pd-proj-pane { flex: 1 1 auto; min-width: 0; }
+.pd-tree-head { display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; font-weight: 700; border-bottom: 1px solid var(--pd-line); background: var(--pd-bg); }
+.pd-tree-search { padding: 10px 12px; border-bottom: 1px solid var(--pd-line); }
+.pd-tree-search .pd-input-sm { width: 100%; box-sizing: border-box; }
+.pd-tree { max-height: calc(100vh - 240px); overflow: auto; padding: 6px 0; }
+.pd-tree-node { display: flex; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer;
+  font-size: 13.5px; border-left: 3px solid transparent; }
+.pd-tree-node:hover { background: var(--pd-bg); }
+.pd-tree-node.active { background: var(--pd-red-light); border-left-color: var(--pd-red); font-weight: 600; }
+.pd-tree-node.dim { opacity: .45; }
+.pd-tree-ic { font-size: 13px; }
+.pd-tree-name { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pd-tree-count { font-size: 11px; color: var(--pd-muted); background: var(--pd-bg);
+  border: 1px solid var(--pd-line); border-radius: 999px; padding: 0 7px; min-width: 18px; text-align: center; }
+.pd-tree-node.active .pd-tree-count { background: #fff; }
+/* Gear to edit/delete a workspace or program. Hidden until hover/selection so the tree stays
+   calm; opacity (not display) keeps it keyboard-reachable — focus-visible reveals it. */
+.pd-tree-edit { flex: 0 0 auto; border: none; background: transparent; cursor: pointer;
+  color: var(--pd-muted); padding: 2px; border-radius: 5px; line-height: 1;
+  display: inline-flex; align-items: center; opacity: 0; transition: opacity .12s; }
+.pd-tree-node:hover .pd-tree-edit, .pd-tree-node.active .pd-tree-edit { opacity: 1; }
+.pd-tree-edit:hover { color: var(--pd-red); background: var(--pd-card); }
+.pd-tree-edit:focus-visible { opacity: 1; outline: 2px solid var(--pd-red); outline-offset: 1px; }
+.pd-icon-btn { border: none; background: transparent; cursor: pointer; font-size: 18px; color: var(--pd-red); line-height: 1; }
+
+/* toolbar */
+.pd-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 12px; flex-wrap: wrap; }
+.pd-toolbar-left, .pd-toolbar-right { display: flex; align-items: center; gap: 10px; }
+/* A flex item defaults to min-width:auto, and a text input's min-content width is its `size`
+   (~170px+) — so .pd-toolbar-right could not shrink below search+toggle and overflowed the pane
+   to the right, clipping the card/list toggle at the window edge. min-width:0 lets the row shrink,
+   the input absorbs it, and the toggle stays fixed and always visible. */
+.pd-toolbar-left { min-width: 0; flex-wrap: wrap; }
+.pd-toolbar-right { flex: 1 1 auto; min-width: 0; justify-content: flex-end; flex-wrap: wrap; }
+.pd-toolbar-right .pd-input-sm { flex: 0 1 220px; min-width: 0; }
+.pd-proj-count { color: var(--pd-muted); font-size: 13px; white-space: nowrap; }
+.pd-viewtoggle { flex: 0 0 auto; display: inline-flex; border: 1px solid var(--pd-line); border-radius: 8px; overflow: hidden; }
+.pd-vt { border: none; background: var(--pd-card); padding: 6px 12px; cursor: pointer; color: var(--pd-muted); font-size: 14px; }
+.pd-vt.active { background: var(--pd-red); color: #fff; }
+
+/* add dropdown */
+.pd-add-wrap { position: relative; }
+.pd-add-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; display: none;
+  background: var(--pd-card); border: 1px solid var(--pd-line); border-radius: 10px;
+  box-shadow: var(--pd-shadow); min-width: 220px; overflow: hidden; }
+.pd-add-menu.open { display: block; }
+.pd-add-menu button { display: block; width: 100%; text-align: left; border: none; background: none;
+  padding: 10px 14px; cursor: pointer; color: var(--pd-ink); font-size: 13.5px; }
+.pd-add-menu button:hover { background: var(--pd-red-light); }
+
+/* projects table */
+.pd-proj-table { border: 1px solid var(--pd-line); border-radius: var(--pd-radius); overflow: hidden; }
+.pd-proj-table code { background: var(--pd-bg); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+.pd-group-row td { background: var(--pd-bg); font-weight: 700; font-size: 12.5px;
+  color: var(--pd-ink); text-transform: none; letter-spacing: 0; }
+.pd-proj-row { cursor: pointer; }
+.pd-proj-row:hover td { background: var(--pd-red-light); }
+.pd-proj-name { font-weight: 600; }
+.pd-proj-ic { margin-right: 8px; }
+
+/* project cards */
+.pd-proj-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.pd-proj-card { background: var(--pd-card); border: 1px solid var(--pd-line); border-radius: var(--pd-radius);
+  padding: 16px; cursor: pointer; transition: box-shadow .15s, border-color .15s, transform .1s; }
+.pd-proj-card:hover { border-color: var(--pd-red-mid); box-shadow: var(--pd-shadow); transform: translateY(-2px); }
+.pd-proj-card-top { display: flex; align-items: center; justify-content: space-between; }
+.pd-proj-card-top .pd-proj-ic { font-size: 22px; }
+.pd-proj-card-title { font-weight: 700; margin: 8px 0 2px; line-height: 1.25; }
+.pd-proj-card-id code { background: var(--pd-bg); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+.pd-proj-card-meta { display: flex; gap: 14px; margin-top: 12px; }
+.pd-proj-card-meta > div { font-size: 13px; font-weight: 600; }
+.pd-proj-card-meta span { display: block; font-size: 11px; font-weight: 500; color: var(--pd-muted); }
+.pd-proj-card-loc { margin-top: 10px; font-size: 12px; color: var(--pd-muted); }
+
+.pd-empty { padding: 40px; text-align: center; color: var(--pd-muted);
+  background: var(--pd-card); border: 1px dashed var(--pd-line); border-radius: var(--pd-radius); }
+
+/* ---- Project Home: switcher, tabs, scaffolds ---- */
+.pd-projsw { position: relative; margin-left: 6px; }
+.pd-projsw-btn { display: inline-flex; align-items: center; gap: 10px; background: var(--pd-bg);
+  border: 1px solid var(--pd-line); border-radius: 9px; padding: 6px 12px; cursor: pointer; color: var(--pd-ink); max-width: 520px; }
+.pd-projsw-ic { font-size: 16px; }
+.pd-projsw-txt { display: flex; flex-direction: column; line-height: 1.18; text-align: left; min-width: 0; }
+.pd-projsw-txt strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 420px; }
+.pd-projsw-txt small { color: var(--pd-muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 440px; }
+.pd-projsw-caret { color: var(--pd-muted); }
+.pd-projsw-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; display: none;
+  background: var(--pd-card); border: 1px solid var(--pd-line); border-radius: 10px;
+  box-shadow: var(--pd-shadow); min-width: 320px; max-height: 60vh; overflow: auto; }
+.pd-projsw-menu.open { display: block; }
+.pd-projsw-menu-head { padding: 10px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--pd-muted); border-bottom: 1px solid var(--pd-line); }
+.pd-projsw-menu button { display: block; width: 100%; text-align: left; border: none; background: none;
+  padding: 9px 14px; cursor: pointer; color: var(--pd-ink); border-bottom: 1px solid var(--pd-line); }
+.pd-projsw-menu button:hover { background: var(--pd-red-light); }
+.pd-projsw-menu button.cur { background: var(--pd-red-light); }
+.pd-projsw-menu button strong { display: block; font-size: 13.5px; }
+.pd-projsw-menu button small { color: var(--pd-muted); font-size: 11.5px; }
+.pd-projsw-all { display: block; padding: 11px 14px; color: var(--pd-red); font-weight: 600; font-size: 13px; }
+.pd-projsw-all:hover { background: var(--pd-bg); }
+
+.pd-tabbar { display: flex; gap: 2px; padding: 0 24px; background: var(--pd-card);
+  border-bottom: 1px solid var(--pd-line); }
+.pd-tab { border: none; background: none; padding: 13px 20px; cursor: pointer; font-size: 14px;
+  font-weight: 600; color: var(--pd-muted); border-bottom: 3px solid transparent; }
+.pd-tab:hover { color: var(--pd-ink); }
+.pd-tab.active { color: var(--pd-red); border-bottom-color: var(--pd-red); }
+
+.pd-info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+.pd-info-card { background: var(--pd-card); border: 1px solid var(--pd-line); border-radius: var(--pd-radius); padding: 16px; }
+.pd-info-ic { font-size: 22px; }
+.pd-info-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--pd-muted); margin-top: 8px; }
+.pd-info-val { font-size: 16px; font-weight: 700; margin-top: 2px; }
+.pd-note { margin-top: 16px; padding: 14px 16px; background: var(--pd-bg); border-left: 3px solid var(--pd-red);
+  border-radius: 8px; color: var(--pd-muted); font-size: 13.5px; }
+
+/* portfolio rollup header (Program / Workspace tabs) */
+.pd-rollup-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.pd-rollup-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700;
+  color: var(--pd-red); background: var(--pd-red-light); padding: 3px 10px; border-radius: 999px; }
+.pd-rollup-head h3 { margin: 0; font-size: 19px; }
+.pd-rollup-gh { font-size: 13px; color: var(--pd-muted); font-weight: 600; }
+.pd-proj-row.cur td { background: var(--pd-red-light); }
+
+@media (max-width: 860px) {
+  .pd-proj-shell { flex-direction: column; }
+  .pd-tree-pane { flex: 1 1 auto; width: 100%; }
+  .pd-ws-context { display: none; }
+}
+
+/* ============================================================================
+   ICONS — alignment + theming for the shared SVG icon set (icons.js)
+   ============================================================================ */
+.pd-ico { display: inline-block; vertical-align: -0.18em; flex: none; }
+[data-ico] { display: inline-flex; align-items: center; }
+
+/* sidebar nav: icon + label on one row */
+.pd-sidebar nav a { display: flex; align-items: center; }
+.pd-navico { width: 18px; height: 18px; margin-right: 11px; flex: none; opacity: .9; }
+
+/* module launcher tiles: brand-red glyph centered in the tinted square */
+.pd-module-icon { display: flex; align-items: center; justify-content: center; }
+.pd-module-icon .pd-ico { color: var(--pd-red); }
+.pd-module-sub { display: inline-flex; align-items: center; gap: 5px; }
+
+/* KPI / info cards: brand-red glyph */
+.pd-info-ic { display: flex; }
+.pd-info-ic .pd-ico { color: var(--pd-red); }
+
+/* tree, project rows, switcher, context chip: muted glyphs that inherit color */
+.pd-tree-ic { display: inline-flex; align-items: center; color: var(--pd-muted); }
+.pd-tree-node.active .pd-tree-ic { color: var(--pd-red); }
+.pd-proj-ic { display: inline-flex; align-items: center; color: var(--pd-red); }
+.pd-projsw-ic { display: inline-flex; align-items: center; color: var(--pd-red); }
+.pd-rollup-gh { display: inline-flex; align-items: center; gap: 5px; }
+
+/* toolbar buttons: center glyphs */
+.pd-vt { display: inline-flex; align-items: center; justify-content: center; }
+.pd-btn [data-ico], .pd-btn .pd-ico { vertical-align: middle; }
+.pd-icon-btn { display: inline-flex; align-items: center; justify-content: center; }
+.pd-projsw-all { display: inline-flex; align-items: center; gap: 6px; }
+.pd-theme-toggle { display: inline-flex !important; align-items: center; justify-content: center; }
+
+/* ============================================================================
+   MOBILE & TABLET — added 2026-07-23
+   ----------------------------------------------------------------------------
+   One shared responsive layer so every page and module adapts without its own
+   breakpoint work. Read this before adding module-level media queries — most of
+   what a module needs (off-canvas sidebar, scrollable tables/tabs, sheet-style
+   modals, touch targets) is already handled here.
+
+   Breakpoints:
+     <= 1024px  tablet   — tighter chrome, narrower sidebar, scrolling tab strips
+     <=  820px  drawer   — sidebar becomes an off-canvas drawer (matches the
+                           820px check in ui.js initShell — keep them in sync)
+     <=  700px  phone    — stacked toolbars, sheet modals, 16px inputs
+     <=  420px  small    — minimum-chrome phone
+
+   Two rules that are easy to get wrong, handled here once:
+   1. iOS Safari ZOOMS the page when a focused input's font-size is under 16px.
+      All form controls go to 16px at phone width — do not "fix" this back to
+      13/14px to match the desktop look.
+   2. initShell adds .pd-collapsed by DEFAULT (clean desktop entry). Left alone
+      that makes the mobile drawer open as a useless 64px icon rail with no
+      labels, so the drawer width and labels are re-asserted below.
+   ============================================================================ */
+
+:root {
+  --pd-tap: 44px;              /* minimum comfortable touch target */
+  --pd-drawer-w: min(84vw, 290px);
+}
+
+/* Never let a wide child (table, Gantt, chart) scroll the whole PAGE sideways.
+   `clip` not `hidden`: `hidden` on body breaks position:sticky descendants, and
+   the topbar plus every sticky table header depends on sticky working. */
+body { overflow-x: clip; }
+.pd-content, .pd-main { min-width: 0; }
+
+/* Drawer scrim (injected by ui.js on every shell page). Explicitly display:none
+   outside the drawer breakpoint so a stale .open left over from a resize can
+   never intercept clicks on desktop — don't rely on it being an unstyled div. */
+.pd-scrim { display: none; }
+
+/* Horizontal-scroll wrapper for wide content. Wrap any wide table in one:
+   <div class="pd-tablewrap"><table class="pd-table"> … </table></div> */
+.pd-tablewrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+.pd-tablewrap > table { min-width: max-content; }
+
+/* ---- Tablet ---- */
+@media (max-width: 1024px) {
+  :root { --pd-sidebar-w: 210px; }
+  .pd-topbar { padding: 10px 16px; gap: 10px; }
+  .pd-main { padding: 18px; }
+  .pd-module-grid { gap: 16px; }
+  /* Tab strips scroll sideways rather than wrapping into a tall stack. */
+  .pd-tabbar { padding: 0 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .pd-tabbar::-webkit-scrollbar { display: none; }
+  .pd-tab { white-space: nowrap; }
+}
+
+/* ---- Sidebar becomes an off-canvas drawer ---- */
+@media (max-width: 820px) {
+  .pd-sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; height: 100dvh;
+    width: var(--pd-drawer-w); flex-basis: var(--pd-drawer-w);
+    transform: translateX(-100%); transition: transform .22s ease;
+    z-index: 70; box-shadow: 0 0 40px rgba(0,0,0,.35);
+    padding-top: max(18px, env(safe-area-inset-top));
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
+  }
+  .pd-sidebar.open { transform: none; }
+
+  /* Re-assert the FULL drawer even when .pd-collapsed is set (see note 2 above).
+     On mobile the hamburger opens/closes the drawer; it never icon-rails. */
+  .pd-app.pd-collapsed .pd-sidebar { width: var(--pd-drawer-w); flex-basis: var(--pd-drawer-w); padding-left: 16px; padding-right: 16px; }
+  .pd-app.pd-collapsed .pd-sidebar nav a { justify-content: flex-start; padding: 12px; gap: 10px; font-size: 13.5px; }
+  .pd-app.pd-collapsed .pd-navtxt { display: flex; }
+  .pd-app.pd-collapsed .pd-navsec { display: block; }
+  .pd-app.pd-collapsed .pd-navico { margin-right: 11px; }
+  .pd-app.pd-collapsed .pd-brand-logo, .pd-app.pd-collapsed .pd-brand small { display: block; }
+  .pd-app.pd-collapsed .pd-brand { margin-bottom: 14px; padding-bottom: 14px; }
+
+  /* Nav rows are the primary touch targets on a phone. */
+  .pd-sidebar nav a { min-height: var(--pd-tap); }
+
+  /* Scrim behind the open drawer (injected by ui.js). */
+  .pd-scrim { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 60;
+    opacity: 0; pointer-events: none; transition: opacity .22s ease; }
+  .pd-scrim.open { opacity: 1; pointer-events: auto; }
+  body.pd-noscroll { overflow: hidden; }
+
+  .pd-main { padding: 16px; }
+  /* Project selector: the tree stacks above the list and stops eating height. */
+  .pd-tree { max-height: 300px; }
+}
+
+/* ---- Phone ---- */
+@media (max-width: 700px) {
+  .pd-topbar { padding: 9px 12px; gap: 8px; flex-wrap: wrap; row-gap: 8px; }
+  .pd-topbar h1 { font-size: 15px; }
+  .pd-topbar-mark { height: 24px; }
+  .pd-main { padding: 12px; }
+  .pd-card { padding: 14px; }
+
+  /* iOS zoom guard — see note 1 at the top of this section. */
+  .pd-input, .pd-select, .pd-textarea, .pd-input-sm,
+  input[type="text"], input[type="number"], input[type="date"],
+  input[type="email"], input[type="password"], input[type="search"],
+  select, textarea { font-size: 16px; }
+  .pd-input, .pd-select, .pd-textarea { padding: 10px 12px; }
+  .pd-input-sm { height: 40px; padding: 8px 10px; }
+
+  /* Touch targets */
+  .pd-btn { padding: 10px 14px; min-height: var(--pd-tap); }
+  .pd-btn-sm { min-height: 36px; }
+  .pd-vt, .pd-icon-btn, .pd-theme-toggle, .pd-sidebar-toggle { min-width: var(--pd-tap); min-height: var(--pd-tap); }
+  .pd-avatar { width: 40px; height: 40px; }
+
+  /* Toolbars stack; search takes a full row instead of being squeezed out. */
+  .pd-toolbar { flex-direction: column; align-items: stretch; gap: 10px; }
+  .pd-toolbar-left, .pd-toolbar-right { justify-content: flex-start; flex-wrap: wrap; }
+  .pd-toolbar-right .pd-input-sm { flex: 1 1 100%; }
+
+  /* Tables scroll inside their own card rather than widening the page. Applied
+     to the shared table classes so modules inherit it without markup changes. */
+  .pd-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+  .pd-proj-table { overflow-x: auto; }
+
+  /* Modals become bottom sheets — reachable with a thumb, full-height scroll. */
+  .pd-modal-overlay { padding: 0; align-items: flex-end; }
+  .pd-modal { max-width: none; width: 100%; border-radius: 14px 14px 0 0;
+    max-height: 92dvh; padding: 18px;
+    padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+  .pd-modal-header { margin: -18px -18px 14px; padding: 13px 16px; border-radius: 14px 14px 0 0; }
+  .pd-modal-footer { margin: 14px -18px -18px; padding: 12px 16px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom)); flex-wrap: wrap; }
+  .pd-modal-footer .pd-btn { flex: 1 1 auto; justify-content: center; }
+  .pd-modal-close { width: var(--pd-tap); height: var(--pd-tap); }
+
+  /* Dropdown popovers: anchor to the viewport instead of running off-screen. */
+  .pd-psel-pop, .pd-projsw-menu, .pd-add-menu {
+    position: fixed; left: 8px; right: 8px; top: auto; width: auto;
+    min-width: 0; max-width: none; max-height: 70dvh; }
+  .pd-usermenu { position: fixed; right: 8px; left: auto; top: 58px; width: auto; min-width: 220px; }
+
+  .pd-projsw-btn { max-width: 100%; }
+  .pd-projsw-txt strong, .pd-projsw-txt small { max-width: 52vw; }
+  .pd-tab { padding: 12px 14px; font-size: 13.5px; }
+  .pd-proj-cards { grid-template-columns: 1fr; }
+  .pd-info-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .pd-module-card { min-height: 0; padding: 18px 16px; gap: 10px; }
+  .pd-module-icon { width: 44px; height: 44px; border-radius: 11px; }
+  .pd-home-head h2 { font-size: 19px; }
+  .pd-toast { left: 12px; right: 12px; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateY(20px); }
+  .pd-toast.show { transform: none; }
+  .pd-auth-wrap { padding: 16px; align-items: flex-start; padding-top: 8vh; }
+}
+
+/* ---- Small phone ---- */
+@media (max-width: 420px) {
+  .pd-topbar h1 { font-size: 14px; }
+  .pd-main { padding: 10px; }
+  .pd-card { padding: 12px; }
+  .pd-userbar-role, .pd-userbar-name { display: none; }   /* the avatar carries identity */
+  .pd-module-grid { gap: 12px; }
+}
+
+/* ============================================================================
+   MODULE TOPBAR — two-row layout on phones/tablets
+   ----------------------------------------------------------------------------
+   ui.js `initModuleTopbar()` wraps the topbar's children into .pd-tb-main
+   (back · icon · title · theme · avatar) and .pd-tb-tools (project select ·
+   view tabs · action buttons). Both are display:contents here, so on desktop
+   the topbar is byte-for-byte the flat flex row it has always been — the
+   wrappers do not participate in layout at all.
+
+   Below 900px they become real rows: identity stays on one line, and the
+   controls collapse into ONE horizontally-scrolling strip instead of wrapping
+   into four full-height rows that push the content off the screen.
+   ============================================================================ */
+.pd-tb-main, .pd-tb-tools { display: contents; }
+
+/* ⚠️ `display:contents` makes the wrappers invisible to layout, but the DOM
+   REGROUPING is still real: the account controls now precede the tool cluster
+   in source order, which on desktop dropped the avatar into the middle of the
+   bar. `order` restores the original left-to-right sequence — back/title, then
+   tools, then theme + avatar. Required on desktop; harmless on mobile, where it
+   happens to be the order each row wants anyway. */
+.pd-topbar .pd-tb-tools > * { order: 1; }
+.pd-topbar .pd-tb-main > #pd-theme-toggle,
+.pd-topbar .pd-tb-main > #user-bar { order: 2; }
+
+/* ⚠️ Every module.css re-declares `.pd-topbar { display:flex; flex-wrap:wrap }`
+   and loads AFTER this file, so a bare `.pd-topbar` here loses on source order
+   (a media query adds no specificity). These rules are qualified with `.pd-app`
+   / `.pd-topbar` purely to outrank that — do not "simplify" the selectors. */
+@media (max-width: 900px) {
+  .pd-app .pd-topbar.pd-tb-split { flex-direction: column; align-items: stretch; gap: 8px; flex-wrap: nowrap; }
+
+  .pd-topbar .pd-tb-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  /* The Megawide mark is `width:auto`, so a stretching column would blow it up
+     to full width. This is what produced the giant red bars on the shell pages. */
+  .pd-topbar .pd-tb-main > img { flex: none; width: auto; align-self: center; }
+  /* The title takes the slack and truncates, so the avatar can never be pushed
+     onto a line of its own (what the topbar did when it simply wrapped). */
+  .pd-topbar .pd-tb-main h1 { flex: 1 1 auto; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .pd-topbar .pd-tb-main > a, .pd-topbar .pd-tb-main > button,
+  .pd-topbar .pd-tb-main > #user-bar,
+  .pd-topbar .pd-tb-main > #pd-theme-toggle { flex: none; }
+  /* The avatar's desktop divider reads as a stray rule once it is the row's
+     last item against the screen edge. */
+  .pd-topbar .pd-tb-main > #user-bar { margin-left: auto; padding-left: 0; border-left: 0; }
+
+  /* ⚠️ The controls row WRAPS — it is deliberately not a horizontal scroller.
+     A scroller was tried first and failed on two counts: it pushed the leading
+     view tab half off the left edge (so the "Photos" tab was unreachable unless
+     you guessed there was a hidden scroll), and `overflow-x:auto` establishes a
+     clipping context that cuts off every dropdown opened from inside it — the
+     project switcher, the add menus, the module tool menus. Wrapping keeps all
+     controls visible and all popovers unclipped. */
+  .pd-topbar .pd-tb-tools {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; row-gap: 8px;
+  }
+  .pd-topbar .pd-tb-tools button, .pd-topbar .pd-tb-tools .pd-btn { white-space: nowrap; }
+  /* Pairs with a narrow tab strip when both fit (the project name truncates in
+     that case, which the owner has accepted) and takes a full row of its own
+     otherwise. Not `1 1 100%` — see the note below on why that costs height. */
+  /* ⚠️ 120px is measured, not arbitrary. It is the largest basis at which
+     Material Submittal's selector still pairs with its tab strip instead of
+     taking a 4th row (at 130px it wraps: 221px vs 169px). Raising this costs a
+     whole row on that module; lowering it buys nothing — Issues and Contracts
+     have tab labels too long to pair at any basis, even 110px. */
+  .pd-topbar .pd-tb-tools > [class$="-projctx"] { flex: 1 1 120px; min-width: 0; }
+  .pd-topbar .pd-tb-tools > [class$="-projctx"] .pd-select,
+  .pd-topbar .pd-tb-tools > [class$="-projctx"] .pd-psel,
+  .pd-topbar .pd-tb-tools > [class$="-projctx"] > button { width: 100%; max-width: none; }
+
+  /* ---- Make the wrapped rows look designed rather than merely wrapped ----
+     Tabs plus three action buttons genuinely cannot fit one 351px line, so the
+     controls occupy a few rows. Left to itself that reads as broken wrapping:
+     the modules push their tool cluster right with `margin-left:auto`, which on
+     its own row leaves it floating half-centred, misaligned with the tabs above
+     it. Instead each group claims a full row and divides it evenly, so every row
+     is a deliberate full-width control. Suffix selectors — every module names
+     these consistently (`-tabs`, `-topbar-tools`, `-tb-sep`). */
+  .pd-topbar .pd-tb-tools > * { margin-left: 0; margin-right: 0; }
+
+  .pd-topbar .pd-tb-tools > [class$="-tabs"] {
+    flex: 1 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0;
+  }
+  /* On a phone the action cluster keeps its own row — its buttons carry the
+     longest labels ("+ Add photos", "+ New PPR") and squeezing them beside tabs
+     truncates them. A tablet has the width to share, so it only claims a full
+     row below 700px; at 700–900px it sits beside whatever fits. */
+  .pd-topbar .pd-tb-tools > [class$="-topbar-tools"],
+  .pd-topbar .pd-tb-tools > [id$="-topbar-tools"] {
+    flex: 1 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .pd-topbar .pd-tb-tools > [class$="-topbar-tools"],
+  .pd-topbar .pd-tb-tools > [id$="-topbar-tools"] { flex: 1 1 100%; }
+  /* Equal segments, like a native segmented control. ⚠️ `min-height` matters:
+     the modules size these to 28px, well under the 44px touch minimum — they
+     were among the hardest things on the page to hit accurately. */
+  .pd-topbar .pd-tb-tools > [class$="-tabs"] > button {
+    flex: 1 1 0; justify-content: center; min-height: var(--pd-tap);
+    /* ⚠️ `min-width:0` + wrapping are load-bearing for long tab labels. A flex
+       item will not shrink below its text width by default, so Contracts &
+       Claims ("Contract" / "Claims / Change Order" / "Extension of Time") blew
+       past the viewport and — because the strip is `overflow:hidden` — the last
+       tab was silently CLIPPED rather than visibly overflowing. Measured 416px
+       of tabs in a 393px viewport. Wrapping to two lines keeps every label
+       readable in full; ellipsis would hide which tab you are on. */
+    min-width: 0; white-space: normal; line-height: 1.15;
+    font-size: 12.5px; padding-left: 6px; padding-right: 6px; text-align: center;
+  }
+  /* Same for the project selector — it was 34px. */
+  .pd-topbar .pd-tb-tools > [class$="-projctx"] .pd-select,
+  .pd-topbar .pd-tb-tools > [class$="-projctx"] > button { min-height: var(--pd-tap); height: auto; }
+  /* Actions share their row proportionally, so a labelled button keeps its words
+     while an icon-only one stays compact. */
+  .pd-topbar .pd-tb-tools > [class$="-topbar-tools"] > .pd-btn,
+  .pd-topbar .pd-tb-tools > [id$="-topbar-tools"] > .pd-btn,
+  .pd-topbar .pd-tb-tools > [class$="-topbar-tools"] > button,
+  .pd-topbar .pd-tb-tools > [id$="-topbar-tools"] > button {
+    flex: 1 1 auto; justify-content: center; min-height: var(--pd-tap);
+  }
+  /* Vertical rules were dividing a horizontal cluster; on its own row they just
+     add noise between full-width buttons. */
+  .pd-topbar .pd-tb-tools [class$="-tb-sep"] { display: none; }
+}
+
+/* ---- Phone: module title + filter panels ---- */
+@media (max-width: 900px) {
+  /* Every module hides its own title TEXT on narrow screens (`.rr-title-txt`,
+     `.pp-title-txt`, … at 820–1250px) to buy room in the single-row topbar,
+     which now leaves the identity row showing a bare unlabelled icon. The
+     two-row layout has the space, so put the words back. Selector is
+     `.pd-tb-main [class$=…]` (0,2,0) to outrank the modules' own (0,1,0) rule
+     in a stylesheet that loads after this one. */
+  .pd-topbar .pd-tb-main [class$="-title-txt"] { display: inline !important; }
+}
+
+@media (max-width: 700px) {
+  /* Module filter bars pin their controls to desktop pixel widths with inline
+     `max-width` styles (e.g. `max-width:150px`), which on a phone leaves each
+     select stranded at half width with dead space beside it. Let every filter
+     control span the row it already wraps onto. `!important` is required — the
+     widths are inline styles in the modules' markup, not stylesheet rules. */
+  .pd-app .pd-main .pd-select, .pd-app .pd-main .pd-input, .pd-app .pd-main .pd-textarea {
+    max-width: none !important; width: 100%;
+  }
+  /* ⚠️ Modules pin filter controls to `height:34px` (e.g. `.pp-filters
+     .pd-select`), but the iOS zoom guard above raises them to 16px + 10px
+     padding — about 42px of content in a 34px box, which clipped the descenders
+     off "All categories" / "Filter by Works". Height must be free to grow.
+     `.pd-app .pd-main` (0,3,0) outranks the modules' `.xx-filters .pd-select`. */
+  .pd-app .pd-main .pd-select, .pd-app .pd-main .pd-input {
+    height: auto; min-height: var(--pd-tap);
+    /* ⚠️ Re-assert the iOS zoom guard. The generic `.pd-input` rule above is
+       (0,1,0) and every module's `.xx-filters .pd-input { font-size:13px }` is
+       (0,2,0) in a stylesheet that loads later — so the guard was being
+       silently overridden and tapping a filter search still zoomed the page.
+       Measured 13px on Progress Photos before this rule. */
+    font-size: 16px;
+  }
+  /* Inputs inside a table cell or a segmented control are sized by their
+     container, not the filter bar — leave those alone. */
+  .pd-app .pd-main table .pd-select, .pd-app .pd-main table .pd-input,
+  .pd-app .pd-main .pd-viewtoggle .pd-select { width: auto; height: 34px; min-height: 0; }
+
+  /* ⚠️ The module title keeps its TEXT at every width (owner's call) — do not
+     re-add a phone-width `display:none` here. The modules' own CSS hides
+     `.xx-title-txt` below 820–1250px for the old single-row bar; the ≤900px
+     rule above overrides that, and this block must not undo it. The title takes
+     the slack and ellipsises if a module name is long. */
+  .pd-topbar .pd-tb-main h1 { flex: 1 1 auto; min-width: 0; font-size: 15px; }
+}
+
+/* Coarse pointers (touch): reveal controls that are hover-gated on desktop,
+   since a touch device never produces the hover that would show them. */
+@media (hover: none) {
+  .pd-tree-edit { opacity: 1; }
+}

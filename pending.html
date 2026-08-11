@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/img/icon.png" />
+  <script src="assets/js/theme.js?v=20260726d"></script>
+  <title>Pending approval · Engineering App</title>
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260806b" />
+</head>
+<body>
+  <div class="pd-auth-wrap">
+    <div class="pd-auth-card">
+      <div class="pd-auth-logo">
+        <img class="pd-auth-mark" src="assets/img/favicon.png" alt="Megawide">
+        <div class="pd-brand">Engineering App</div>
+      </div>
+      <div class="pd-card" style="text-align:center;">
+        <div style="font-size:40px;margin-bottom:8px;">⏳</div>
+        <h2 style="margin:0 0 8px;">Awaiting approval</h2>
+        <p style="color:var(--pd-muted);margin:0 0 14px;">
+          Your account exists but an administrator has to grant you access before you
+          can open the Engineering App.
+        </p>
+        <p style="color:var(--pd-muted);margin:0 0 18px;font-size:12.5px;line-height:1.6;">
+          Engineering App accounts are separate from the Planners Dashboard, so a first
+          approval is needed here even if you already use that app. Your administrator
+          also assigns which projects you can see.
+        </p>
+        <button class="pd-btn" id="logout" style="margin:0 auto;">Back to sign in</button>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="assets/js/config.js?v=20260724a"></script>
+  <script src="assets/js/auth.js?v=20260724a"></script>
+  <script>
+    document.getElementById('logout').onclick = function () { AppAuth.logout(); };
+  </script>
+</body>
+</html>

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="../../assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="../../assets/img/icon.png" />
+  <script src="../../assets/js/theme.js?v=20260726d"></script>
+  <title>Material Submittal Log · Engineering App</title>
+  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260806b" />
+  <link rel="stylesheet" href="module.css?v=20260806a" />
+</head>
+<body>
+  <div class="pd-app">
+    <!-- Sidebar-less shell (matches Drawing Register / Cash Flow / Project Schedule). -->
+    <div class="pd-content">
+      <div class="pd-topbar">
+        <a class="pd-btn ms-modback" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
+        <h1 class="ms-title" style="margin:0;"><span class="ms-title-ico" data-ico="box" data-ico-size="20"></span> <span class="ms-title-txt">Material Submittal Log</span></h1>
+        <div class="ms-projctx">
+          <select class="pd-select ms-project" id="ms-project" title="Project"></select>
+        </div>
+        <div class="ms-tabs" role="tablist">
+          <button class="ms-tab active" data-view="dashboard">Overview</button>
+          <button class="ms-tab" data-view="backlog">Backlog</button>
+          <button class="ms-tab" data-view="log">Registry</button>
+        </div>
+        <!-- Global tools sit beside the profile (theme.js injects the dark-mode toggle before #user-bar) -->
+        <div class="ms-topbar-tools" id="ms-topbar-tools">
+          <button class="pd-btn ms-tb-labeled pd-btn-primary" id="ms-add" data-perm="create" title="Add a material submittal">+ Add</button>
+          <span class="ms-tb-sep"></span>
+          <button class="pd-btn" id="ms-import" data-perm="create" title="Import from the PMO Excel workbook"><span data-ico="upload" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="ms-export" title="Export to Excel"><span data-ico="download" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="ms-print" title="Print / PDF"><span data-ico="printer" data-ico-size="16"></span></button>
+          <button class="pd-btn ms-clearbtn" id="ms-clear" title="Clear all submittals for this project" style="display:none;"><span data-ico="trash" data-ico-size="16"></span></button>
+        </div>
+        <div id="ms-presence" title="People viewing this project"></div>
+        <div id="user-bar"></div>
+      </div>
+
+      <div class="pd-main">
+        <!-- Filter bar — log view only (hidden on the dashboard, like Drawing Register's Progress tab) -->
+        <div class="ms-filters" id="ms-filters">
+          <span class="ms-filt-ico" data-ico="filter" data-ico-size="15"></span>
+          <input class="pd-input ms-search" id="ms-f-search" placeholder="Search item, spec, brand, vendor, code…" />
+          <select class="pd-select" id="ms-f-section"><option value="">All trade sections</option></select>
+          <select class="pd-select" id="ms-f-discipline"><option value="">All disciplines</option></select>
+          <select class="pd-select" id="ms-f-status"><option value="">All statuses</option></select>
+          <select class="pd-select" id="ms-f-pres"><option value="">All presentation types</option></select>
+          <label class="ms-chk" title="Planned approval date has passed and the item is not yet approved"><input type="checkbox" id="ms-f-overdue" /> Overdue only</label>
+          <button class="ms-clearfilt" id="ms-f-clear" title="Clear all filters" hidden><span data-ico="x" data-ico-size="13"></span> Clear</button>
+          <span class="ms-count" id="ms-count"></span>
+        </div>
+
+        <div id="ms-view"></div>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="ms-file" accept=".xlsx,.xls" style="display:none;" />
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- Charting: same stack the Procurement (WPM) dashboard uses, so the period
+       chart's sizing, tooltips and data labels behave identically there and here. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+  <script src="../../assets/js/config.js?v=20260724a"></script>
+  <script src="../../assets/js/auth.js?v=20260724a"></script>
+  <script src="../../assets/js/db.js?v=20260724a"></script>
+  <script src="../../assets/js/ui.js?v=20260724a"></script>
+  <script src="../../assets/js/icons.js?v=20260811a"></script>
+  <script src="../../assets/js/perm.js?v=20260811a"></script>
+  <script src="../../assets/js/offline.js?v=20260726d"></script>
+  <script src="../../assets/js/collab.js?v=20260727b"></script>
+  <script src="../../assets/js/autosave.js?v=20260806a"></script>
+  <script src="module.js?v=20260806a"></script>
+  <script>
+    AppAuth.requireLogin(function (user, profile) {
+      UI.renderUserBar(profile);
+      MaterialSubmittal.init(user, profile);
+      // Hide write actions this role may not perform. The DB enforces the
+      // same rules via RLS + the approval-guard trigger — this is only UX.
+      Perm.applyReadonly(document, profile);
+    });
+  </script>
+</body>
+</html>
