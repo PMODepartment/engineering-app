@@ -166,23 +166,95 @@ function reownRows(rows) {
   return moved;
 }
 
+// ---------------------------------------------------------------------------
+// COLUMN PROJECTION
+//
+// The source and destination schemas are deliberately NOT identical. The
+// Engineering App omits Planning-App-only columns — e.g. projects carries
+// schedule_* rollup caches written solely by the Project Schedule module, which
+// this app does not have (see 0001, where they are commented out on purpose).
+//
+// But this script reads `select *`, so an upsert of the whole source row fails:
+//     Could not find the 'schedule_activities' column of 'projects'
+//
+// So each row is projected onto the columns the destination actually has. The
+// danger is doing that silently — on drawing_register, a dropped column is lost
+// engineering data. Hence: intentional omissions are declared below and merely
+// reported; ANY other dropped column aborts the run.
+// ---------------------------------------------------------------------------
+
+// Columns known to be intentionally absent from the destination.
+const EXPECTED_DROPS = {
+  projects: ['schedule_progress', 'schedule_start', 'schedule_finish',
+             'schedule_activities', 'schedule_updated_at'],
+};
+
+// PostgREST names the offending column in its error:
+//   "Could not find the 'schedule_activities' column of 'projects' in the schema cache"
+// so the destination schema does not need to be introspected up front — which is
+// just as well, because the OpenAPI document at /rest/v1/ comes back with no
+// column definitions on this project. Attempt the write, learn from the failure,
+// drop that column from every row, retry. Self-correcting, and it cannot
+// misread the schema because the database itself is the source of truth.
+//
+// A column is only ever dropped if it is declared in EXPECTED_DROPS. Anything
+// else aborts the run rather than quietly discarding data.
+const MISSING_COL_RE = /Could not find the '([^']+)' column/;
+
+async function upsertChunk(table, chunk, key, dropped) {
+  for (let attempt = 0; attempt <= 12; attempt++) {
+    // Apply everything learned so far, including from earlier chunks.
+    for (const c of dropped) for (const r of chunk) delete r[c];
+
+    const { error } = await dst.from(table).upsert(chunk, { onConflict: key });
+    if (!error) return;
+
+    const m = MISSING_COL_RE.exec(error.message || '');
+    if (!m) throw new Error(`${table} upsert: ${error.message}`);
+    const col = m[1];
+
+    if (!(EXPECTED_DROPS[table] || []).includes(col)) {
+      throw new Error(
+        `${table}: the source has a column this database does not: "${col}"\n` +
+        `    Refusing to drop it silently — on a module table that would be lost\n` +
+        `    engineering data. Either add the column to the destination, or add it\n` +
+        `    to EXPECTED_DROPS in this script if the omission is deliberate.`
+      );
+    }
+
+    if (!dropped.has(col)) {
+      dropped.add(col);
+      console.log(`\n  ${table}: dropping "${col}" — absent from this app by design`);
+    }
+  }
+  throw new Error(`${table}: too many missing columns; aborting rather than looping`);
+}
+
 async function copyTable({ name, key, reown }) {
   if (ONLY && !ONLY.includes(name)) { console.log(`  ${name}: skipped (--only)`); return; }
-  const rows = await readAll(src, name);
+  let rows = await readAll(src, name);
   console.log(`  ${name}: ${rows.length} row(s) in source`);
   if (reown && rows.length) {
     const moved = reownRows(rows);
     console.log(`  ${name}: ${moved} row(s) re-attributed to legacy_created_by`);
   }
-  if (!rows.length || DRY) return;
+  if (!rows.length) return;
+  if (DRY) {
+    // ⚠️ Column compatibility cannot be checked without attempting a write, so a
+    // dry run cannot prove the schemas line up. Say so rather than implying a
+    // clean dry run guarantees a clean import — it does not.
+    const maybe = EXPECTED_DROPS[name];
+    if (maybe) console.log(`  ${name}: may drop by design if present — ${maybe.join(', ')}`);
+    return;
+  }
 
   // Chunked upsert. 200 keeps each request comfortably under the payload limit
   // even for drawing_register rows carrying a long `submissions` array.
+  const dropped = new Set();
   let done = 0;
   for (let i = 0; i < rows.length; i += 200) {
     const chunk = rows.slice(i, i + 200);
-    const { error } = await dst.from(name).upsert(chunk, { onConflict: key });
-    if (error) throw new Error(`${name} upsert @${i}: ${error.message}`);
+    await upsertChunk(name, chunk, key, dropped);
     done += chunk.length;
     process.stdout.write(`\r  ${name}: wrote ${done}/${rows.length}`);
   }
