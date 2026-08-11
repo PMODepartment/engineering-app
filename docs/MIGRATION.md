@@ -200,6 +200,35 @@ migrations/0004-harden-audit-grants.sql
    projects.
 4. After each batch: `node migrations/migrate-data.mjs --relink-users`
 
+> ### ⚠️ Disable the audit triggers for `--relink-users` too
+>
+> Relinking rewrites `created_by` on every historical row belonging to that
+> person — 1,883 rows for a single author in the Megawide data. With the audit
+> triggers live that writes 1,883 entries reading "edited created_by", attributed
+> to `(server-side / SQL editor)`, for something no user did. It buries real
+> activity exactly like the bulk import would have.
+>
+> Relink is an administrative correction to attribution, not an edit to the
+> drawing. So, each time you relink:
+>
+> ```sql
+> alter table drawing_register   disable trigger audit_drawing_register;
+> alter table material_submittal disable trigger audit_material_submittal;
+> ```
+>
+> …run `--relink-users`, then:
+>
+> ```sql
+> alter table drawing_register   enable trigger audit_drawing_register;
+> alter table material_submittal enable trigger audit_material_submittal;
+>
+> select tgrelid::regclass as tbl, tgname, tgenabled from pg_trigger
+> where tgname in ('audit_drawing_register','audit_material_submittal','audit_users');
+> ```
+>
+> All three must read `O` afterwards. This applies on EVERY relink batch, not
+> just the first — it is easy to forget on the fifth person who registers.
+
 > ⚠️ **Step 2 is not optional, and it changes what admins see.** This Supabase
 > project has **"Confirm email" enabled** (`mailer_autoconfirm: false`), so
 > `signUp()` returns no session. `AppAuth.register()` tries to insert the `users`
