@@ -1022,6 +1022,7 @@ window.MaterialSubmittal = (function () {
   function masDataOf(r) {
     var maker = [r.brand, r.supplier].filter(Boolean).join(' / ');
     return {
+      projectCode: pid || '',
       masId:       r.mas_id || codeOf(r) || '',
       revision:    r.revision_no || '',
       date:        todayISO(),

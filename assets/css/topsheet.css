@@ -34,11 +34,14 @@
   border: 0 solid #000; padding: 2px 4px; vertical-align: top;
   font-size: 9pt; line-height: 1.2; word-wrap: break-word; overflow-wrap: anywhere;
 }
-/* Border edges, mapped 1:1 from each template cell's own top/right/bottom/left. */
-.bt { border-top-width: 1px; }
-.br { border-right-width: 1px; }
-.bb { border-bottom-width: 1px; }
-.bl { border-left-width: 1px; }
+/* Border edges, mapped 1:1 from each template cell's own top/right/bottom/left.
+   ⚠️ Written as `.ts-t td.bx`, NOT `.bx` — same trap as the font sizes below.
+   `.ts-t td` sets border-width:0 at (0,1,1); a bare `.bt` scores (0,1,0) and
+   LOSES, which rendered all three forms with no grid lines at all. */
+.ts-t td.bt { border-top-width: .8pt; }
+.ts-t td.br { border-right-width: .8pt; }
+.ts-t td.bb { border-bottom-width: .8pt; }
+.ts-t td.bl { border-left-width: .8pt; }
 
 /* Section banners — Excel theme 0, tint −0.25 ("White, Background 1, Darker 25%").
    ⚠️ Every rule below is written as `.ts-t td.x`, NOT `.x`. The base rule
@@ -56,6 +59,35 @@
 /* Values the app fills in, so a reviewer can tell them from the blank form. */
 .ts-val { font-weight: 700; }
 .ts-pre { white-space: pre-wrap; }
+.ts-t td.ts-mid { vertical-align: middle; }
+.ts-t td.ts-bot { vertical-align: bottom; }
+.ts-sub { font-weight: 400; font-size: 8pt; }
+
+/* Megawide wordmark above the sheet, as on the issued MAS. Extracted from that
+   document because assets/img/logo-white.png is the white sidebar mark and
+   would be invisible on paper. */
+.ts-logo { margin: 0 0 3mm 2mm; }
+.ts-logo img { height: 9mm; width: auto; display: block; }
+
+/* Tick boxes. Always printed EMPTY unless explicitly ticked — the reviewer
+   signs the paper, so pre-ticking a decision the app only guessed at would put
+   a false approval on a controlled form. */
+.ts-cbx { display: inline-flex; align-items: flex-start; gap: 1.4mm; }
+.ts-box {
+  width: 2.9mm; height: 2.9mm; border: 0.7pt solid #000; flex: none;
+  margin-top: .5mm; position: relative; background: #fff;
+}
+.ts-box.ts-on::after {
+  content: ""; position: absolute; left: .7mm; top: .1mm;
+  width: .9mm; height: 1.9mm; border: solid #000;
+  border-width: 0 .55mm .55mm 0; transform: rotate(45deg);
+}
+.ts-cbl { line-height: 1.15; }
+.ts-yn { display: inline-flex; gap: 7mm; }
+
+/* "Submittal Review Status" block — bold italic heading, then the four options. */
+.ts-rs-hd { font-weight: 700; font-style: italic; text-align: center; margin-bottom: 2mm; }
+.ts-rs { margin: 0 0 2.2mm 2mm; }
 
 /* Form identifier, printed in the sheet's own footer area like the source. */
 .ts-formno { font-size: 8pt; }
@@ -105,3 +137,12 @@
 @media print {
   .ts-prev .ts-doc { transform: none !important; margin-bottom: 0 !important; }
 }
+
+/* Document-type checklist in the dialog (RFA). */
+.ts-typegrid { display: grid; gap: 4px; }
+.ts-typegrid label { display: flex; gap: 6px; align-items: flex-start; font-size: 11px; font-weight: 500; }
+.ts-typegrid input { margin-top: 2px; flex: none; }
+
+/* The issued forms space the four Copies entries apart; HTML would collapse the
+   runs of spaces, so this cell preserves them. */
+.ts-t td.ts-pre-sp { white-space: pre-wrap; }

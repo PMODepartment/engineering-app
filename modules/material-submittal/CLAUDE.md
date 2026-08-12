@@ -534,3 +534,42 @@ RUN)**.
 - **Email is NOT built** (owner deferred it): sending needs a backend — a Supabase Edge Function
   plus a provider (Resend or Megawide SMTP) — since browser JS cannot speak SMTP.
 - Assets `topsheet.js/css?v=20260812c`, `module.js/css?v=20260812c`.
+
+## Top sheets rebuilt from ISSUED documents, not the blank templates (2026-08-12b) — fmlozano
+The owner supplied two real, issued sheets — a **TMS201 MAS** and an **SLT101 RFA** — after the
+first build. ⚠️ **The blank F-GEN workbooks are NOT the form in use**; MAS and RFA are now
+transcribed from the issued documents instead. What actually differed:
+- **MAS**: a **Megawide logo** sits above the sheet; there is a **PROJECT CODE** row the blank
+  template has no trace of; "Attachment included?" is a **Yes/No checkbox pair stacked vertically**,
+  not a free-text cell; and each review block prints the **four review-status options as
+  checkboxes** (Approved / Approved with comments / Not Approved - Revise / Rejected).
+- **RFA**: the description area is a **3x4 checkbox grid of 12 document types**, not a free-text
+  box; the document table's last column is **"Pages"**, not the template's "Copies"; the signature
+  band is **"Company" with THREE rows** (Prepared / Checked / Approved), not one plus a client
+  return date; and both review bands are titled **"… REVIEW AND APPROVAL"**.
+- **Dates print `dd-MMM-yy`** (13-Mar-26 / 31-Jul-26) on both issued forms. `TopSheet.fmtDate` is
+  integer maths on the ISO string — never local `Date` getters, which shift the day east of
+  Greenwich (the same trap this module's importer notes document).
+- **Column geometry is measured, not guessed.** The issued RFA's own vector rule lines put the
+  verticals at 0 / 7.5 / 30.6 / 42.1 / 53.75 / 76.7 / 88.3 / 100 % — i.e. **column A = 7.5%,
+  columns B–I = 11.5625% each**. The blank template implied 9 equal columns, which is visibly wrong.
+- **The print logo had to be extracted from the MAS PDF** → `assets/img/logo-print.png`.
+  `logo-white.png` is the white sidebar wordmark and is invisible on paper.
+- ⚠️ **REAL BUG, the same specificity trap twice.** `.ts-t td` sets `border: 0` at (0,1,1); the edge
+  classes were written bare (`.bt`/`.br`/`.bb`/`.bl`) at (0,1,0) and **lost**, so all three forms
+  rendered with **no grid lines whatsoever** — a controlled form with no boxes. Identical to the
+  font-size bug fixed hours earlier in the same file. Every such rule is now `.ts-t td.x`.
+  **Neither was visible in the source; both took `getComputedStyle`/a render to see.**
+- ⚠️ **Review-status boxes are always printed UNTICKED**, and so is the copy that reproduces them.
+  The consultant ticks one by hand; the log's `status` is Megawide's own record, not the
+  consultant's decision, so pre-ticking it would put a false approval on a controlled form.
+- ⚠️ **No form number is printed in the body** — neither issued sheet carries one (it lives in the
+  file name). `F-GEN0nn Rev 0` stays on the dialog header only.
+- **RFI has no issued sample**, so it still follows its blank template, with only the Yes/No
+  attachment boxes carried across for house consistency. **Re-check it against a real RFI.**
+- **Verified by rendering** (headless Edge screenshot — the in-app browser still cannot composite):
+  all three measure **210x297mm**, a rowspan/colspan walk confirms **every row totals exactly 9
+  columns**, none overflows its page, and **49/49, 82/86 and 54/54 cells carry borders**. Compared
+  side by side against the two issued PDFs. ⚠️ **Not verified signed-in, and not yet printed on
+  paper** — margins/scale at the printer are the owner's check.
+- Assets `topsheet.js/css?v=20260812d`, `module.js?v=20260812d`.
