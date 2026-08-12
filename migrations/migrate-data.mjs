@@ -96,7 +96,7 @@
 //     alter table drawing_register   enable  trigger audit_drawing_register;
 //     alter table material_submittal enable  trigger audit_material_submittal;
 //
-//   Order matters (foreign keys): workspaces → projects → module tables.
+//   Order matters (foreign keys): group_heads → projects → module tables.
 // ============================================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -124,7 +124,11 @@ const dst = createClient(need('DST_URL'), need('DST_SERVICE_KEY'), { auth: { per
 // `users` is NOT here — see the header. Source profiles go to `legacy_users`
 // via copyLegacyUsers(), and module rows are rewritten by reownRows().
 const TABLES = [
-  { name: 'workspaces',         key: 'id' },
+  // group_heads replaced the workspaces tree. It must still come FIRST:
+  // projects.group_head_id is a foreign key into it, so syncing projects
+  // against a stale group_heads table fails the constraint on any project
+  // tagged with a group head created since the last run.
+  { name: 'group_heads',        key: 'id' },
   { name: 'projects',           key: 'id' },
   { name: 'drawing_register',   key: 'id', reown: true },
   { name: 'material_submittal', key: 'id', reown: true },

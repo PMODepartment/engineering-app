@@ -70,7 +70,7 @@ window.APP_CONFIG = {
       // The name is deliberately NOT carried over — the shell re-reads it from
       // the projects table, which is the trustworthy source.
       sessionStorage.removeItem('pd_project_name');
-      sessionStorage.removeItem('pd_workspace');
+      sessionStorage.removeItem('pd_group_head');
     }
   } catch (e) { /* private-mode sessionStorage — fall back to the selector */ }
 })();

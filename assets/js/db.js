@@ -48,27 +48,15 @@
       if (error) throw error;
     },
 
-    // ---- Workspaces (Workspace → Program → Project tree; shared) ----
-    async getWorkspaces() {
+    // ---- Group Heads (the flat tag that replaced the workspace tree) ----
+    // READ-ONLY here, like projects: group heads are authored in the Planners
+    // Dashboard and mirrored in, so there is deliberately no create/update/
+    // delete. See perm.js — this app sources org structure, it does not own it.
+    async getGroupHeads() {
       var { data, error } = await sb()
-        .from('workspaces').select('*').order('sort_order').order('name');
+        .from('group_heads').select('*').order('sort_order').order('name');
       if (error) throw error;
       return data || [];
-    },
-    async createWorkspace(w) {
-      var { data, error } = await sb().from('workspaces').insert(w).select().single();
-      if (error) throw error;
-      return data;
-    },
-    async updateWorkspace(id, w) {
-      var { error } = await sb().from('workspaces').update(w).eq('id', id);
-      if (error) throw error;
-    },
-    // Hard delete. The RPC refuses while the node still has child
-    // workspaces/programs or projects — surface error.message to the admin.
-    async deleteWorkspace(id) {
-      var { error } = await sb().rpc('admin_delete_workspace', { target: id });
-      if (error) throw error;
     },
 
     // ---- Users (admin screens) ----

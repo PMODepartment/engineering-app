@@ -1,7 +1,7 @@
 # =============================================================================
-# Sync projects + workspaces: Planners Dashboard → Engineering App
+# Sync projects + group heads: Planners Dashboard → Engineering App
 # -----------------------------------------------------------------------------
-# The Planners Dashboard is the single place projects and workspaces are created
+# The Planners Dashboard is the single place projects and group heads are created
 # and maintained (enforced by migrations/0009-projects-read-only.sql). The two
 # apps are on separate Supabase projects, so nothing propagates on its own —
 # this job is what makes a new project appear in the Engineering App.
@@ -10,18 +10,18 @@
 # used for the original import, so there is no second implementation to keep
 # correct.
 #
-# ⚠️⚠️ NEVER REMOVE `--only=workspaces,projects` ⚠️⚠️
+# ⚠️⚠️ NEVER REMOVE `--only=group_heads,projects` ⚠️⚠️
 # Without it the script also copies drawing_register and material_submittal FROM
 # the Planners Dashboard — overwriting the Engineering App's live register with a
 # stale pre-cutover snapshot and destroying every change made since. The
 # Engineering App owns the engineering data; the Planners Dashboard owns projects
-# and workspaces. This flag is the entire boundary between those two facts.
+# and group heads. This flag is the entire boundary between those two facts.
 #
 # ⚠️ WHAT THIS SYNC DOES NOT DO
 #   • It never DELETES. A project deleted in the Planners Dashboard stays here.
 #     Archive instead of deleting — `status` is an ordinary column and does come
 #     across.
-#   • It OVERWRITES. Any local edit to a project/workspace row is replaced. That
+#   • It OVERWRITES. Any local edit to a project/group-head row is replaced. That
 #     is safe only because 0009 makes these tables read-only in this app; if 0009
 #     is ever rolled back, this job silently becomes destructive.
 #   • It does not sync USER↔PROJECT ASSIGNMENTS. Those live in users.projects and
@@ -102,7 +102,7 @@ jobs:
           DST_SERVICE_KEY: ${{ secrets.DST_SERVICE_KEY }}
         run: node migrate-data.mjs --preflight
 
-      - name: Sync workspaces + projects
+      - name: Sync group heads + projects
         working-directory: /tmp/sync
         env:
           # ⚠️ URLs are VARIABLES, not secrets. Storing them as secrets got them
@@ -117,9 +117,9 @@ jobs:
         run: |
           # See the banner at the top of this file before touching --only.
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            node migrate-data.mjs --only=workspaces,projects --dry-run
+            node migrate-data.mjs --only=group_heads,projects --dry-run
           else
-            node migrate-data.mjs --only=workspaces,projects
+            node migrate-data.mjs --only=group_heads,projects
           fi
 
       # migrate-data.mjs sets a non-zero exit code on failure, so a failed sync

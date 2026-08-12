@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <link rel="apple-touch-icon" href="assets/img/icon.png" />
-  <script src="assets/js/theme.js?v=20260726d"></script>
+  <script src="assets/js/theme.js?v=20260812a"></script>
   <title>Engineering Dashboard — Engineering App</title>
-  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260806b" />
-  <link rel="stylesheet" href="assets/css/engineering.css?v=20260811a" />
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260812a" />
+  <link rel="stylesheet" href="assets/css/engineering.css?v=20260812a" />
 </head>
 <body>
   <div class="pd-app">
@@ -77,14 +77,14 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="assets/js/config.js?v=20260811a"></script>
-  <script src="assets/js/auth.js?v=20260724a"></script>
-  <script src="assets/js/db.js?v=20260724a"></script>
-  <script src="assets/js/ui.js?v=20260724a"></script>
-  <script src="assets/js/icons.js?v=20260811a"></script>
-  <script src="assets/js/perm.js?v=20260811b"></script>
-  <script src="assets/js/nav.js?v=20260811a"></script>
-  <script src="assets/js/engdata.js?v=20260811c"></script>
+  <script src="assets/js/config.js?v=20260812a"></script>
+  <script src="assets/js/auth.js?v=20260812a"></script>
+  <script src="assets/js/db.js?v=20260812a"></script>
+  <script src="assets/js/ui.js?v=20260812a"></script>
+  <script src="assets/js/icons.js?v=20260812a"></script>
+  <script src="assets/js/perm.js?v=20260812a"></script>
+  <script src="assets/js/nav.js?v=20260812a"></script>
+  <script src="assets/js/engdata.js?v=20260812a"></script>
   <script>
   (function () {
     var pid = sessionStorage.getItem('pd_project');
@@ -93,7 +93,7 @@
     // meaningful to show until a project is chosen.
     if (!pid) { location.replace('projects.html'); return; }
 
-    var PROJ = [], WS = [], wsById = {}, curProj = null, profile = null;
+    var PROJ = [], GH = [], ghById = {}, curProj = null, profile = null;
 
     AppAuth.requireLogin(function (user, prof) {
       profile = prof;
@@ -110,28 +110,36 @@
     // ---- project header / switcher (same behaviour as the Planning App) ----
     async function boot() {
       try {
-        var res = await Promise.all([PDb.getProjects(), PDb.getWorkspaces()]);
-        PROJ = res[0]; WS = res[1];
+        var res = await Promise.all([PDb.getProjects(), PDb.getGroupHeads()]);
+        PROJ = res[0]; GH = res[1];
       } catch (e) { /* header falls back to the cached name */ }
-      WS.forEach(function (w) { wsById[w.id] = w; });
+      GH.forEach(function (g) { ghById[g.id] = g; });
       curProj = PROJ.filter(function (p) { return p.id === pid; })[0] ||
                 { id: pid, name: sessionStorage.getItem('pd_project_name') || pid };
       document.getElementById('projsw-name').textContent =
         (curProj.name || curProj.id) + ' (' + curProj.id + ')';
-      var names = [], cur = curProj.workspace_id ? wsById[curProj.workspace_id] : null;
-      while (cur) { names.unshift(cur.name); cur = cur.parent_id ? wsById[cur.parent_id] : null; }
-      document.getElementById('projsw-path').textContent = names.join(' › ');
+      var gh = groupHead(curProj);
+      document.getElementById('projsw-path').textContent = gh ? ('Group Head: ' + gh) : '';
       renderSwitcher();
+    }
+
+    // The project's own tag — there is no workspace ancestry to walk any more.
+    // Falls back to the raw id so a group head that failed to load still reads as
+    // something, rather than silently blanking the caption.
+    function groupHead(p) {
+      if (!p || !p.group_head_id) return null;
+      var g = ghById[p.group_head_id];
+      return g ? g.name : p.group_head_id;
     }
 
     function renderSwitcher() {
       var menu = document.getElementById('projsw-menu');
       menu.innerHTML = '<div class="pd-projsw-menu-head">Switch project</div>' +
         PROJ.map(function (p) {
-          var w = p.workspace_id ? wsById[p.workspace_id] : null;
+          var gh = groupHead(p);
           return '<button data-pick="' + Fmt.esc(p.id) + '"' + (p.id === pid ? ' class="cur"' : '') + '>' +
             '<strong>' + Fmt.esc(p.name || p.id) + '</strong><small>' + Fmt.esc(p.id) +
-            (w ? ' · ' + Fmt.esc(w.name) : '') + '</small></button>';
+            (gh ? ' · ' + Fmt.esc(gh) : '') + '</small></button>';
         }).join('') +
         '<a class="pd-projsw-all" href="projects.html">' + Icons.svg('arrowRight', 15) + ' All projects</a>';
       menu.querySelectorAll('[data-pick]').forEach(function (b) {
@@ -139,7 +147,7 @@
           var np = PROJ.filter(function (x) { return x.id === b.dataset.pick; })[0];
           sessionStorage.setItem('pd_project', np.id);
           sessionStorage.setItem('pd_project_name', np.name || np.id);
-          sessionStorage.setItem('pd_workspace', np.workspace_id || '');
+          sessionStorage.setItem('pd_group_head', np.group_head_id || '');
           location.reload();
         };
       });

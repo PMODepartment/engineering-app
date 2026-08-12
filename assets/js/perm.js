@@ -114,11 +114,13 @@
     isViewer:  function (p) { return role(p) === 'viewer'; },
     ROLES: { ADMINS: ADMINS, PLANNERS: PLANNERS, WRITERS: WRITERS },
 
-    // ---- Projects and workspaces are SOURCED, not authored, here -----------
-    // The Planners Dashboard is the single place projects and workspaces are
+    // ---- Projects and group heads are SOURCED, not authored, here ---------
+    // The Planners Dashboard is the single place projects and group heads are
     // created and maintained. This app reads them, and a scheduled
-    //     migrate-data.mjs --only=workspaces,projects
+    //     migrate-data.mjs --only=group_heads,projects
     // refreshes the copy.
+    // (`group_heads` replaced the old `workspaces` tree — a project now carries
+    // one group_head_id tag instead of a Workspace/Program/Group ancestry.)
     //
     // Deliberately role-INDEPENDENT: this returns false even for super_admin,
     // because the constraint is architectural, not a privilege level. The two
