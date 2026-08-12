@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <link rel="apple-touch-icon" href="assets/img/icon.png" />
-  <script src="assets/js/theme.js?v=20260812a"></script>
+  <script src="assets/js/theme.js?v=20260812b"></script>
   <title>Projects — Engineering App</title>
-  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260812a" />
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260812b" />
 </head>
 <body>
   <div class="pd-app">
@@ -30,8 +30,8 @@
              Read-only here: group heads, like projects, are SOURCED from the
              Planners Dashboard (see perm.js / migration 0009). -->
         <aside class="pd-tree-pane">
-          <div class="pd-tree-head"><span>Group Heads</span></div>
-          <div class="pd-tree-search"><input class="pd-input pd-input-sm" id="gh-search" placeholder="Search group heads…" /></div>
+          <div class="pd-tree-head"><span>Group Heads</span><span class="pd-tree-head-count" id="gh-total"></span></div>
+          <div class="pd-tree-search"><input class="pd-input pd-input-sm" id="gh-search" type="search" placeholder="Search group heads…" /></div>
           <div class="pd-tree" id="gh-list"></div>
         </aside>
 
@@ -53,7 +53,7 @@
                 <option value="id">Sort: ID</option>
                 <option value="finish">Sort: Forecast Finish</option>
               </select>
-              <input class="pd-input pd-input-sm" id="proj-search" placeholder="Search projects…" />
+              <input class="pd-input pd-input-sm" id="proj-search" type="search" placeholder="Search projects…" />
               <div class="pd-viewtoggle" role="group" aria-label="View">
                 <button class="pd-vt active" id="vt-list" title="List view"><span data-ico="listView" data-ico-size="16"></span></button>
                 <button class="pd-vt" id="vt-cards" title="Card view"><span data-ico="gridView" data-ico-size="16"></span></button>
@@ -67,13 +67,13 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="assets/js/config.js?v=20260812a"></script>
-  <script src="assets/js/auth.js?v=20260812a"></script>
-  <script src="assets/js/db.js?v=20260812a"></script>
-  <script src="assets/js/ui.js?v=20260812a"></script>
-  <script src="assets/js/icons.js?v=20260812a"></script>
-  <script src="assets/js/perm.js?v=20260812a"></script>
-  <script src="assets/js/nav.js?v=20260812a"></script>
+  <script src="assets/js/config.js?v=20260812b"></script>
+  <script src="assets/js/auth.js?v=20260812b"></script>
+  <script src="assets/js/db.js?v=20260812b"></script>
+  <script src="assets/js/ui.js?v=20260812b"></script>
+  <script src="assets/js/icons.js?v=20260812b"></script>
+  <script src="assets/js/perm.js?v=20260812b"></script>
+  <script src="assets/js/nav.js?v=20260812b"></script>
   <script>
   (function () {
     // A project carries ONE group_head_id. There is no tree: sorting, filtering
@@ -148,25 +148,35 @@
     function renderGhList() {
       var q = (document.getElementById('gh-search').value || '').toLowerCase();
       var host = document.getElementById('gh-list');
+      // `selectedGh === null` and the All row's id ('__all__') are the SAME state.
+      // Normalise before comparing, or the default scope renders unhighlighted.
+      var activeId = (selectedGh === null) ? '__all__' : selectedGh;
       function row(id, label, count, extraCls) {
-        var cls = 'pd-tree-node' + (selectedGh === id ? ' active' : '') + (extraCls || '');
+        var cls = 'pd-tree-node' + (activeId === id ? ' active' : '') + (extraCls || '');
         return '<div class="' + cls + '" data-gh="' + Fmt.esc(id) + '" style="padding-left:8px;">' +
           '<span class="pd-tree-ic">' + Icons.svg(id === '__all__' ? 'org' : 'group', 15) + '</span>' +
           '<span class="pd-tree-name">' + Fmt.esc(label) + '</span>' +
-          '<span class="pd-tree-count">' + count + '</span></div>';
+          '<span class="pd-tree-count' + (count ? '' : ' zero') + '">' + count + '</span></div>';
       }
-      var html = row('__all__', 'All Projects', PROJ.length);
+      var shown = 0;
+      var html = row('__all__', 'All Projects', PROJ.length) + '<div class="pd-tree-sep"></div>';
       GH.slice().sort(function (a, b) {
         return (a.sort_order || 0) - (b.sort_order || 0) || String(a.name).localeCompare(String(b.name));
       }).forEach(function (g) {
         if (q && g.name.toLowerCase().indexOf(q) === -1) return;
+        shown++;
         // Inactive group heads are retired, not deleted — projects assigned to
         // one keep working and stay visible, so the row must still render.
         html += row(g.id, g.name + (g.active === false ? ' (inactive)' : ''), countFor(g.id), g.active === false ? ' dim' : '');
       });
+      if (q && !shown) html += '<div class="pd-tree-empty">No group head matches “' + Fmt.esc(q) + '”.</div>';
       var nUn = countFor(NONE);
-      if (nUn && !q) html += row(NONE, '— No group head —', nUn);
+      // The unassigned bucket is a different KIND of row from a real group head,
+      // so it is separated rather than sorted in among them.
+      if (nUn && !q) html += '<div class="pd-tree-sep"></div>' + row(NONE, '— No group head —', nUn);
       host.innerHTML = html;
+      var tot = document.getElementById('gh-total');
+      if (tot) tot.textContent = GH.length;
 
       host.querySelectorAll('[data-gh]').forEach(function (el) {
         el.onclick = function () {
@@ -248,28 +258,34 @@
       return ghLabel(k);
     }
 
-    function renderList(area, list) {
+    // Ordered [key, items] pairs. Shared by the list AND card views — the card
+    // view used to ignore grouping entirely and render one flat run of cards,
+    // silently discarding the Group-by selection the user had just made.
+    function groupProjects(list) {
       var groups = {}, order = [];
       list.forEach(function (p) {
         var k = groupKeyOf(p);
         if (!groups[k]) { groups[k] = []; order.push(k); }
         groups[k].push(p);
       });
-      // The unassigned bucket always sits last.
+      // The unassigned bucket always sits last; the rest read alphabetically.
       order.sort(function (a, b) {
         if (a === NONE) return 1; if (b === NONE) return -1;
         return groupLabelOf(a).localeCompare(groupLabelOf(b));
       });
+      return order.map(function (k) { return [k, groups[k]]; });
+    }
 
+    function renderList(area, list) {
       var rows = '<table class="pd-table pd-proj-table"><thead><tr>' +
         '<th>Name</th><th>ID</th><th>Status</th><th>Group Head</th><th>Forecast Start</th><th>Forecast Finish</th>' +
         '</tr></thead><tbody>';
-      order.forEach(function (k) {
+      groupProjects(list).forEach(function (g) {
         if (groupBy !== 'none') {
-          rows += '<tr class="pd-group-row"><td colspan="6">' + Fmt.esc(groupLabelOf(k)) +
-            ' <span class="pd-tree-count">' + groups[k].length + '</span></td></tr>';
+          rows += '<tr class="pd-group-row"><td colspan="6">' + Fmt.esc(groupLabelOf(g[0])) +
+            ' <span class="pd-tree-count">' + g[1].length + '</span></td></tr>';
         }
-        groups[k].forEach(function (p) {
+        g[1].forEach(function (p) {
           rows += '<tr class="pd-proj-row" data-open="' + Fmt.esc(p.id) + '">' +
             '<td class="pd-proj-name"><span class="pd-proj-ic">' + Icons.svg('project', 16) + '</span>' + Fmt.esc(p.name) + '</td>' +
             '<td><code>' + Fmt.esc(p.id) + '</code></td>' +
@@ -284,19 +300,26 @@
       area.innerHTML = rows;
     }
 
+    function cardHTML(p) {
+      return '<div class="pd-proj-card" data-open="' + Fmt.esc(p.id) + '">' +
+        '<div class="pd-proj-card-top"><span class="pd-proj-ic">' + Icons.svg('project', 22) + '</span>' + statusPill(p.status) + '</div>' +
+        '<div class="pd-proj-card-title">' + Fmt.esc(p.name) + '</div>' +
+        '<div class="pd-proj-card-id"><code>' + Fmt.esc(p.id) + '</code></div>' +
+        '<div class="pd-proj-card-meta">' +
+          '<div><span>Group Head</span><b>' + Fmt.esc(ghNameOf(p) || '—') + '</b></div>' +
+          '<div><span>Forecast Finish</span><b>' + Fmt.date(p.forecast_finish || p.end_date) + '</b></div>' +
+        '</div>' +
+        (p.location ? '<div class="pd-proj-card-loc">' + Icons.svg('mapPin', 13) + '<span>' + Fmt.esc(p.location) + '</span></div>' : '') +
+      '</div>';
+    }
+    // Cards honour the SAME grouping as the list view (see groupProjects).
     function renderCards(area, list) {
-      area.innerHTML = '<div class="pd-proj-cards">' + list.map(function (p) {
-        return '<div class="pd-proj-card" data-open="' + Fmt.esc(p.id) + '">' +
-          '<div class="pd-proj-card-top"><span class="pd-proj-ic">' + Icons.svg('project', 22) + '</span>' + statusPill(p.status) + '</div>' +
-          '<div class="pd-proj-card-title">' + Fmt.esc(p.name) + '</div>' +
-          '<div class="pd-proj-card-id"><code>' + Fmt.esc(p.id) + '</code></div>' +
-          '<div class="pd-proj-card-meta">' +
-            '<div><span>Group Head</span>' + Fmt.esc(ghNameOf(p) || '—') + '</div>' +
-            '<div><span>Forecast Finish</span>' + Fmt.date(p.forecast_finish || p.end_date) + '</div>' +
-          '</div>' +
-          (p.location ? '<div class="pd-proj-card-loc">' + Icons.svg('mapPin', 13) + ' ' + Fmt.esc(p.location) + '</div>' : '') +
-        '</div>';
-      }).join('') + '</div>';
+      area.innerHTML = groupProjects(list).map(function (g) {
+        var head = (groupBy === 'none') ? '' :
+          '<div class="pd-cardgroup"><span>' + Fmt.esc(groupLabelOf(g[0])) + '</span>' +
+          '<span class="pd-cardgroup-count">' + g[1].length + '</span><span class="pd-cardgroup-rule"></span></div>';
+        return head + '<div class="pd-proj-cards">' + g[1].map(cardHTML).join('') + '</div>';
+      }).join('');
     }
 
     function openProject(id) {
@@ -310,13 +333,20 @@
 
     // ---- Toolbar wiring ----
     function wireToolbar() {
-      document.getElementById('proj-search').oninput = render;
-      document.getElementById('gh-search').oninput = renderGhList;
+      // ⚠️ 'input' alone is not enough: the native clear (×) and Esc fire 'search'
+      // and 'change' but NOT 'input', which left the list filtered after clearing.
+      bindSearch(document.getElementById('proj-search'), render);
+      bindSearch(document.getElementById('gh-search'), renderGhList);
       document.getElementById('group-by').onchange = function () { groupBy = this.value; render(); };
       document.getElementById('sort-by').onchange = function () { sortBy = this.value; render(); };
       document.getElementById('vt-list').onclick = function () { view = 'list'; setVt(); render(); };
       document.getElementById('vt-cards').onclick = function () { view = 'cards'; setVt(); render(); };
     }
+    function bindSearch(el, fn) {
+      if (!el) return;
+      ['input', 'search', 'change'].forEach(function (ev) { el.addEventListener(ev, fn); });
+    }
+
     function setVt() {
       document.getElementById('vt-list').classList.toggle('active', view === 'list');
       document.getElementById('vt-cards').classList.toggle('active', view === 'cards');

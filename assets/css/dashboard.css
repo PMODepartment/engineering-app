@@ -409,7 +409,12 @@ html.pd-dark .pd-module-card:hover { box-shadow: 0 10px 26px rgba(0,0,0,.5); }
 .pd-tree-name { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pd-tree-count { font-size: 11px; color: var(--pd-muted); background: var(--pd-bg);
   border: 1px solid var(--pd-line); border-radius: 999px; padding: 0 7px; min-width: 18px; text-align: center; }
-.pd-tree-node.active .pd-tree-count { background: #fff; }
+/* ⚠️ Was a hardcoded `#fff`. In dark mode the active row is a dark maroon, so a
+   white chip read as a glaring blob — and the bug was INVISIBLE because the
+   "All Projects" row was never given the .active class in the first place (its
+   id is '__all__' but the scope variable is null, so they never matched). Fixing
+   the highlight exposed this. Tokens only, never a literal surface colour. */
+.pd-tree-node.active .pd-tree-count { background: var(--pd-card); border-color: var(--pd-red-mid); color: var(--pd-ink); }
 /* Gear to edit/delete a workspace or program. Hidden until hover/selection so the tree stays
    calm; opacity (not display) keeps it keyboard-reachable — focus-visible reveals it. */
 .pd-tree-edit { flex: 0 0 auto; border: none; background: transparent; cursor: pointer;
@@ -903,3 +908,63 @@ body { overflow-x: clip; }
 @media (hover: none) {
   .pd-tree-edit { opacity: 1; }
 }
+
+/* ---------------------------------------------------------------------------
+   Group-head scope pane + grouped card view
+   --------------------------------------------------------------------------- */
+
+/* The pane is a FILTER, not a tree — one flat level. It sticks so the scope
+   stays reachable while a long project list scrolls.
+   ⚠️ DESKTOP ONLY. Below 860px the shell stacks to a column and the pane sits
+   ABOVE the list, so sticking it would pin a ~355px block to the top of a phone
+   screen and the projects would scroll underneath it. Measured at 375px before
+   this guard: pane 355px tall AND sticky. Keep this in sync with the 860px
+   `.pd-proj-shell { flex-direction: column }` rule below. */
+@media (min-width: 861px) { .pd-tree-pane { position: sticky; top: 0; } }
+
+/* The scope rows are the main tap target in this pane, so they get the same
+   44px minimum the rest of the suite uses on touch. Measured 34px before. */
+@media (max-width: 700px) {
+  .pd-tree-node { min-height: var(--pd-tap); padding-top: 4px; padding-bottom: 4px; }
+}
+.pd-tree-head { text-transform: uppercase; letter-spacing: .04em; font-size: 11px; color: var(--pd-muted); }
+.pd-tree-head-count { font-size: 11px; color: var(--pd-muted); background: var(--pd-card);
+  border: 1px solid var(--pd-line); border-radius: 999px; padding: 0 7px; font-weight: 600; }
+
+/* "All Projects" is a scope reset, not a group head — a rule above it separates
+   the two ideas, and another sits above the unassigned bucket for the same reason. */
+.pd-tree-sep { height: 1px; background: var(--pd-line); margin: 6px 12px; }
+.pd-tree-empty { padding: 14px 12px; font-size: 12.5px; color: var(--pd-muted); text-align: center; }
+.pd-tree-node { border-radius: 0; }
+.pd-tree-node.active .pd-tree-name { color: var(--pd-ink); }
+/* A zero-count group head is real but empty — dim the COUNT only, not the row,
+   so it stays obviously clickable (an inactive group head dims the whole row,
+   and the two states must not look the same). */
+.pd-tree-node .pd-tree-count.zero { opacity: .5; }
+
+/* Grouped CARD view. The list view groups by the Group-by selection; the card
+   view used to ignore it entirely and render one flat run of cards, silently
+   discarding the grouping the user had just chosen. Same headers, both views. */
+.pd-cardgroup { display: flex; align-items: center; gap: 10px; margin: 20px 0 10px;
+  font-weight: 700; font-size: 13px; color: var(--pd-ink); }
+.pd-cardgroup:first-child { margin-top: 2px; }
+.pd-cardgroup-rule { flex: 1 1 auto; height: 1px; background: var(--pd-line); }
+.pd-cardgroup-count { font-size: 11px; font-weight: 600; color: var(--pd-muted);
+  background: var(--pd-bg); border: 1px solid var(--pd-line); border-radius: 999px; padding: 0 7px; }
+
+/* Cards: give the metadata room to breathe and let it wrap instead of colliding. */
+.pd-proj-cards { grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); }
+.pd-proj-card { display: flex; flex-direction: column; }
+.pd-proj-card-meta { flex-wrap: wrap; gap: 10px 16px; margin-top: auto; padding-top: 12px; }
+.pd-proj-card-meta > div { min-width: 0; }
+.pd-proj-card-meta > div > b { display: block; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.pd-proj-card-loc { display: flex; align-items: center; gap: 5px; }
+.pd-proj-card-loc svg { flex: 0 0 auto; }
+
+/* Ghost "clear" for the project search — the suite's existing filter-clear
+   pattern (progress-photos .pp-clear / material-submittal .ms-clearfilt),
+   promoted here so both apps share one. Shown only when a filter is set. */
+.pd-clear { display: inline-flex; align-items: center; gap: 5px; border: none; background: transparent;
+  color: var(--pd-muted); cursor: pointer; font-size: 12.5px; padding: 6px 8px; border-radius: 6px; }
+.pd-clear:hover { color: var(--pd-red); background: var(--pd-bg); }
