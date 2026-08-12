@@ -490,3 +490,47 @@ existing `file_url` column — **no new migration**. Follows drawing-register’
 - [x] Document upload / view / replace / remove (private bucket + signed URLs)
 - [x] Migration run on the live DB (owner confirmed 2026-07-20)
 - [ ] Live click-through against a real login
+
+## Top sheets: MAS / RFA / RFI generated to PDF (2026-08-12) — fmlozano
+Three PMO controlled forms are now generated from the app and printed via the browser's own
+"Save as PDF". Shared renderer in `../../assets/js/topsheet.js` + `../../assets/css/topsheet.css`;
+per-project header defaults in migration `../../migrations/0012-topsheet-defaults.sql` **(USER MUST
+RUN)**.
+- **They are THREE DIFFERENT DOCUMENTS, not one parameterised form.** F-GEN013 MAS covers a
+  material submission, F-GEN011 RFA an approval request for *documents*, F-GEN010 RFI a question to
+  the design consultant — the RFA template says in its own body that it must not be used for a
+  material submittal. Hence three renderers and three field lists.
+- **Only MAS is generated FROM a record** (Registry row → "Form" column), because every MAS field
+  maps onto a column of this table: `mas_id`/`codeOf` → MAS ID, `material` → Product Name,
+  `brand + supplier` → Manufacturer/Supplier, `specification` → Spec/BOQ Ref, `location +
+  floor_levels` → Location/Use, `trade_section` → Category, `discipline` → Sub-category,
+  `file_url` → Attachment included?. **RFA/RFI have no register here yet**, so their topbar buttons
+  open a blank sheet seeded with project context only.
+- **Layout is transcribed from the workbooks, not approximated.** Each form is the template's own
+  9-column A–I grid with every merged range reproduced as a colspan/rowspan and every border taken
+  from the source cell's own borders. Extracted with openpyxl (`merged_cells.ranges` + per-cell
+  `border`/`fill`/`font`). Banner shading is Excel **theme 0, tint −0.25 = `#BFBFBF`**.
+- ⚠️ **REAL BUG found by measuring, not reading — CSS specificity flattened every font size.**
+  The base rule `.ts-t td` scores (0,1,1); the size classes were written bare (`.ts-band-c`,
+  `.ts-11`, …) at (0,1,0) and therefore **lost to it**, rendering all three forms at a flat 9pt —
+  the 16pt title measured 12px. Every size/weight rule is now written `.ts-t td.x`. This is
+  invisible in the source and only showed up in `getComputedStyle`.
+- ⚠️ **`HEAD` grew by one** ("Form" column). It is the single source of truth for `SPAN`, so the
+  group rows and empty state followed automatically — but the Form column is deliberately **NOT**
+  gated on `canWrite` (printing only reproduces what the row already holds), unlike `.ms-actcol`.
+  `.ms-tscol` is added to the module's `@media print` hide-list so it never prints in the log.
+- ⚠️ **Print is gated on `body.ts-printing`**, added only while the top-sheet dialog prints, so the
+  "hide everything except `.ts-doc`" rule can never affect an ordinary Ctrl+P of the log behind it.
+  `afterprint` clears it, with a 4s fallback because Safari/older Chrome do not always fire it.
+- ⚠️ **`projects` cannot hold the client name** — 0009/0010 made it read-only because it is synced
+  from the Planners Dashboard by an id-keyed upsert that would overwrite any local column. Hence
+  `topsheet_defaults` in this app's own schema.
+- **Verified in-browser** against the real CSS/JS: all three docs measure exactly **210×297mm**, a
+  rowspan/colspan walk confirms **every row totals exactly 9 columns** in all three forms, none
+  overflows its page (table height 213/250/222mm), every mapped field renders, and a hostile
+  payload (`<img onerror>`, `<script>`, `<b>`) produces **0 injected nodes** with the text preserved.
+  ⚠️ Screenshots remain impossible here (stalled compositor) — verified by measurement.
+  ⚠️ **Not verified signed-in**, and the migration has **not** been run yet.
+- **Email is NOT built** (owner deferred it): sending needs a backend — a Supabase Edge Function
+  plus a provider (Resend or Megawide SMTP) — since browser JS cannot speak SMTP.
+- Assets `topsheet.js/css?v=20260812c`, `module.js/css?v=20260812c`.

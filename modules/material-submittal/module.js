@@ -883,7 +883,10 @@ window.MaterialSubmittal = (function () {
       logTh('discipline'), logTh('location'), logTh('brand'), logTh('vendor'), logTh('presentation'),
       '<th class="ms-doccol">Doc</th>',
       logTh('req'), logTh('psub'), logTh('asub'), logTh('pappr'), logTh('aappr'),
-      logTh('approver'), logTh('rev'), logTh('status'), logTh('mas')];
+      logTh('approver'), logTh('rev'), logTh('status'), logTh('mas'),
+      // Top sheet is a READ action (it only prints what the row already holds),
+      // so unlike the edit/delete column it is not gated on canWrite.
+      '<th class="ms-tscol" title="MAS top sheet">Form</th>'];
     if (canWrite) HEAD.push('<th class="ms-actcol"></th>');
     var SPAN = HEAD.length;
 
@@ -932,6 +935,7 @@ window.MaterialSubmittal = (function () {
           '<td class="ms-r">' + esc(r.revision_no || '') + '</td>' +
           '<td>' + (st ? '<span class="ms-pill ' + (meta ? meta.cls : 's-forsub') + '">' + esc(st) + '</span>' : '<span class="ms-mut ms-mini">—</span>') + '</td>' +
           '<td class="ms-nowrap ms-mini">' + esc(r.mas_id || '') + '</td>' +
+          '<td class="ms-tscol"><button class="pd-btn ms-iconbtn" data-mas="' + esc(r.id) + '" title="Generate the MAS top sheet (F-GEN013)">' + ico('fileText', 15) + '</button></td>' +
           (canWrite ? '<td class="ms-actcol"><button class="pd-btn ms-iconbtn" data-edit="' + esc(r.id) + '" title="Edit">' + ico('pencil', 15) + '</button> ' +
             '<button class="pd-btn ms-iconbtn ms-iconbtn-del" data-del="' + esc(r.id) + '" title="Delete">' + ico('trash', 15) + '</button></td>' : '') +
           '</tr>';
@@ -975,6 +979,13 @@ window.MaterialSubmittal = (function () {
       visibleRows().forEach(function (r) { sel[r.id] = xall.checked; });
       renderLog();
     };
+    host.querySelectorAll('[data-mas]').forEach(function (b) {
+      // stopPropagation: the row click opens the editor.
+      b.onclick = function (e) {
+        e.stopPropagation();
+        openTopSheet('MAS', rows.find(function (r) { return String(r.id) === b.dataset.mas; }));
+      };
+    });
     host.querySelectorAll('[data-edit]').forEach(function (b) {
       b.onclick = function (e) { e.stopPropagation(); openForm(rows.find(function (r) { return String(r.id) === b.dataset.edit; })); };
     });
@@ -985,6 +996,60 @@ window.MaterialSubmittal = (function () {
     if (bs) bs.onchange = function () { if (bs.value) bulkStatus(bs.value); };
     var bd = document.getElementById('ms-bulkdel'); if (bd) bd.onclick = bulkDelete;
     var sn = document.getElementById('ms-selnone'); if (sn) sn.onclick = function () { sel = {}; renderLog(); };
+  }
+
+  // ==========================================================================
+  // Top sheets (F-GEN013 MAS / F-GEN011 RFA / F-GEN010 RFI)
+  // --------------------------------------------------------------------------
+  // Only MAS is generated FROM a record — it is the material submittal's own
+  // cover sheet, so every field maps onto a column of this table. RFA and RFI
+  // are separate PMO documents with no register here yet (the RFA template even
+  // says in its own body that it must not be used for a material submittal), so
+  // they open blank with just the project context filled in.
+  // ==========================================================================
+  var tsDefaults = null;                       // per-project, loaded lazily
+  async function ensureTsDefaults() {
+    if (tsDefaults && tsDefaults.__pid === pid) return tsDefaults;
+    var d = await TopSheet.loadDefaults(pid);
+    d.__pid = pid;
+    tsDefaults = d;
+    return d;
+  }
+
+  // MAS field mapping. The template's four description columns are Product Name
+  // / Manufacturer / Specification-BOQ Ref / Location-Use, which correspond to
+  // the log's material, brand+supplier, specification and location.
+  function masDataOf(r) {
+    var maker = [r.brand, r.supplier].filter(Boolean).join(' / ');
+    return {
+      masId:       r.mas_id || codeOf(r) || '',
+      revision:    r.revision_no || '',
+      date:        todayISO(),
+      category:    sectionOf(r) === 'UNCLASSIFIED' ? '' : sectionOf(r),
+      subCategory: discOf(r) || '',
+      attachments: r.file_url ? 'Yes' : 'No',
+      productName: r.material || '',
+      manufacturer: maker,
+      specRef:     r.specification || '',
+      location:    [r.location, r.floor_levels].filter(Boolean).join(' — '),
+      submittedBy: (PROFILE && PROFILE.name) || ''
+    };
+  }
+
+  async function openTopSheet(kind, r) {
+    if (!pid) { UI.toast('Select a project first.', 'error'); return; }
+    var defaults = await ensureTsDefaults();
+    TopSheet.open({
+      kind: kind,
+      project: { id: pid, name: projName() },
+      defaults: defaults,
+      data: kind === 'MAS' && r ? masDataOf(r) : {
+        date: todayISO(),
+        from: (PROFILE && PROFILE.name) || '',
+        to: defaults.default_to || '',
+        consultant: defaults.consultant_name || ''
+      }
+    });
   }
 
   function emptyHTML() {
@@ -1812,6 +1877,8 @@ window.MaterialSubmittal = (function () {
       // A drill-through aging filter / column sort / page cap must not leak
       // across projects.
       bkAging = ''; bkShowAll = false; logSort = { col: null, dir: 1 };
+      tsDefaults = null;                    // client name is per project
+
       load();
       joinCollab();
     });
@@ -1831,6 +1898,8 @@ window.MaterialSubmittal = (function () {
       setTimeout(function () { window.print(); }, 60);
     };
     document.getElementById('ms-clear').onclick = clearAll;
+    document.getElementById('ms-rfa').onclick = function () { openTopSheet('RFA', null); };
+    document.getElementById('ms-rfi').onclick = function () { openTopSheet('RFI', null); };
 
     // ---- filters ----
     var q = document.getElementById('ms-f-search'), t = null;

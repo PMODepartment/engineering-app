@@ -8,7 +8,8 @@
   <script src="../../assets/js/theme.js?v=20260812c"></script>
   <title>Material Submittal Log · Engineering App</title>
   <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260812c" />
-  <link rel="stylesheet" href="module.css?v=20260806a" />
+  <link rel="stylesheet" href="../../assets/css/topsheet.css?v=20260812c" />
+  <link rel="stylesheet" href="module.css?v=20260812c" />
 </head>
 <body>
   <div class="pd-app">
@@ -32,6 +33,12 @@
           <button class="pd-btn" id="ms-import" data-perm="create" title="Import from the PMO Excel workbook"><span data-ico="upload" data-ico-size="16"></span></button>
           <button class="pd-btn" id="ms-export" title="Export to Excel"><span data-ico="download" data-ico-size="16"></span></button>
           <button class="pd-btn" id="ms-print" title="Print / PDF"><span data-ico="printer" data-ico-size="16"></span></button>
+          <span class="ms-tb-sep"></span>
+          <!-- Top sheets. MAS is generated per submittal from the Registry row
+               action; RFA and RFI are standalone documents with no register of
+               their own yet, so they open blank here seeded with project context. -->
+          <button class="pd-btn" id="ms-rfa" title="New Request for Approval (RFA) top sheet">RFA</button>
+          <button class="pd-btn" id="ms-rfi" title="New Request for Information (RFI) top sheet">RFI</button>
           <button class="pd-btn ms-clearbtn" id="ms-clear" title="Clear all submittals for this project" style="display:none;"><span data-ico="trash" data-ico-size="16"></span></button>
         </div>
         <div id="ms-presence" title="People viewing this project"></div>
@@ -74,7 +81,8 @@
   <script src="../../assets/js/offline.js?v=20260812c"></script>
   <script src="../../assets/js/collab.js?v=20260812c"></script>
   <script src="../../assets/js/autosave.js?v=20260812c"></script>
-  <script src="module.js?v=20260806a"></script>
+  <script src="../../assets/js/topsheet.js?v=20260812c"></script>
+  <script src="module.js?v=20260812c"></script>
   <script>
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);

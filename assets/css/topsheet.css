@@ -1,0 +1,107 @@
+/* ============================================================================
+   Top sheets — PMO controlled forms
+     F-GEN013 Rev 0  Material Submittal        (MAS)
+     F-GEN011 Rev 0  Request for Approval      (RFA)
+     F-GEN010 Rev 0  Request for Information   (RFI)
+   ----------------------------------------------------------------------------
+   The layout is a FAITHFUL reproduction of the source workbooks, not a
+   re-design: each form is the workbook's own 9-column A–I grid, with every
+   merged range reproduced as a colspan/rowspan and every border taken from the
+   template's own cell borders. Row/column proportions, the banner shading and
+   the font sizes all come from the files (see modules/material-submittal/
+   CLAUDE.md for the extraction notes).
+
+   ⚠️ Two deliberate departures from the rest of the app's CSS:
+   1. Literal black-on-white values instead of the --pd-* tokens. This renders a
+      CONTROLLED FORM, which must look identical on every printer and must NOT
+      follow the viewer's dark-mode preference — a dark-themed MAS is not the
+      company's form. Everything is scoped under .ts-doc so nothing leaks.
+   2. pt/mm units rather than px, because the output is A4 paper.
+   ============================================================================ */
+
+.ts-doc {
+  width: 210mm; min-height: 297mm; box-sizing: border-box;
+  margin: 0 auto; padding: 10mm 9mm;
+  background: #fff; color: #000;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* The form grid. table-layout:fixed + a 9-col colgroup reproduces the
+   workbook's columns; border-collapse makes the per-cell borders meet like
+   Excel's do. */
+.ts-t { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.ts-t td {
+  border: 0 solid #000; padding: 2px 4px; vertical-align: top;
+  font-size: 9pt; line-height: 1.2; word-wrap: break-word; overflow-wrap: anywhere;
+}
+/* Border edges, mapped 1:1 from each template cell's own top/right/bottom/left. */
+.bt { border-top-width: 1px; }
+.br { border-right-width: 1px; }
+.bb { border-bottom-width: 1px; }
+.bl { border-left-width: 1px; }
+
+/* Section banners — Excel theme 0, tint −0.25 ("White, Background 1, Darker 25%").
+   ⚠️ Every rule below is written as `.ts-t td.x`, NOT `.x`. The base rule
+   `.ts-t td` scores (0,1,1); a bare class scores (0,1,0) and therefore LOSES to
+   it, which silently flattened all three forms to the 9pt body size. */
+.ts-t td.ts-band { background: #BFBFBF; font-weight: 700; font-size: 11pt; }
+.ts-t td.ts-band-c { text-align: center; font-size: 16pt; letter-spacing: .02em; }
+
+.ts-t td.ts-b   { font-weight: 700; }
+.ts-t td.ts-c   { text-align: center; }
+.ts-t td.ts-11  { font-size: 11pt; }
+.ts-t td.ts-10  { font-size: 10pt; }
+.ts-t td.ts-9   { font-size: 9pt; }
+.ts-t td.ts-8   { font-size: 8pt; }
+/* Values the app fills in, so a reviewer can tell them from the blank form. */
+.ts-val { font-weight: 700; }
+.ts-pre { white-space: pre-wrap; }
+
+/* Form identifier, printed in the sheet's own footer area like the source. */
+.ts-formno { font-size: 8pt; }
+
+/* ---- on-screen preview chrome (never printed) ---- */
+.ts-prev { background: #6b6b6b; padding: 16px; overflow: auto; max-height: 70vh; }
+.ts-prev .ts-doc { box-shadow: 0 2px 14px rgba(0,0,0,.45); }
+
+/* ---- print ----------------------------------------------------------------
+   Everything except the sheet is hidden rather than the sheet being moved, so
+   the modal/app chrome around it never reaches the paper. */
+@page { size: A4 portrait; margin: 0; }
+@media print {
+  html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+  body.ts-printing * { visibility: hidden !important; }
+  body.ts-printing .ts-doc, body.ts-printing .ts-doc * { visibility: visible !important; }
+  body.ts-printing .ts-doc {
+    position: absolute; left: 0; top: 0; margin: 0;
+    box-shadow: none; page-break-after: always;
+  }
+  body.ts-printing .ts-prev { background: #fff; padding: 0; max-height: none; overflow: visible; }
+  .ts-noprint { display: none !important; }
+}
+
+/* ---- fill-in dialog: fields on the left, live A4 preview on the right ----- */
+.ts-wrap { display: flex; gap: 14px; align-items: stretch; }
+.ts-side {
+  flex: 0 0 300px; max-height: 70vh; overflow-y: auto; padding-right: 4px;
+  display: flex; flex-direction: column; gap: 9px;
+}
+.ts-side-hd {
+  font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--pd-muted); padding-bottom: 4px; border-bottom: 1px solid var(--pd-line);
+}
+.ts-fld { display: flex; flex-direction: column; gap: 3px; }
+.ts-fld > span { font-size: 11px; font-weight: 600; color: var(--pd-muted); }
+.ts-fld textarea.pd-input { resize: vertical; min-height: 42px; font-family: inherit; }
+.ts-prev { flex: 1; min-width: 0; }
+/* The sheet is 210mm wide; scale it down so both panes fit the dialog. */
+.ts-prev .ts-doc { transform: scale(.62); transform-origin: top left; margin-bottom: -110mm; }
+
+@media (max-width: 900px) {
+  .ts-wrap { flex-direction: column; }
+  .ts-side { flex: none; max-height: none; }
+  .ts-prev .ts-doc { transform: scale(.45); margin-bottom: -160mm; }
+}
+@media print {
+  .ts-prev .ts-doc { transform: none !important; margin-bottom: 0 !important; }
+}

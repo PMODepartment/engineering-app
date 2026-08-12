@@ -354,7 +354,7 @@ html.pd-dark .ms-pill.s-info      { background:rgba(30,78,140,.26);  color:#8fbd
 
 /* ---- Print -------------------------------------------------------------- */
 @media print {
-  .pd-topbar, .ms-filters, .ms-actcol, .ms-cb, .ms-doccol { display:none !important; }
+  .pd-topbar, .ms-filters, .ms-actcol, .ms-cb, .ms-doccol, .ms-tscol { display:none !important; }
   .ms-tablecard { max-height:none; overflow:visible; }
   .ms-table { min-width:0; font-size:var(--ms-fs-micro); }
   .ms-table th.ms-fz1, .ms-table td.ms-fz1, .ms-table th.ms-fz2, .ms-table td.ms-fz2 { position:static; }
@@ -387,3 +387,8 @@ html.pd-dark .ms-pill.s-info      { background:rgba(30,78,140,.26);  color:#8fbd
   .ms-codeparts { grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); }
   .ms-legend { min-width: 0; }
 }
+
+/* ---- Top-sheet column (F-GEN013 MAS generator) ---------------------------
+   A read action, so it is present for every role — unlike .ms-actcol, which is
+   only emitted when the user may write. Sized like .ms-doccol. */
+.ms-tscol { width: 47px; text-align: center; }
