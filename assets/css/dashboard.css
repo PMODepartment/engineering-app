@@ -88,6 +88,17 @@ a:hover { text-decoration: underline; }
 .pd-sidebar .pd-nav-sub { font-size: 10.5px; font-weight: 400; color: #96a0b0; margin-top: 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
 .pd-sidebar nav a.active .pd-nav-sub { color: rgba(255,255,255,.82); }
+/* Sidebar footer: cross-app link to the Planners Dashboard. Lives here, not in
+   engineering.css, because nav.js renders it on EVERY page and the module pages
+   are the only ones that load engineering.css. */
+.pd-nav-foot { margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.12); }
+.pd-nav-sibling {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border-radius: 8px; font-size: 12.5px; color: #96a0b0;
+}
+.pd-nav-sibling:hover { background: rgba(255,255,255,.08); color: #fff; text-decoration: none; }
+.pd-nav-sibling .pd-navico { opacity: .75; }
+.pd-nav-sibling:hover .pd-navico { opacity: 1; }
 
 /* Collapsible sidebar (desktop): the toggle adds .pd-collapsed on .pd-app, which
    shrinks the sidebar to a slim ICON RAIL (labels/sections hide; hover title = tooltip)

@@ -41,7 +41,11 @@
 
     html += section('Engineering');
     html += link('projects.html', 'grid', 'Projects', null, active === 'projects');
-    html += link('dashboard.html', 'home', 'Dashboard', pn || 'No project selected', active === 'dashboard');
+    // On the Projects page the user is choosing a project, so the previously
+    // selected one must not be advertised underneath Dashboard as if it were
+    // already in context.
+    html += link('dashboard.html', 'home', 'Dashboard',
+      active === 'projects' ? null : (pn || 'No project selected'), active === 'dashboard');
 
     // Engineering modules — config-driven, permission-filtered. A module the
     // user's role cannot open is omitted entirely rather than shown disabled.

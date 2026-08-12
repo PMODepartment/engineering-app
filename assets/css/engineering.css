@@ -127,16 +127,6 @@
 /* ---- permission-denied controls (Perm.applyReadonly disable mode) -------- */
 .pd-perm-denied { opacity: .45; cursor: not-allowed; }
 
-/* ---- sidebar footer: cross-app link ------------------------------------- */
-.pd-nav-foot { margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.12); }
-.pd-nav-sibling {
-  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-  border-radius: 8px; font-size: 12.5px; color: #96a0b0;
-}
-.pd-nav-sibling:hover { background: rgba(255,255,255,.08); color: #fff; text-decoration: none; }
-.pd-nav-sibling .pd-navico { opacity: .75; }
-.pd-nav-sibling:hover .pd-navico { opacity: 1; }
-
 /* ---- notifications page -------------------------------------------------- */
 .eng-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
 .eng-filters .pd-input, .eng-filters .pd-select { max-width: 220px; }
