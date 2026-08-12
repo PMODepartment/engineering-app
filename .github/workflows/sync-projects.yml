@@ -28,15 +28,23 @@
 #     are Engineering-App-specific (separate auth tables).
 # =============================================================================
 
-name: Sync projects from Planners Dashboard
+name: Sync projects from Planners Dashboard (fallback)
+
+# =============================================================================
+# ⚠️ SUPERSEDED by the `sync-projects` Edge Function (supabase/functions/
+# sync-projects/index.ts), which the app calls from Admin → Projects → "Sync
+# now", and which the Supabase dashboard runs on a schedule.
+#
+# KEPT as a manual fallback: if the function is broken or its secrets are wrong,
+# this still works and is a known-good path back to a synced state. It does NOT
+# prune — a project deleted upstream stays here — so prefer the in-app button.
+#
+# ⚠️ The nightly `schedule:` trigger was REMOVED so the two mechanisms cannot
+# both run. Do not re-add it without removing the Supabase schedule first;
+# two concurrent syncs would race on the same upserts.
+# =============================================================================
 
 on:
-  schedule:
-    # 22:00 UTC = 06:00 Asia/Manila. Cron here is ALWAYS UTC — it does not follow
-    # Philippine time, and there is no DST to worry about (UTC+8 year-round).
-    # GitHub may delay scheduled runs under load; treat the time as approximate.
-    - cron: '0 22 * * *'
-
   # Manual "sync now", with an optional dry run. Use dry_run the first time, to
   # confirm the secrets work before anything is written.
   workflow_dispatch:

@@ -91,9 +91,92 @@
             '</strong> and synced into this app. ' +
             '<a href="' + Fmt.esc(src.url) + '" target="_blank" rel="noopener">Open it there</a> ' +
             'to add, edit, archive or delete one.</span>' +
+            '<div style="flex:1;"></div>' +
+            // The sync used to be a button on github.com (Actions → Run workflow),
+            // which meant leaving the app and knowing the repo existed. Same job,
+            // same code path as the nightly run — see supabase/functions/sync-projects.
+            '<button class="pd-btn" id="btn-sync-projects" style="white-space:nowrap;">Sync now</button>' +
           '</div>';
         if (window.Icons) Icons.hydrate(wrap);
+        document.getElementById('btn-sync-projects').onclick = syncProjects;
       }
+    }
+
+    // -------- Sync projects from the Planners Dashboard --------
+    // Two-step by design: the first click only ever COPIES (upsert), which is
+    // recoverable by re-running. Removing projects that no longer exist upstream
+    // is a separate, explicit second click, because a delete here is not
+    // recoverable — see the PRUNE note in the Edge Function.
+    async function syncProjects() {
+      var btn = document.getElementById('btn-sync-projects');
+      btn.disabled = true; btn.textContent = 'Syncing…';
+      try {
+        var res = await window.getSB().functions.invoke('sync-projects', { body: {} });
+        if (res.error) throw new Error(res.error.message || 'Sync failed');
+        var r = res.data || {};
+        if (r.ok === false) throw new Error(r.error || 'Sync failed');
+
+        await loadProjects();
+        var g = (r.tables && r.tables.group_heads) || {}, p = (r.tables && r.tables.projects) || {};
+        UI.toast('Synced ' + (p.written || 0) + ' project(s) and ' +
+                 (g.written || 0) + ' group head(s).', 'success');
+
+        var stale = (r.orphans || []).filter(function (o) { return o.removable; });
+        var blocked = (r.orphans || []).filter(function (o) { return !o.removable; });
+        if (stale.length || blocked.length) reportOrphans(stale, blocked);
+      } catch (e) {
+        UI.toast(e.message, 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Sync now';
+      }
+    }
+
+    // Projects that exist here but no longer exist in the Planners Dashboard.
+    // The old GitHub Action never deleted, so these accumulated silently and no
+    // amount of syncing cleared them.
+    function reportOrphans(stale, blocked) {
+      var list = function (arr) {
+        return arr.map(function (o) {
+          var holds = Object.keys(o.holds || {}).map(function (t) {
+            return o.holds[t] + ' ' + t.replace('_', ' ');
+          }).join(', ');
+          return '<li><strong>' + Fmt.esc(o.id) + '</strong> — ' + Fmt.esc(o.name || '') +
+                 (holds ? ' <span style="color:var(--pd-muted);">(' + Fmt.esc(holds) + ')</span>' : '') +
+                 '</li>';
+        }).join('');
+      };
+      var m = UI.modal(
+        '<h2 style="margin-top:0;">Projects no longer in the Planners Dashboard</h2>' +
+        (stale.length
+          ? '<p style="color:var(--pd-muted);">These hold no drawings or submittals here, so they can ' +
+            'be removed safely:</p><ul>' + list(stale) + '</ul>'
+          : '') +
+        (blocked.length
+          ? '<p style="color:var(--pd-muted);">These still hold engineering data, so they are left ' +
+            'alone. Deleting one would orphan that work — decide deliberately:</p><ul>' +
+            list(blocked) + '</ul>'
+          : '') +
+        '<div style="margin-top:16px;text-align:right;">' +
+          '<button class="pd-btn" id="o-close">Close</button> ' +
+          (stale.length
+            ? '<button class="pd-btn pd-btn-danger" id="o-prune">Remove ' + stale.length + ' stale project(s)</button>'
+            : '') +
+        '</div>');
+      m.el.querySelector('#o-close').onclick = m.close;
+      var pr = m.el.querySelector('#o-prune');
+      if (pr) pr.onclick = async function () {
+        pr.disabled = true; pr.textContent = 'Removing…';
+        try {
+          var res = await window.getSB().functions.invoke('sync-projects', { body: { prune: true } });
+          if (res.error) throw new Error(res.error.message || 'Prune failed');
+          if (res.data && res.data.ok === false) throw new Error(res.data.error);
+          UI.toast('Removed ' + ((res.data && res.data.pruned) || []).length + ' stale project(s).', 'success');
+          m.close(); await loadProjects();
+        } catch (e) {
+          UI.toast(e.message, 'error');
+          pr.disabled = false; pr.textContent = 'Remove ' + stale.length + ' stale project(s)';
+        }
+      };
     }
 
     // -------- Users --------
