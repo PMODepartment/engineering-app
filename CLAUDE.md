@@ -77,3 +77,26 @@ Planners schema changed and the projection needs looking at.
   yet); see `modules/method-register/CLAUDE.md`
 
 See `docs/MODULE_GUIDE.md` before adding or building out a module.
+
+## Project-first is now enforced everywhere
+
+A project is "current" only because the user chose it. Three rules, and they have
+to stay in agreement or the shell and the modules contradict each other:
+
+1. **`projects.html` CLEARS the selection on load** — it *is* the selection step,
+   so arriving there means "not chosen yet". Clears `pd_project`,
+   `pd_project_name`, `pd_group_head`. ⚠️ **Except when the URL carries
+   `?project=`** — that is the Planners Dashboard hand-off `config.js` adopts,
+   an explicit choice made on the way in, and clearing it would discard it.
+2. **`dashboard.html` and both modules redirect to `projects.html`** when nothing
+   valid is stored. ⚠️ **Never fall back to `projects[0]`** — that was a real bug:
+   a `<select>` with no explicit value reports its FIRST OPTION, so a missing or
+   stale id silently became "whichever project sorts first" and its register was
+   shown as though the user had picked it.
+   ⚠️ `location.replace()` does **not** halt the running script — the caller must
+   bail as well (drawing-register's `loadProjects()` returns a boolean for this).
+3. **`nav.js` gates the project-scoped items** (Dashboard + every module) when
+   nothing is selected: inert, `href` → `projects.html`, tooltip "Select a project
+   first". Otherwise they would be links that bounce straight back, which reads as
+   broken. Projects / Notifications / Administration are not project-scoped and are
+   never gated.

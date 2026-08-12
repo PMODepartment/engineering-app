@@ -88,6 +88,11 @@ a:hover { text-decoration: underline; }
 .pd-sidebar .pd-nav-sub { font-size: 10.5px; font-weight: 400; color: #96a0b0; margin-top: 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
 .pd-sidebar nav a.active .pd-nav-sub { color: rgba(255,255,255,.82); }
+/* Project-scoped nav items with no project chosen. They still point at
+   projects.html (so a click lands somewhere useful rather than doing nothing),
+   but read as unavailable and carry a "Select a project first" tooltip. */
+.pd-sidebar nav a.pd-nav-disabled { opacity: .38; }
+.pd-sidebar nav a.pd-nav-disabled:hover { background: rgba(255,255,255,.04); color: #cbd2dd; }
 /* Sidebar footer: cross-app link to the Planners Dashboard. Lives here, not in
    engineering.css, because nav.js renders it on EVERY page and the module pages
    are the only ones that load engineering.css. */

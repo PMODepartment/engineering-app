@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <link rel="apple-touch-icon" href="assets/img/icon.png" />
-  <script src="assets/js/theme.js?v=20260812c"></script>
+  <script src="assets/js/theme.js?v=20260812e"></script>
   <title>Projects — Engineering App</title>
-  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260812c" />
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260812e" />
 </head>
 <body>
   <div class="pd-app">
@@ -67,13 +67,13 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="assets/js/config.js?v=20260812c"></script>
-  <script src="assets/js/auth.js?v=20260812c"></script>
-  <script src="assets/js/db.js?v=20260812c"></script>
-  <script src="assets/js/ui.js?v=20260812c"></script>
-  <script src="assets/js/icons.js?v=20260812c"></script>
-  <script src="assets/js/perm.js?v=20260812c"></script>
-  <script src="assets/js/nav.js?v=20260812c"></script>
+  <script src="assets/js/config.js?v=20260812e"></script>
+  <script src="assets/js/auth.js?v=20260812e"></script>
+  <script src="assets/js/db.js?v=20260812e"></script>
+  <script src="assets/js/ui.js?v=20260812e"></script>
+  <script src="assets/js/icons.js?v=20260812e"></script>
+  <script src="assets/js/perm.js?v=20260812e"></script>
+  <script src="assets/js/nav.js?v=20260812e"></script>
   <script>
   (function () {
     // A project carries ONE group_head_id. There is no tree: sorting, filtering
@@ -83,6 +83,25 @@
     var GH = [], PROJ = [], ghById = {};
     var selectedGh = null;          // null = all group heads
     var view = 'list', groupBy = 'grouphead', sortBy = 'name';
+
+    // ---- landing here CLEARS the current project -----------------------------
+    // This page IS the selection step, so arriving at it means "I have not
+    // chosen yet". Keeping the previous selection made the shell contradict
+    // itself: the sidebar advertised a project underneath Dashboard, and
+    // Dashboard/the modules would open it, while the user was still standing on
+    // the screen where a project is supposed to be picked.
+    //
+    // Runs before Nav.render so the sidebar paints "No project selected", and
+    // before anything reads pd_project.
+    //
+    // ⚠️ EXCEPT when config.js has just adopted a ?project= hand-off from the
+    // Planners Dashboard — that IS an explicit choice, made on the way in, and
+    // clearing it here would silently discard it.
+    if (!/[?&]project=/.test(location.search)) {
+      ['pd_project', 'pd_project_name', 'pd_group_head'].forEach(function (k) {
+        try { sessionStorage.removeItem(k); } catch (e) { /* private mode */ }
+      });
+    }
 
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);
