@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="../../assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="../../assets/img/icon.png" />
+  <script src="../../assets/js/theme.js?v=20260812c"></script>
+  <title>Method Register · Engineering App</title>
+  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260812c" />
+</head>
+<body>
+  <div class="pd-app">
+    <!-- Sidebar-less shell, matches Drawing Register / Material Submittal Log. -->
+    <div class="pd-content">
+      <div class="pd-topbar">
+        <a class="pd-btn" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
+        <h1 style="margin:0; display:flex; align-items:center; gap:8px;">
+          <span data-ico="clipboard" data-ico-size="20"></span> Method Register
+        </h1>
+        <div id="user-bar"></div>
+      </div>
+
+      <div class="pd-main">
+        <div class="pd-empty">
+          <div style="font-size:16px; font-weight:600; margin-bottom:6px;">Method Register is coming soon</div>
+          <div>This module will track method statements — submission, review and approval — the same way Drawing Register and Material Submittal Log track their documents.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../assets/js/config.js?v=20260812c"></script>
+  <script src="../../assets/js/auth.js?v=20260812c"></script>
+  <script src="../../assets/js/db.js?v=20260812c"></script>
+  <script src="../../assets/js/ui.js?v=20260812c"></script>
+  <script src="../../assets/js/icons.js?v=20260812c"></script>
+  <script>
+    AppAuth.requireLogin(function (user, profile) {
+      UI.renderUserBar(profile);
+      if (window.Icons) Icons.hydrate(document.body);
+    });
+  </script>
+</body>
+</html>

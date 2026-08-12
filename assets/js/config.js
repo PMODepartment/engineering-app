@@ -37,8 +37,9 @@ window.APP_CONFIG = {
   // shell changes are required — the launcher, nav and dashboard all read this
   // list. Follow docs/MODULE_GUIDE.md.
   MODULES: [
-    { key: 'drawing-register',   name: 'Drawing Register',       path: 'modules/drawing-register/index.html',   icon: 'ruler', enabled: true },
-    { key: 'material-submittal', name: 'Material Submittal Log', path: 'modules/material-submittal/index.html', icon: 'box',   enabled: true },
+    { key: 'drawing-register',   name: 'Drawing Register',       path: 'modules/drawing-register/index.html',   icon: 'ruler',     enabled: true },
+    { key: 'material-submittal', name: 'Material Submittal Log', path: 'modules/material-submittal/index.html', icon: 'box',       enabled: true },
+    { key: 'method-register',    name: 'Method Register',        path: 'modules/method-register/index.html',    icon: 'clipboard', enabled: true },
   ],
 };
 
