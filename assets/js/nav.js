@@ -58,11 +58,13 @@
     html += '</nav>';
 
     // Cross-app link back to the Planners Dashboard. The two apps are siblings
-    // with separate logins, so this is an explicit external link, not a nav item.
+    // with separate logins, so this opens in a new tab rather than navigating
+    // the current session away.
     if (APP_CONFIG.PLANNING_APP_URL) {
       html += '<div class="pd-nav-foot">' +
-        '<a class="pd-nav-sibling" href="' + Fmt.esc(APP_CONFIG.PLANNING_APP_URL) + '" title="Planners Dashboard">' +
-        '<span class="pd-navico" data-ico="arrowRight"></span>' +
+        '<a class="pd-nav-sibling" href="' + Fmt.esc(APP_CONFIG.PLANNING_APP_URL) +
+        '" target="_blank" rel="noopener" title="Opens Planners Dashboard in a new tab">' +
+        '<span class="pd-navico" data-ico="externalLink"></span>' +
         '<span class="pd-navtxt">Planners Dashboard</span></a></div>';
     }
 

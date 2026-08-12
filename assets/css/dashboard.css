@@ -94,7 +94,8 @@ a:hover { text-decoration: underline; }
    instead of hiding it entirely. font-size:0 collapses the bare-text labels while the
    fixed-size SVG icons stay, so it works whether or not a label is wrapped in a span. */
 .pd-app.pd-collapsed .pd-sidebar { width: 64px; flex-basis: 64px; padding-left: 8px; padding-right: 8px; }
-.pd-app.pd-collapsed .pd-sidebar nav a { justify-content: center; padding: 11px 0; gap: 0; font-size: 0; }
+.pd-app.pd-collapsed .pd-sidebar nav a,
+.pd-app.pd-collapsed .pd-nav-sibling { justify-content: center; padding: 11px 0; gap: 0; font-size: 0; }
 .pd-app.pd-collapsed .pd-navtxt { display: none; }   /* wrapped labels (with sub-captions whose own font-size ignores the font-size:0 trick) */
 .pd-app.pd-collapsed .pd-navico { margin-right: 0; }
 .pd-app.pd-collapsed .pd-navsec { display: none; }
@@ -636,7 +637,8 @@ body { overflow-x: clip; }
   /* Re-assert the FULL drawer even when .pd-collapsed is set (see note 2 above).
      On mobile the hamburger opens/closes the drawer; it never icon-rails. */
   .pd-app.pd-collapsed .pd-sidebar { width: var(--pd-drawer-w); flex-basis: var(--pd-drawer-w); padding-left: 16px; padding-right: 16px; }
-  .pd-app.pd-collapsed .pd-sidebar nav a { justify-content: flex-start; padding: 12px; gap: 10px; font-size: 13.5px; }
+  .pd-app.pd-collapsed .pd-sidebar nav a,
+  .pd-app.pd-collapsed .pd-nav-sibling { justify-content: flex-start; padding: 12px; gap: 10px; font-size: 13.5px; }
   .pd-app.pd-collapsed .pd-navtxt { display: flex; }
   .pd-app.pd-collapsed .pd-navsec { display: block; }
   .pd-app.pd-collapsed .pd-navico { margin-right: 11px; }

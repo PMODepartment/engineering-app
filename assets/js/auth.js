@@ -28,19 +28,12 @@
   var ROLES = ['super_admin', 'admin', 'planner', 'user', 'viewer'];
   var AUTO_APPROVE = ['super_admin', 'admin', 'planner'];
 
-  function profKey(uid) { return 'pd_prof_' + uid; }
-
   async function loadProfile(user) {
-    // Try the sessionStorage cache first.
-    try {
-      var cached = sessionStorage.getItem(profKey(user.id));
-      if (cached) return JSON.parse(cached);
-    } catch (e) {}
-
+    // Always fetch fresh: admin edits (name/role/status) must take effect
+    // without forcing the user to log out. This call is cheap.
     var { data, error } = await getSB()
       .from('users').select('*').eq('id', user.id).single();
     if (error || !data) return null;
-    try { sessionStorage.setItem(profKey(user.id), JSON.stringify(data)); } catch (e) {}
     return data;
   }
 
@@ -128,11 +121,6 @@
   }
 
   async function logout() {
-    try {
-      Object.keys(sessionStorage).forEach(function (k) {
-        if (k.indexOf('pd_prof_') === 0) sessionStorage.removeItem(k);
-      });
-    } catch (e) {}
     await getSB().auth.signOut();
     redirect('index.html');
   }
