@@ -573,3 +573,22 @@ transcribed from the issued documents instead. What actually differed:
   side by side against the two issued PDFs. ⚠️ **Not verified signed-in, and not yet printed on
   paper** — margins/scale at the printer are the owner's check.
 - Assets `topsheet.js/css?v=20260812d`, `module.js?v=20260812d`.
+
+## ⚠️ REAL BUG: the module silently auto-selected a project (2026-08-12c) — fmlozano
+Owner: *"Why does the Dashboard auto-select the Megaworld Projects DP Tracker? I am in the Projects
+tab where I am supposed to select a project first."*
+- `init()` read **`pid = selEl.value || (projects[0] && projects[0].id)`**. A `<select>` with options
+  and no explicit value reports its **FIRST OPTION**, so whenever `pd_project` was missing, stale, or
+  pointed at a project the user can no longer access, the module silently adopted **whichever project
+  sorts first** and rendered its log as though the user had chosen it.
+- **This contradicted the shell.** `dashboard.html` has always redirected to `projects.html` when
+  nothing is selected ("there is nothing meaningful to show until a project is chosen"). The modules
+  did the opposite, so the shell and the modules disagreed about whether a project was in context.
+- Now: validate the stored id against the accessible list and `location.replace('../../projects.html')`
+  when it fails. **`drawing-register` had the identical bug** (`sessionStorage.getItem('pd_project') ||
+  projects[0].id`) and is fixed the same way.
+- ⚠️ **`location.replace()` does NOT stop the running script.** drawing-register's `loadProjects()`
+  returns a boolean and `init()` bails on it — otherwise the rest of init keeps wiring handlers against
+  a null `pid` until navigation commits.
+- Verified: 5/5 in a Node harness over the corrected logic (nothing stored / empty string / stale id /
+  valid id / valid id that sorts last), `node --check` on both modules. **Not verified signed-in.**

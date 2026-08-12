@@ -1867,9 +1867,18 @@ window.MaterialSubmittal = (function () {
     try { projects = (await PDb.getProjects()) || []; } catch (e) { projects = []; }
     projects = projects.filter(function (p) { return !AppAuth.canAccessProject || AppAuth.canAccessProject(profile, p.id); });
     selEl.innerHTML = projects.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.name || p.id) + '</option>'; }).join('');
+    // ⚠️ NEVER fall back to the first project. This used to read
+    //   pid = selEl.value || projects[0].id
+    // and a <select> with no explicit value reports its FIRST OPTION — so a
+    // missing (or stale, or no-longer-accessible) stored project silently
+    // became "whichever project sorts first", whose log was then shown as if
+    // the user had chosen it. dashboard.html is project-first; the modules must
+    // agree, or the shell and the module disagree about what is in context.
     var stored = sessionStorage.getItem('pd_project');
-    if (stored && projects.some(function (p) { return String(p.id) === String(stored); })) selEl.value = stored;
-    pid = selEl.value || (projects[0] && projects[0].id) || null;
+    var ok = stored && projects.some(function (p) { return String(p.id) === String(stored); });
+    if (!ok) { location.replace('../../projects.html'); return; }
+    selEl.value = stored;
+    pid = stored;
     if (UI.enhanceProjectSelect) UI.enhanceProjectSelect(selEl);
     selEl.addEventListener('change', function () {
       pid = selEl.value;

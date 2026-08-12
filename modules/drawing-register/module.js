@@ -392,7 +392,7 @@ window.DrawingRegister = (function () {
     profile = prof; uid = (user && user.id) || (prof && prof.id);
     var role = (prof && prof.role) || window.__role || '';
     canWrite = ['super_admin','admin','planner'].indexOf(role) !== -1;
-    await loadProjects();
+    if (!(await loadProjects())) return;   // no project chosen — redirecting
 
     document.getElementById('dr-add').onclick = function () { addDrawing(); };
     document.getElementById('dr-import').onclick = function () { openImport(); };
@@ -516,7 +516,17 @@ window.DrawingRegister = (function () {
   async function loadProjects() {
     var projects = await PDb.getProjects();
     var sel = document.getElementById('dr-project');
-    pid = sessionStorage.getItem('pd_project') || (projects[0] && projects[0].id) || null;
+    // ⚠️ NEVER fall back to projects[0]. This used to read
+    //   pid = sessionStorage.getItem('pd_project') || projects[0].id
+    // so opening the module with nothing chosen silently adopted whichever
+    // project happened to sort first and presented its register as though the
+    // user had picked it. dashboard.html's rule is project-first — there is
+    // nothing meaningful to show until a project is chosen — and the modules
+    // have to obey it too, or the shell and the modules disagree about whether
+    // a project is in context.
+    var stored = sessionStorage.getItem('pd_project');
+    pid = (stored && projects.some(function (p) { return String(p.id) === String(stored); })) ? stored : null;
+    if (!pid) { location.replace('../../projects.html'); return false; }
     sel.innerHTML = '<option value="">Select project…</option>' +
       projects.map(function (p) {
         return '<option value="' + p.id + '"' + (p.id === pid ? ' selected' : '') + '>' + Fmt.esc(p.name) + '</option>';
@@ -524,6 +534,7 @@ window.DrawingRegister = (function () {
     UI.enhanceProjectSelect(sel);   // shared searchable project picker
     var cur = projects.find(function (p){ return p.id === pid; });
     projName = cur ? cur.name : '';
+    return true;
   }
 
   async function load(opts) {
