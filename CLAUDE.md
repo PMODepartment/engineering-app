@@ -73,8 +73,8 @@ Planners schema changed and the projection needs looking at.
 
 - `modules/drawing-register/` — live
 - `modules/material-submittal/` — live
-- `modules/method-register/` — placeholder only (`enabled: true`, no table/CRUD
-  yet); see `modules/method-register/CLAUDE.md`
+- `modules/method-register/` — live (Summary + Registry, migration `0013`);
+  see `modules/method-register/CLAUDE.md`
 
 See `docs/MODULE_GUIDE.md` before adding or building out a module.
 

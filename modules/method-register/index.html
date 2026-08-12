@@ -5,41 +5,73 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/png" href="../../assets/img/favicon.png" />
   <link rel="apple-touch-icon" href="../../assets/img/icon.png" />
-  <script src="../../assets/js/theme.js?v=20260812e"></script>
+  <script src="../../assets/js/theme.js?v=20260812f"></script>
   <title>Method Register · Engineering App</title>
-  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260812e" />
+  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260812f" />
+  <link rel="stylesheet" href="module.css?v=20260812f" />
 </head>
 <body>
   <div class="pd-app">
-    <!-- Sidebar-less shell, matches Drawing Register / Material Submittal Log. -->
+    <!-- Sidebar-less shell (matches Drawing Register / Material Submittal Log). -->
     <div class="pd-content">
       <div class="pd-topbar">
-        <a class="pd-btn" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
-        <h1 style="margin:0; display:flex; align-items:center; gap:8px;">
-          <span data-ico="clipboard" data-ico-size="20"></span> Method Register
-        </h1>
+        <a class="pd-btn mr-modback" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
+        <h1 class="mr-title" style="margin:0;"><span class="mr-title-ico" data-ico="clipboard" data-ico-size="20"></span> <span class="mr-title-txt">Method Register</span></h1>
+        <div class="mr-projctx">
+          <select class="pd-select mr-project" id="mr-project" title="Project"></select>
+        </div>
+        <div class="mr-tabs" role="tablist">
+          <button class="mr-tab active" data-view="summary">Summary</button>
+          <button class="mr-tab" data-view="registry">Registry</button>
+        </div>
+        <!-- Global tools sit beside the profile (theme.js injects the dark-mode toggle before #user-bar) -->
+        <div class="mr-topbar-tools" id="mr-topbar-tools">
+          <button class="pd-btn mr-tb-labeled pd-btn-primary" id="mr-add" data-perm="create" title="Add a method statement">+ Add</button>
+          <span class="mr-tb-sep"></span>
+          <button class="pd-btn" id="mr-import" data-perm="create" title="Import the Method Registry Tracker workbook"><span data-ico="upload" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="mr-export" title="Export to Excel"><span data-ico="download" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="mr-print" title="Print / PDF"><span data-ico="printer" data-ico-size="16"></span></button>
+          <button class="pd-btn mr-clearbtn" id="mr-clear" title="Clear the register for this project" style="display:none;"><span data-ico="trash" data-ico-size="16"></span></button>
+        </div>
         <div id="user-bar"></div>
       </div>
 
       <div class="pd-main">
-        <div class="pd-empty">
-          <div style="font-size:16px; font-weight:600; margin-bottom:6px;">Method Register is coming soon</div>
-          <div>This module will track method statements — submission, review and approval — the same way Drawing Register and Material Submittal Log track their documents.</div>
+        <!-- Filter bar — Registry view only. -->
+        <div class="mr-filters" id="mr-filters">
+          <span class="mr-filt-ico" data-ico="filter" data-ico-size="15"></span>
+          <input class="pd-input mr-search" id="mr-f-search" placeholder="Search title, code, group…" />
+          <select class="pd-select" id="mr-f-trade"><option value="">All trades</option></select>
+          <select class="pd-select" id="mr-f-status"><option value="">All statuses</option></select>
+          <select class="pd-select" id="mr-f-ballin"><option value="">All ball-in-court</option></select>
+          <label class="mr-chk" title="Hide rows the workbook does not count toward the target (N=0)"><input type="checkbox" id="mr-f-counted" /> Counted only</label>
+          <button class="mr-clearfilt" id="mr-f-clear" title="Clear all filters" hidden><span data-ico="x" data-ico-size="13"></span> Clear</button>
+          <span class="mr-count" id="mr-count"></span>
         </div>
+
+        <div id="mr-view"></div>
       </div>
     </div>
   </div>
 
+  <input type="file" id="mr-file" accept=".xlsx,.xls" style="display:none;" />
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="../../assets/js/config.js?v=20260812e"></script>
-  <script src="../../assets/js/auth.js?v=20260812e"></script>
-  <script src="../../assets/js/db.js?v=20260812e"></script>
-  <script src="../../assets/js/ui.js?v=20260812e"></script>
-  <script src="../../assets/js/icons.js?v=20260812e"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="../../assets/js/config.js?v=20260812f"></script>
+  <script src="../../assets/js/auth.js?v=20260812f"></script>
+  <script src="../../assets/js/db.js?v=20260812f"></script>
+  <script src="../../assets/js/ui.js?v=20260812f"></script>
+  <script src="../../assets/js/icons.js?v=20260812f"></script>
+  <script src="../../assets/js/perm.js?v=20260812f"></script>
+  <script src="module.js?v=20260812f"></script>
   <script>
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);
-      if (window.Icons) Icons.hydrate(document.body);
+      MethodRegister.init(user, profile);
+      // Hide write actions this role may not perform. The DB enforces the same
+      // rules via RLS — this is only UX.
+      Perm.applyReadonly(document, profile);
     });
   </script>
 </body>

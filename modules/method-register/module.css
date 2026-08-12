@@ -1,0 +1,208 @@
+/* Method Register — module styles (all classes prefixed .mr-)
+   Chrome (topbar / tabs / tools / filter bar) is copied VERBATIM from
+   material-submittal/module.css, which took it from drawing-register after a
+   computed-style diff against the suite. Do not re-invent it: see the
+   2026-07-20(c) note in material-submittal/CLAUDE.md for what breaks. */
+
+/* ------------------------------- TYPE SCALE -------------------------------
+   The SAME six steps as the other two registers — the three modules sit in one
+   suite, so a heading here must be the size of a heading there. Never a raw px
+   font-size; `micro` is the readable floor. */
+:root {
+  --mr-fs-micro:11px;
+  --mr-fs-sm:12px;
+  --mr-fs-base:13px;
+  --mr-fs-lg:15px;
+  --mr-fs-xl:20px;
+  --mr-fs-kpi:32px;
+}
+
+/* ---- Shared topbar chrome (VERBATIM from drawing-register/module.css) -----
+   Every uniform module carries this block. Without it the topbar inherits
+   dashboard.css's `gap:14px` with no wrapping, the avatar loses its left
+   divider, and theme.js's injected toggle keeps its default size instead of
+   matching the 34x34 tool buttons — which reads as "the buttons beside the
+   profile icon are misplaced". Do not drop it when copying this module. */
+.pd-topbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; row-gap:8px; }
+.pd-topbar #user-bar { margin-left:10px; padding-left:10px; border-left:1px solid var(--pd-line); flex:none; }
+.pd-topbar #pd-theme-toggle { width:34px; height:34px; padding:0; display:inline-flex; align-items:center; justify-content:center; margin-left:4px; flex:none; }
+
+/* ---- Topbar: project selector + tabs + tools ----------------------------- */
+.mr-title-txt { white-space:nowrap; }
+@media (max-width:1150px){ .mr-title-txt { display:none; } }   /* icon-only title when tight */
+.mr-title-ico { color:var(--pd-red); vertical-align:-3px; }
+.mr-modback { height:36px; width:36px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+
+.mr-projctx { display:flex; align-items:center; min-width:0; flex:0 1 auto; }
+.mr-project { max-width:230px; min-width:120px; height:34px; font-weight:600; font-size:var(--mr-fs-base);
+  background:transparent; border-color:transparent; }
+.mr-project:hover, .mr-project:focus { background:var(--pd-card); border-color:var(--pd-line); }
+
+.mr-tabs { display:inline-flex; border:1px solid var(--pd-line); border-radius:var(--pd-radius); overflow:hidden; flex:none; }
+.mr-tab { border:0; background:var(--pd-card); color:var(--pd-ink); padding:6px 14px; font-weight:600;
+  cursor:pointer; font-size:var(--mr-fs-base); transition:background .12s; white-space:nowrap; }
+.mr-tab + .mr-tab { border-left:1px solid var(--pd-line); }
+.mr-tab:hover:not(.active) { background:var(--pd-bg); }
+.mr-tab.active { background:var(--pd-red); color:#fff; }
+
+.mr-topbar-tools { display:flex; align-items:center; gap:4px; margin-left:auto; }
+.mr-topbar-tools .pd-btn { height:34px; width:34px; padding:0; display:inline-flex; align-items:center; justify-content:center;
+  background:transparent; border-color:transparent; font-size:var(--mr-fs-base); }
+.mr-topbar-tools .pd-btn:hover { background:var(--pd-bg); border-color:var(--pd-line); }
+.mr-topbar-tools .pd-btn.mr-tb-labeled { width:auto; padding:0 12px; gap:6px; }
+.mr-topbar-tools .pd-btn.pd-btn-primary { background:var(--pd-red); border-color:var(--pd-red); color:#fff; }
+.mr-topbar-tools .pd-btn.pd-btn-primary:hover { filter:brightness(.94); }
+.mr-tb-sep { width:1px; align-self:stretch; margin:5px 3px; background:var(--pd-line); }
+.mr-clearbtn { color:var(--pd-bad,#dc2626); }
+.mr-clearbtn:hover { background:var(--pd-bad,#dc2626) !important; border-color:var(--pd-bad,#dc2626) !important; color:#fff; }
+
+/* ---- Filter bar --------------------------------------------------------- */
+.mr-filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px;
+  background:var(--pd-card); border:1px solid var(--pd-line); border-radius:var(--pd-radius); padding:8px 12px; }
+.mr-filt-ico { color:var(--pd-muted); flex:none; }
+.mr-filters .mr-search { flex:1 1 280px; min-width:170px; }
+.mr-filters .pd-select { flex:0 0 auto; max-width:190px; }
+.mr-chk { display:inline-flex; align-items:center; gap:6px; font-size:var(--mr-fs-base); color:var(--pd-ink); cursor:pointer; white-space:nowrap; }
+.mr-chk input { width:15px; height:15px; accent-color:var(--pd-red); cursor:pointer; }
+/* Ghost clear — only rendered when a filter is actually set (Progress Photos lesson:
+   a margin-left:auto button orphans itself onto a second line when the row wraps). */
+.mr-clearfilt { display:inline-flex; align-items:center; gap:5px; border:0; background:none; cursor:pointer;
+  color:var(--pd-muted); font-size:var(--mr-fs-sm); font-weight:600; padding:4px 6px; border-radius:var(--pd-radius); }
+.mr-clearfilt:hover { background:var(--pd-bg); color:var(--pd-red); }
+.mr-clearfilt[hidden] { display:none; }
+.mr-count { color:var(--pd-muted); font-size:var(--mr-fs-base); margin-left:auto; white-space:nowrap; }
+
+
+/* ---- KPI row ------------------------------------------------------------- */
+.mr-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:18px; margin-bottom:16px; }
+.mr-kpi { padding:20px 22px; position:relative; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.05); transition:transform .12s, box-shadow .12s; }
+.mr-kpi:hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,.09); }
+.mr-kpi::before { content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--pd-line); }
+.mr-kpi.good::before { background:#12693A; }
+.mr-kpi.warn::before { background:#B45309; }
+.mr-kpi.bad::before  { background:var(--pd-red); }
+.mr-kpi-val { font-size:var(--mr-fs-kpi); font-weight:800; line-height:1.05; }
+.mr-kpi-lbl { font-size:var(--mr-fs-base); font-weight:600; margin-top:4px; }
+.mr-kpi-sub { font-size:var(--mr-fs-micro); color:var(--pd-muted); margin-top:2px; }
+
+/* ---- Tables -------------------------------------------------------------- */
+.mr-tablecard { padding:0; overflow:auto; }
+.mr-sumtable, .mr-table { width:100%; border-collapse:collapse; font-size:var(--mr-fs-base); }
+.mr-sumtable th, .mr-sumtable td, .mr-table th, .mr-table td {
+  padding:7px 10px; border-bottom:1px solid var(--pd-line); text-align:left; white-space:nowrap; }
+.mr-sumtable thead th, .mr-table thead th {
+  position:sticky; top:0; z-index:2; background:var(--pd-card); font-size:var(--mr-fs-micro);
+  font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--pd-muted); }
+.mr-sum-grp th { text-align:center; border-bottom:1px solid var(--pd-line); color:var(--pd-ink); }
+.mr-sum-grp th + th { border-left:1px solid var(--pd-line); }
+.mr-sumtable tbody tr:hover { background:var(--pd-bg); cursor:pointer; }
+.mr-r { text-align:right !important; font-variant-numeric:tabular-nums; }
+.mr-b { font-weight:700; }
+.mr-sum-trade { font-weight:600; }
+.mr-zero td { color:var(--pd-muted); }
+.mr-sumtotal td { font-weight:800; border-top:2px solid var(--pd-line); background:var(--pd-bg); }
+.mr-bal { color:var(--pd-red); font-weight:700; }
+
+/* ---- Registry tree ------------------------------------------------------- */
+.mr-table { min-width:1500px; }
+.mr-grp td { background:var(--pd-bg); font-weight:700; cursor:pointer; }
+.mr-lvl-1 td { background:color-mix(in srgb, var(--pd-red) 9%, var(--pd-card)); }
+.mr-lvl-2 td { padding-left:26px; }
+.mr-lvl-3 td { padding-left:46px; font-weight:600; }
+.mr-caret { display:inline-flex; vertical-align:-2px; margin-right:6px; transition:transform .12s; }
+.mr-caret-col { transform:rotate(-90deg); }
+.mr-grp-txt { vertical-align:middle; }
+.mr-grp-count { font-weight:500; font-size:var(--mr-fs-micro); color:var(--pd-muted); margin-left:10px; }
+.mr-code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:var(--mr-fs-sm); font-weight:700; }
+.mr-code-lvl { color:var(--pd-red); margin-right:8px; }
+.mr-item { font-weight:500; white-space:normal; }
+.mr-nowrap { white-space:nowrap; }
+.mr-mut { color:var(--pd-muted); }
+.mr-uncounted td { opacity:.55; }
+.mr-nc { font-size:var(--mr-fs-micro); color:var(--pd-muted); font-weight:600; }
+
+/* Frozen identity columns, same treatment as the sibling registers. */
+.mr-table th.mr-fz1, .mr-table td.mr-fz1 { position:sticky; left:0;   z-index:1; background:var(--pd-card); min-width:120px; }
+.mr-table th.mr-fz2, .mr-table td.mr-fz2 { position:sticky; left:120px; z-index:1; background:var(--pd-card); min-width:300px; max-width:420px; }
+.mr-table tbody tr:hover td.mr-fz1, .mr-table tbody tr:hover td.mr-fz2 { background:var(--pd-bg); }
+.mr-grp td.mr-fz1, .mr-grp td.mr-fz2 { position:static; }
+
+/* ---- Status / ball-in / attachment chips ---------------------------------
+   Soft tint + dark text, never white on a saturated fill — the treatment the
+   2026-08-06 accessibility pass made the standard across both sibling
+   registers after 5 of 7 solid-fill pills failed WCAG AA. */
+.mr-pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:var(--mr-fs-micro);
+  font-weight:700; border:1px solid; background:color-mix(in srgb, var(--c) 16%, var(--pd-card));
+  border-color:color-mix(in srgb, var(--c) 42%, transparent); color:color-mix(in srgb, var(--c) 78%, var(--pd-ink)); }
+.mr-s-open { --c:#8A8F98; }
+.mr-s-app  { --c:#12693A; }
+.mr-s-awc  { --c:#B45309; }
+.mr-s-dis  { --c:#C42127; }
+.mr-ball { font-size:var(--mr-fs-micro); font-weight:600; padding:2px 7px; border-radius:5px;
+  background:var(--pd-bg); border:1px solid var(--pd-line); }
+.mr-att { text-align:center !important; width:62px; }
+.mr-ok { color:#12693A; display:inline-flex; }
+.mr-bal-dot { font-size:9.5px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+  color:var(--pd-red); opacity:.8; }
+.mr-pri { display:inline-block; width:20px; height:20px; line-height:20px; text-align:center; border-radius:5px;
+  font-size:var(--mr-fs-micro); font-weight:800; }
+.mr-pri-1 { background:color-mix(in srgb,#C42127 18%,var(--pd-card)); color:#C42127; }
+.mr-pri-2 { background:color-mix(in srgb,#B45309 18%,var(--pd-card)); color:#B45309; }
+.mr-pri-3 { background:var(--pd-bg); color:var(--pd-muted); }
+
+.mr-doccol { width:52px; text-align:center !important; }
+.mr-filebtn { display:inline-flex; color:var(--pd-muted); }
+.mr-filebtn:hover { color:var(--pd-red); }
+.mr-actcol { width:76px; text-align:right !important; }
+.mr-iconbtn { padding:3px 6px; line-height:1; }
+.mr-iconbtn-del:hover { color:var(--pd-red); border-color:var(--pd-red); }
+
+/* ---- Reconciliation note ------------------------------------------------- */
+.mr-note { margin-top:16px; border-left:3px solid #B45309; }
+.mr-note-hd { display:flex; align-items:center; gap:7px; font-weight:700; font-size:var(--mr-fs-base); margin-bottom:6px; }
+.mr-note ul { margin:0; padding-left:20px; }
+.mr-note li { font-size:var(--mr-fs-sm); color:var(--pd-muted); margin-bottom:6px; line-height:1.5; }
+.mr-note strong { color:var(--pd-ink); }
+.mr-note code { font-size:var(--mr-fs-micro); background:var(--pd-bg); padding:1px 4px; border-radius:3px; }
+
+/* ---- Empty + skeleton ---------------------------------------------------- */
+.mr-empty { padding:40px; text-align:center; }
+.mr-empty h3 { margin:0 0 6px; font-size:var(--mr-fs-lg); }
+.mr-empty p { color:var(--pd-muted); font-size:var(--mr-fs-base); margin:0; }
+.mr-skcard { padding:16px; }
+.mr-sk-head { display:flex; align-items:center; gap:8px; font-size:var(--mr-fs-base); color:var(--pd-muted); margin-bottom:12px; }
+.mr-spin { width:13px; height:13px; border:2px solid var(--pd-line); border-top-color:var(--pd-red);
+  border-radius:50%; animation:mr-spin .7s linear infinite; }
+@keyframes mr-spin { to { transform:rotate(360deg); } }
+.mr-sk-row { display:flex; gap:10px; margin-bottom:9px; }
+.mr-sk { height:11px; border-radius:4px; background:linear-gradient(90deg,var(--pd-line),var(--pd-bg),var(--pd-line));
+  background-size:200% 100%; animation:mr-sh 1.2s ease-in-out infinite; }
+@keyframes mr-sh { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+
+/* ---- Add/Edit form ------------------------------------------------------- */
+.mr-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin:14px 0; }
+.mr-fld { display:flex; flex-direction:column; gap:4px; }
+.mr-fld > span { font-size:var(--mr-fs-sm); font-weight:600; color:var(--pd-muted); }
+.mr-fld-wide { grid-column:1/-1; }
+.mr-attrow { display:flex; flex-wrap:wrap; gap:14px; }
+.mr-attrow label { display:inline-flex; align-items:center; gap:6px; font-size:var(--mr-fs-base); cursor:pointer; }
+.mr-countchk { display:flex; gap:9px; align-items:flex-start; cursor:pointer; padding:10px 12px;
+  background:var(--pd-bg); border:1px solid var(--pd-line); border-radius:var(--pd-radius); }
+.mr-countchk small { display:block; color:var(--pd-muted); font-size:var(--mr-fs-micro); margin-top:2px; line-height:1.45; }
+
+/* ---- Registry fills the viewport (desktop only) --------------------------
+   Gated above the phone breakpoint so mobile keeps normal page scrolling —
+   the same rule, and the same reason, as the sibling registers. */
+@media (min-width:701px) {
+  body.mr-fit .pd-app { height:100dvh; overflow:hidden; }
+  body.mr-fit .pd-content { display:flex; flex-direction:column; min-height:0; }
+  body.mr-fit .pd-main { flex:1; min-height:0; display:flex; flex-direction:column; }
+  body.mr-fit .mr-tablecard { flex:1; min-height:0; }
+}
+
+@media print {
+  .pd-topbar, .mr-filters, .mr-actcol, .mr-doccol { display:none !important; }
+  .mr-tablecard { max-height:none; overflow:visible; }
+  .mr-table { min-width:0; font-size:var(--mr-fs-micro); }
+  .mr-table th.mr-fz1, .mr-table td.mr-fz1, .mr-table th.mr-fz2, .mr-table td.mr-fz2 { position:static; }
+}
