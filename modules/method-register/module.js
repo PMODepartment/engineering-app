@@ -655,6 +655,22 @@ window.MethodRegister = (function () {
     return best;
   }
 
+  // ⚠️ EVERY record must carry EVERY not-null column, even the structural rows
+  // that have no use for them.
+  //
+  // PostgREST bulk-inserts an array of objects by taking the UNION of their
+  // keys, and a key missing from one object is sent as NULL — it does NOT fall
+  // back to the column DEFAULT. So a batch mixing item rows (which set
+  // hirac_done…) with trade/group rows (which did not) made Postgres reject the
+  // whole import with
+  //     null value in column "hirac_done" ... violates not-null constraint
+  // even though the column has `default false`. Keeping one shape for every row
+  // is the fix, and it is cheaper than relaxing the constraint — "outstanding vs
+  // done" genuinely has no third state.
+  function baseRecord() {
+    return { counts: false, hirac_done: false, qcc_done: false, mas_done: false, isd_done: false };
+  }
+
   function parseGrid(g, hdr) {
     var out = [], items = 0, order = 0;
     var curTrade = null, curTradeName = null, curGroup = null, curSub = null;
@@ -667,21 +683,22 @@ window.MethodRegister = (function () {
       if (t1) {                                   // trade header
         curTrade = code || null; curTradeName = t1.replace(/\s+/g, ' ').trim();
         curGroup = curSub = null;
-        out.push({ node_kind: 'trade', trade_code: curTrade, trade_name: curTradeName,
-          seq_no: no || null, title: curTradeName, counts: false, sort_order: order++ });
+        out.push(Object.assign(baseRecord(), { node_kind: 'trade', trade_code: curTrade,
+          trade_name: curTradeName, seq_no: no || null, title: curTradeName, sort_order: order++ }));
         continue;
       }
       if (t2) {                                   // group
         curGroup = t2.replace(/\s+/g, ' ').trim(); curSub = null;
-        out.push({ node_kind: 'group', trade_code: curTrade, trade_name: curTradeName,
-          group_name: curGroup, seq_no: no || null, title: curGroup, counts: false, sort_order: order++ });
+        out.push(Object.assign(baseRecord(), { node_kind: 'group', trade_code: curTrade,
+          trade_name: curTradeName, group_name: curGroup, seq_no: no || null, title: curGroup,
+          sort_order: order++ }));
         continue;
       }
       if (t3) {                                   // sub-group
         curSub = t3.replace(/\s+/g, ' ').trim();
-        out.push({ node_kind: 'subgroup', trade_code: curTrade, trade_name: curTradeName,
-          group_name: curGroup, subgroup_name: curSub, seq_no: no || null,
-          title: curSub, counts: false, sort_order: order++ });
+        out.push(Object.assign(baseRecord(), { node_kind: 'subgroup', trade_code: curTrade,
+          trade_name: curTradeName, group_name: curGroup, subgroup_name: curSub,
+          seq_no: no || null, title: curSub, sort_order: order++ }));
         continue;
       }
       // a method statement
@@ -693,7 +710,7 @@ window.MethodRegister = (function () {
           if (p || a) subs.push({ rev: idx + 1, planned: p, actual: a });
         });
       items++;
-      out.push({
+      out.push(Object.assign(baseRecord(), {
         node_kind: null,
         trade_code: curTrade, trade_name: curTradeName,
         group_name: curGroup, subgroup_name: curSub,
@@ -721,7 +738,7 @@ window.MethodRegister = (function () {
         responsible: String(row[COL.responsible] || '').trim() || null,
         target_date: realDate(parseDate(row[COL.target])),
         sort_order: order++
-      });
+      }));
     }
     return { records: out, items: items };
   }
@@ -755,8 +772,18 @@ window.MethodRegister = (function () {
             var d = await sb().from(TABLE).delete().eq('project_id', pid);
             if (d.error) throw d.error;
           }
+          // Give every object the SAME key set before inserting. PostgREST
+          // unions the keys of a bulk-insert array and sends NULL for any a row
+          // omits, so a ragged payload silently depends on which columns happen
+          // to be nullable. Normalising here makes the insert deterministic;
+          // baseRecord() is what guarantees the not-null ones are never null.
+          var keys = {};
+          got.recs.forEach(function (r) { Object.keys(r).forEach(function (k) { keys[k] = 1; }); });
+          var allKeys = Object.keys(keys);
           var payload = got.recs.map(function (r) {
-            return Object.assign({}, r, { project_id: pid, created_by: UID });
+            var o = { project_id: pid, created_by: UID };
+            allKeys.forEach(function (k) { o[k] = r[k] === undefined ? null : r[k]; });
+            return o;
           });
           for (var i = 0; i < payload.length; i += 200) {
             var res = await sb().from(TABLE).insert(payload.slice(i, i + 200));
