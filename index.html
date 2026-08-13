@@ -30,6 +30,16 @@
           <button class="pd-btn pd-btn-primary" type="submit" style="width:100%;justify-content:center;">Sign in</button>
           <p id="msg" style="color:var(--pd-bad);font-size:13px;margin:12px 0 0;"></p>
         </form>
+        <div style="display:flex;align-items:center;gap:10px;margin:16px 0;color:var(--pd-muted);font-size:12px;">
+          <span style="flex:1;height:1px;background:var(--pd-line);"></span>
+          <span>OR</span>
+          <span style="flex:1;height:1px;background:var(--pd-line);"></span>
+        </div>
+        <button class="pd-btn" id="ms-login" type="button" style="width:100%;justify-content:center;background:#fff;border:1px solid var(--pd-line);color:#231F20;">
+          <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+          Sign in with Microsoft
+        </button>
+        <p id="ms-msg" style="color:var(--pd-bad);font-size:13px;margin:10px 0 0;"></p>
         <p style="text-align:center;margin:14px 0 0;font-size:13px;">
           <a href="forgot-password.html">Forgot password?</a>
         </p>
@@ -60,6 +70,16 @@
       if (error) { msg.textContent = error.message; return; }
       if (data && data.user) { try { PDb.updateLastLogin(data.user.id); } catch (e) {} }
       location.href = 'projects.html';
+    });
+
+    document.getElementById('ms-login').addEventListener('click', async function () {
+      var msg = document.getElementById('ms-msg');
+      msg.textContent = '';
+      var { error } = await AppAuth.loginWithMicrosoft();
+      // On success the browser navigates away to Microsoft immediately —
+      // this only returns if the redirect itself failed (e.g. provider not
+      // enabled in Supabase yet).
+      if (error) msg.textContent = error.message;
     });
   </script>
 </body>

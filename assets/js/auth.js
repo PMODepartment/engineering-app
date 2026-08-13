@@ -107,6 +107,23 @@
     return getSB().auth.signInWithPassword({ email: email, password: password });
   }
 
+  // loginWithMicrosoft(): redirects to Microsoft (Azure AD) via Supabase's
+  // "azure" OAuth provider. Only called from index.html (root), so the
+  // redirect target is always the root projects.html. On return, Supabase
+  // completes the session from the URL automatically (detectSessionInUrl, on
+  // by default) — the landing page just calls requireLogin() as usual, which
+  // self-heals a profile row for a first-time Microsoft sign-in the same way
+  // email sign-up does.
+  async function loginWithMicrosoft() {
+    return getSB().auth.signInWithOAuth({
+      provider: 'azure',
+      options: {
+        redirectTo: location.origin + location.pathname.replace(/index\.html$/, '') + 'projects.html',
+        scopes: 'email',
+      },
+    });
+  }
+
   async function register(email, password, name) {
     var res = await getSB().auth.signUp({ email: email, password: password });
     if (res.error) return res;
@@ -129,7 +146,7 @@
     getSB: getSB, ROLES: ROLES,
     requireLogin: requireLogin, requireRole: requireRole, requireAdmin: requireAdmin,
     isAutoApprove: isAutoApprove, canAccessProject: canAccessProject,
-    login: login, register: register, logout: logout,
+    login: login, loginWithMicrosoft: loginWithMicrosoft, register: register, logout: logout,
   };
   window.getSB = getSB;
 })();
