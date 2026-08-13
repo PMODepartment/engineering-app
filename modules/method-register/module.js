@@ -302,9 +302,17 @@ window.MethodRegister = (function () {
       ' Differences from the source workbook</div><ul>' + notes.join('') + '</ul></div>';
   }
 
+  // ⚠️ The drill MUST also switch on "counted only". Every figure on the Summary
+  // is over counted items, so landing on the unfiltered register makes the
+  // destination disagree with the number just clicked — ST reads 18 on the
+  // Summary and 74 in the register, and the register looks wrong. Same rule the
+  // Material Submittal log follows: a drill target whose count cannot match the
+  // card it came from is worse than no drill at all.
   function drillTo(trade) {
     filters.trade = trade;
+    filters.countedOnly = true;
     var s = document.getElementById('mr-f-trade'); if (s) s.value = trade;
+    var c = document.getElementById('mr-f-counted'); if (c) c.checked = true;
     switchTab('registry');
   }
 
