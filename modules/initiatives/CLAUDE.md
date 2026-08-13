@@ -111,6 +111,26 @@ behind for its first eight hours and under-report overdue items.
 - Cells read as **formatted text** (`cell.w`); `realDate()` rejects outside
   2015–2100; stops at a sign-off block.
 
+### Dashboard section (2026-08-13) — the org-wide problem, again
+`EngData.initiativeStats(pid)` + a section in `dashboard.html`.
+
+- ⚠️ **`fetchAll()` in `engdata.js` hardcodes `.eq('project_id', pid)`** — right
+  for every project-scoped table, **wrong here**, where it would drop every
+  company-wide row, i.e. most of the table. There is a separate
+  **`fetchAllOrgWide()`** with no project predicate that lets RLS decide. Do not
+  collapse the two.
+- ⚠️ **"The numbers for this project" is not a well-formed question here.** The
+  section reports what *applies*: initiatives pinned to this project **plus**
+  company-wide ones, excluding only those pinned to a *different* project.
+  Reporting the pinned ones alone would leave the section permanently empty on
+  most projects; reporting the union without saying so would read as though this
+  project owned company work. So the split is shown in the section caption
+  (`N on this project · M company-wide`) and in a tile.
+- The dashboard repeats the module's two aggregation rules — **Cost-type only**
+  for benefit value, **In Progress only** for the progress mean — and the harness
+  asserts the two screens produce **identical** numbers over the same rows. If
+  they diverge, the module is the authority.
+
 ### Verification
 - **137/137 automated checks** (shared harness with Value Engineering) against
   the **shipped** `module.js`, running its own exported internals. Covers: the

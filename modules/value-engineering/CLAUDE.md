@@ -89,6 +89,18 @@ inside it. Dropping one of those six names would silently un-gate approval on
 drawing-register or material-submittal. The save path translates the resulting
 `42501` into a sentence rather than printing a raw Postgres error.
 
+### Dashboard section (2026-08-13)
+`EngData.veStats(pid)` + a section in `dashboard.html`. ⚠️ **The status
+vocabulary is duplicated into `engdata.js`** (`VE_STATUSES` / `VE_OPEN` /
+`VE_WON`) because the shell cannot import a module's constants — change it in
+both places or the tiles under-count. `VE_OPEN` / `VE_WON` / `Rejected` must stay
+a **partition**; a status in none of them is counted in the total but in no tile,
+the exact failure `DR_BUCKET` documents. `EngData.selfTest(pid)` now checks this
+module too and warns from the console.
+⚠️ Pipeline / Approved / Realised are three separate tiles and the dashboard
+never sums them either — a row of peso tiles with no unit invites exactly the
+addition the module refuses to do, so each carries an explicit sub-caption.
+
 ### Verification
 - **137/137 automated checks** (shared harness with Initiatives) against the
   **shipped** `module.js`, running its own exported internals — no

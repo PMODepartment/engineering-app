@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <link rel="apple-touch-icon" href="assets/img/icon.png" />
-  <script src="assets/js/theme.js?v=20260813a"></script>
+  <script src="assets/js/theme.js?v=20260813b"></script>
   <title>Engineering Dashboard — Engineering App</title>
-  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260813a" />
-  <link rel="stylesheet" href="assets/css/engineering.css?v=20260813a" />
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260813b" />
+  <link rel="stylesheet" href="assets/css/engineering.css?v=20260813b" />
 </head>
 <body>
   <div class="pd-app">
@@ -32,7 +32,7 @@
       <div class="pd-main">
         <div class="eng-dash-head">
           <h2 id="welcome">Engineering Dashboard</h2>
-          <p id="dash-sub">Document and submittal status for the selected project.</p>
+          <p id="dash-sub">Drawings, submittals and value engineering for the selected project, plus the initiatives that apply to it.</p>
         </div>
 
         <!-- Drawing Register ------------------------------------------------- -->
@@ -63,6 +63,41 @@
           </div>
         </section>
 
+        <!-- Value Engineering List ------------------------------------------ -->
+        <section class="eng-sec" id="sec-ve">
+          <div class="eng-sec-head">
+            <span class="eng-sec-ico" data-ico="calculator" data-ico-size="18"></span>
+            <h3>Value Engineering List</h3>
+            <a class="eng-sec-link" href="modules/value-engineering/index.html">Open module <span data-ico="arrowRight" data-ico-size="14"></span></a>
+          </div>
+          <div class="eng-kpis" id="ve-kpis"></div>
+          <div class="eng-split">
+            <div class="pd-card eng-bars"><div class="eng-card-title">Proposals by status</div><div id="ve-bars"></div></div>
+            <div class="pd-card eng-bars"><div class="eng-card-title">Largest awaiting a decision</div><div id="ve-pending"></div></div>
+          </div>
+        </section>
+
+        <!-- Initiatives (ORG-WIDE) ------------------------------------------
+             ⚠️ The only section on this page that is not purely this project's
+             own data. It reports what APPLIES here — initiatives pinned to this
+             project PLUS company-wide ones — and excludes only those pinned to a
+             different project. The caption says so, and one tile breaks out the
+             split, because blurring the two would read as though this project
+             owned company work. -->
+        <section class="eng-sec" id="sec-in">
+          <div class="eng-sec-head">
+            <span class="eng-sec-ico" data-ico="bulb" data-ico-size="18"></span>
+            <h3>Initiatives</h3>
+            <span class="eng-sec-note" id="in-scope-note">this project and company-wide</span>
+            <a class="eng-sec-link" href="modules/initiatives/index.html">Open module <span data-ico="arrowRight" data-ico-size="14"></span></a>
+          </div>
+          <div class="eng-kpis" id="in-kpis"></div>
+          <div class="eng-split">
+            <div class="pd-card eng-bars"><div class="eng-card-title">Initiatives by status</div><div id="in-bars"></div></div>
+            <div class="pd-card eng-bars"><div class="eng-card-title">Past target</div><div id="in-attn"></div></div>
+          </div>
+        </section>
+
         <!-- Recent activity (audit trail) ----------------------------------- -->
         <section class="eng-sec">
           <div class="eng-sec-head">
@@ -77,14 +112,14 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="assets/js/config.js?v=20260813a"></script>
-  <script src="assets/js/auth.js?v=20260813a"></script>
-  <script src="assets/js/db.js?v=20260813a"></script>
-  <script src="assets/js/ui.js?v=20260813a"></script>
-  <script src="assets/js/icons.js?v=20260813a"></script>
-  <script src="assets/js/perm.js?v=20260813a"></script>
-  <script src="assets/js/nav.js?v=20260813a"></script>
-  <script src="assets/js/engdata.js?v=20260813a"></script>
+  <script src="assets/js/config.js?v=20260813b"></script>
+  <script src="assets/js/auth.js?v=20260813b"></script>
+  <script src="assets/js/db.js?v=20260813b"></script>
+  <script src="assets/js/ui.js?v=20260813b"></script>
+  <script src="assets/js/icons.js?v=20260813b"></script>
+  <script src="assets/js/perm.js?v=20260813b"></script>
+  <script src="assets/js/nav.js?v=20260813b"></script>
+  <script src="assets/js/engdata.js?v=20260813b"></script>
   <script>
   (function () {
     var pid = sessionStorage.getItem('pd_project');
@@ -187,9 +222,12 @@
 
     async function loadStats() {
       skeleton('dr-kpis', 6); skeleton('ms-kpis', 6);
+      skeleton('ve-kpis', 6); skeleton('in-kpis', 6);
 
       var DR = 'modules/drawing-register/index.html';
       var MS = 'modules/material-submittal/index.html';
+      var VE = 'modules/value-engineering/index.html';
+      var IN = 'modules/initiatives/index.html';
 
       // Drawing Register --------------------------------------------------
       try {
@@ -244,6 +282,67 @@
       } catch (e) {
         document.getElementById('ms-kpis').innerHTML =
           '<div class="eng-err">Could not load submittal statistics: ' + Fmt.esc(e.message || e) + '</div>';
+      }
+
+      // Value Engineering List --------------------------------------------
+      try {
+        var v = await EngData.veStats(pid);
+        document.getElementById('ve-kpis').innerHTML =
+          // ⚠️ Pipeline / Approved / Realised are three DIFFERENT numbers and are
+          // never added. Pipeline is a claim on undecided items; Approved is the
+          // claim on Approved + Implemented; Realised is baseline − actual. The
+          // subs say which is which, because a row of peso tiles with no unit
+          // invites exactly the addition the module refuses to do.
+          kpi('VE Proposals',   v.total,                        null,   VE, v.open + ' awaiting a decision') +
+          kpi('Pipeline',       Fmt.moneyShort(v.pipeline),     'info', VE, 'claimed, not yet decided') +
+          kpi('Approved',       Fmt.moneyShort(v.approvedSaving), 'good', VE, v.won + ' approved or implemented') +
+          kpi('Realised',       Fmt.moneyShort(v.realised),     'good', VE, 'measured against actual cost') +
+          kpi('Acceptance',     v.acceptance + '%',             null,   VE, v.rejected + ' rejected') +
+          kpi('Programme',      (v.days > 0 ? '+' : '') + v.days + 'd', v.days > 0 ? 'bad' : null, VE,
+              v.days > 0 ? 'approved VE costs time' : 'approved VE saves time');
+        bars('ve-bars', v.byStatus, v.total);
+        document.getElementById('ve-pending').innerHTML = v.pending.length
+          ? '<table class="pd-table eng-mini"><thead><tr><th>VE No.</th><th>Proposal</th><th>Saving</th></tr></thead><tbody>' +
+            v.pending.map(function (r) {
+              return '<tr><td>' + Fmt.esc(r.ve_no || '—') + '</td>' +
+                '<td>' + Fmt.esc(r.title || '—') + '</td>' +
+                '<td>' + (r.saving == null ? '—' : Fmt.esc(Fmt.moneyShort(r.saving))) + '</td></tr>';
+            }).join('') + '</tbody></table>'
+          : '<div class="eng-empty">Nothing awaiting a decision.</div>';
+      } catch (e) {
+        document.getElementById('ve-kpis').innerHTML =
+          '<div class="eng-err">Could not load VE statistics: ' + Fmt.esc(e.message || e) + '</div>';
+      }
+
+      // Initiatives (org-wide) --------------------------------------------
+      try {
+        var i = await EngData.initiativeStats(pid);
+        document.getElementById('in-scope-note').textContent =
+          i.linked + ' on this project · ' + i.org + ' company-wide';
+        document.getElementById('in-kpis').innerHTML =
+          kpi('Initiatives',  i.total,     null,   IN, i.org + ' company-wide') +
+          kpi('In Progress',  i.active,    'info', IN, i.avgProgress == null
+                ? 'no progress recorded' : i.avgProgress + '% average progress') +
+          kpi('Completed',    i.completed, 'good', IN, '') +
+          kpi('Past Target',  i.overdue,   'bad',  IN, 'still open') +
+          // ⚠️ Cost-type initiatives ONLY, matching the module. A peso figure on
+          // a Safety initiative is a different kind of number and neither screen
+          // adds it in — the sub states the denominator so the two agree.
+          kpi('Cost Benefit', Fmt.moneyShort(i.costBenefit), null, IN,
+              i.costRows + ' cost-type initiative' + (i.costRows === 1 ? '' : 's')) +
+          kpi('Cancelled',    i.cancelled, i.cancelled ? 'warn' : null, IN, 'closed without delivering');
+        bars('in-bars', i.byStatus, i.total);
+        document.getElementById('in-attn').innerHTML = i.attention.length
+          ? '<table class="pd-table eng-mini"><thead><tr><th>Initiative</th><th>Owner</th><th>Target</th></tr></thead><tbody>' +
+            i.attention.map(function (r) {
+              return '<tr><td>' + Fmt.esc(r.title || r.init_no || '—') + '</td>' +
+                '<td>' + Fmt.esc(r.owner_name || '—') + '</td>' +
+                '<td class="eng-overdue">' + Fmt.esc(Fmt.date(r.target_date)) + '</td></tr>';
+            }).join('') + '</tbody></table>'
+          : '<div class="eng-empty">Nothing past its target date.</div>';
+      } catch (e) {
+        document.getElementById('in-kpis').innerHTML =
+          '<div class="eng-err">Could not load initiative statistics: ' + Fmt.esc(e.message || e) + '</div>';
       }
 
       // Recent activity ---------------------------------------------------

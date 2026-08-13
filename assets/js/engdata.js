@@ -6,13 +6,21 @@
 // tables. This file is the sanctioned exception: a SHELL-owned, READ-ONLY
 // aggregation layer. It never writes. Modules keep owning their own writes.
 //
-// ⚠️ The status vocabularies below are duplicated from the two modules on
-// purpose — they are the modules' own private constants and the shell cannot
-// import them (no module system). They MUST stay in sync:
+// ⚠️ The status vocabularies below are duplicated from the modules on purpose —
+// they are the modules' own private constants and the shell cannot import them
+// (no module system). They MUST stay in sync:
 //   drawing-register/module.js   → STATUSES, LEGACY_STATUS, isApprovedStatus()
 //   material-submittal/module.js → STATUSES, DONE, isOverdue()
+//   value-engineering/module.js  → STATUSES (its open/won flags), savingOf/realisedOf
+//   initiatives/module.js        → STATUSES (its closed flag), isOverdue()
 // If a module's status list changes, change it here too or the dashboard will
 // quietly under-count. There is a self-check in EngData.selfTest() for this.
+//
+// ⚠️ `initiatives` is ORG-WIDE (nullable project_id) and is the one table here
+// that must NOT be read through fetchAll() — see fetchAllOrgWide().
+//
+// Not yet aggregated: method_register. It has no dashboard section, so no
+// vocabulary for it is duplicated here; add both together or not at all.
 //
 // Nothing here is hardcoded data — only vocabulary. Every count is a live query
 // scoped by project, and RLS guarantees a user aggregates only rows they may
@@ -102,11 +110,45 @@
     if (s === 'For Submission') return 'eng-c-ns';
     return 'eng-c-wip';
   }
+  // ---- Value Engineering vocabulary (mirrors module.js) --------------------
+  // ⚠️ `open` / `won` mirror the module's own STATUSES flags. They must stay a
+  // PARTITION — every status in exactly one of open / won / rejected — or the
+  // tiles stop summing to the total, the failure DR_BUCKET documents above.
+  var VE_STATUSES = ['Proposed', 'Under Review', 'Endorsed', 'Approved',
+                     'Implemented', 'On Hold', 'Rejected'];
+  var VE_OPEN = { 'Proposed': 1, 'Under Review': 1, 'Endorsed': 1, 'On Hold': 1 };
+  var VE_WON  = { 'Approved': 1, 'Implemented': 1 };
+  function veStatus(s) { return (s || '').trim() || 'Proposed'; }
+  function veStatusCls(s) {
+    s = veStatus(s);
+    if (s === 'Implemented') return 'eng-c-ok';
+    if (s === 'Approved') return 'eng-c-okc';
+    if (s === 'Endorsed' || s === 'Under Review') return 'eng-c-warn';
+    if (s === 'Rejected') return 'eng-c-bad';
+    if (s === 'On Hold') return 'eng-c-wip';
+    return 'eng-c-ns';
+  }
+
+  // ---- Initiatives vocabulary (mirrors module.js) --------------------------
+  var IN_STATUSES = ['Idea', 'Planned', 'In Progress', 'On Hold', 'Completed', 'Cancelled'];
+  var IN_CLOSED = { 'Completed': 1, 'Cancelled': 1 };
+  function inStatus(s) { return (s || '').trim() || 'Idea'; }
+  function inStatusCls(s) {
+    s = inStatus(s);
+    if (s === 'Completed') return 'eng-c-ok';
+    if (s === 'In Progress') return 'eng-c-warn';
+    if (s === 'Cancelled') return 'eng-c-bad';
+    if (s === 'On Hold') return 'eng-c-wip';
+    if (s === 'Planned') return 'eng-c-info';
+    return 'eng-c-ns';
+  }
+
   function todayISO() {
     var d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
            String(d.getDate()).padStart(2, '0');
   }
+  function n(v) { return (v === null || v === undefined || v === '' || isNaN(+v)) ? null : +v; }
 
   // Paged read. The modules use keyset pagination because a big register can
   // exceed PostgREST's 1000-row default cap; the dashboard must do the same or
@@ -115,6 +157,26 @@
     var out = [], last = null, PAGE = 1000;
     for (;;) {
       var q = sb().from(table).select(cols).eq('project_id', pid).order('id').limit(PAGE);
+      if (last) q = q.gt('id', last);
+      var res = await q;
+      if (res.error) throw res.error;
+      var rows = res.data || [];
+      out = out.concat(rows);
+      if (rows.length < PAGE) break;
+      last = rows[rows.length - 1].id;
+    }
+    return out;
+  }
+
+  // ⚠️ The org-wide variant. `fetchAll` hardcodes `.eq('project_id', pid)`, which
+  // is right for every project-scoped table and WRONG for `initiatives`, whose
+  // project_id is nullable — that filter drops every company-wide row, i.e. most
+  // of the table. This one applies no project predicate and lets RLS decide;
+  // callers split the rows themselves. Do not "fix" one into the other.
+  async function fetchAllOrgWide(table, cols) {
+    var out = [], last = null, PAGE = 1000;
+    for (;;) {
+      var q = sb().from(table).select(cols).order('id').limit(PAGE);
       if (last) q = q.gt('id', last);
       var res = await q;
       if (res.error) throw res.error;
@@ -144,8 +206,11 @@
 
   var EngData = {
     DR_STATUSES: DR_STATUSES, MS_STATUSES: MS_STATUSES,
+    VE_STATUSES: VE_STATUSES, IN_STATUSES: IN_STATUSES,
     drStatus: drStatus, drStatusCls: drStatusCls,
     msStatus: msStatus, msStatusCls: msStatusCls,
+    veStatus: veStatus, veStatusCls: veStatusCls,
+    inStatus: inStatus, inStatusCls: inStatusCls,
 
     // ---- Drawing Register ------------------------------------------------
     async drawingStats(pid) {
@@ -247,6 +312,131 @@
       };
     },
 
+    // ---- Value Engineering List ------------------------------------------
+    // ⚠️ Mirrors the module's own rule: the CLAIMED saving and the REALISED one
+    // are different numbers and are never added together. `pipeline` is the
+    // claim of undecided items, `approvedSaving` the claim of Approved +
+    // Implemented, `realised` is baseline − actual. A dashboard that summed them
+    // would report a project as having saved money it has not spent yet.
+    async veStats(pid) {
+      var rows = await fetchAll('value_engineering',
+        'id,ve_no,title,discipline,status,baseline_cost,proposed_cost,actual_cost,' +
+        'schedule_impact_days,decision_date,updated_at', pid);
+
+      var open = 0, won = 0, rejected = 0, implemented = 0, unbucketed = [];
+      var pipeline = 0, approvedSaving = 0, realised = 0, rejectedValue = 0, days = 0;
+      rows.forEach(function (r) {
+        var s = veStatus(r.status);
+        var b = n(r.baseline_cost), p = n(r.proposed_cost), a = n(r.actual_cost);
+        var sav = (b == null || p == null) ? null : b - p;
+        if (s === 'Rejected') {
+          rejected++; if (sav != null) rejectedValue += sav;
+        } else if (VE_OPEN[s]) {
+          open++; if (sav != null) pipeline += sav;
+        } else if (VE_WON[s]) {
+          won++;
+          if (sav != null) approvedSaving += sav;
+          days += n(r.schedule_impact_days) || 0;
+          if (s === 'Implemented') {
+            implemented++;
+            if (b != null && a != null) realised += b - a;
+          }
+        } else {
+          // Same discipline as DR_BUCKET: a status in no bucket is counted in
+          // `total` but in no tile, so the tiles silently under-report.
+          unbucketed.push(s);
+        }
+      });
+      if (unbucketed.length) {
+        console.warn('[EngData] VE statuses in no KPI bucket — dashboard tiles will ' +
+          'under-report. Add them to VE_OPEN/VE_WON in engdata.js:',
+          Array.from(new Set(unbucketed)));
+      }
+
+      // The biggest claims still awaiting a decision — what someone opening the
+      // dashboard can actually act on.
+      var pending = rows.filter(function (r) { return VE_OPEN[veStatus(r.status)]; })
+        .map(function (r) {
+          var b = n(r.baseline_cost), p = n(r.proposed_cost);
+          return { ve_no: r.ve_no, title: r.title, status: veStatus(r.status),
+                   saving: (b == null || p == null) ? null : b - p };
+        })
+        .sort(function (x, y) { return (y.saving || 0) - (x.saving || 0); })
+        .slice(0, 8);
+
+      return {
+        total: rows.length,
+        open: open, won: won, rejected: rejected, implemented: implemented,
+        pipeline: pipeline, approvedSaving: approvedSaving, realised: realised,
+        rejectedValue: rejectedValue, days: days,
+        acceptance: (won + rejected) ? Math.round(won / (won + rejected) * 100) : 0,
+        byStatus: tally(rows, function (r) { return veStatus(r.status); }, VE_STATUSES, veStatusCls),
+        pending: pending,
+      };
+    },
+
+    // ---- Initiatives (ORG-WIDE) -------------------------------------------
+    // ⚠️ This is the one module that is NOT scoped to a project, so "the numbers
+    // for this project" is not a well-formed question. The dashboard reports
+    // everything that APPLIES here — initiatives pinned to this project, PLUS
+    // company-wide ones, which genuinely do apply — and excludes only those
+    // pinned to a DIFFERENT project. The split is returned so the section can
+    // state it rather than blur it; reporting the pinned ones alone would leave
+    // the section permanently empty on most projects, and reporting the union
+    // without saying so would look like this project owns company work.
+    async initiativeStats(pid) {
+      var all = await fetchAllOrgWide('initiatives',
+        'id,init_no,title,category,department,owner_name,project_id,status,priority,' +
+        'progress_pct,target_date,benefit_type,benefit_value,updated_at');
+
+      var rows = all.filter(function (r) { return !r.project_id || r.project_id === pid; });
+      var linked = rows.filter(function (r) { return !!r.project_id; }).length;
+      var org = rows.length - linked;
+
+      var today = todayISO();
+      var active = 0, completed = 0, cancelled = 0, overdue = 0;
+      var costBenefit = 0, costRows = 0, progSum = 0, progN = 0;
+      rows.forEach(function (r) {
+        var s = inStatus(r.status);
+        if (s === 'In Progress') active++;
+        if (s === 'Completed') completed++;
+        if (s === 'Cancelled') cancelled++;
+        // Overdue mirrors the module's isOverdue(): past target and still open.
+        // A closed initiative is never overdue however late it finished.
+        if (!IN_CLOSED[s] && r.target_date && String(r.target_date).slice(0, 10) < today) overdue++;
+        // ⚠️ Cost-type only. A peso figure on a Safety initiative is a different
+        // kind of number and is never added in — the module refuses to, and the
+        // dashboard must agree or the two screens disagree about the total.
+        if (r.benefit_type === 'Cost') {
+          var v = n(r.benefit_value);
+          if (v != null) { costBenefit += v; costRows++; }
+        }
+        // ⚠️ Progress averaged over IN PROGRESS rows only — it is hand-entered,
+        // with no task breakdown rolling it up, so averaging it over ideas and
+        // cancelled work reports a number that means nothing.
+        if (s === 'In Progress') {
+          var p = n(r.progress_pct);
+          if (p != null) { progSum += Math.max(0, Math.min(100, p)); progN++; }
+        }
+      });
+
+      var attention = rows.filter(function (r) {
+        return !IN_CLOSED[inStatus(r.status)] && r.target_date &&
+               String(r.target_date).slice(0, 10) < today;
+      }).sort(function (a, b) {
+        return String(a.target_date).localeCompare(String(b.target_date));
+      }).slice(0, 8);
+
+      return {
+        total: rows.length, linked: linked, org: org,
+        active: active, completed: completed, cancelled: cancelled, overdue: overdue,
+        costBenefit: costBenefit, costRows: costRows,
+        avgProgress: progN ? Math.round(progSum / progN) : null,
+        byStatus: tally(rows, function (r) { return inStatus(r.status); }, IN_STATUSES, inStatusCls),
+        attention: attention,
+      };
+    },
+
     // ---- Audit trail feed -------------------------------------------------
     // Reads the engineering_activity view from migration 0002. Throws if that
     // migration has not been run — callers should catch and degrade gracefully.
@@ -312,7 +502,14 @@
     async selfTest(pid) {
       var d = await fetchAll('drawing_register', 'status', pid);
       var m = await fetchAll('material_submittal', 'status', pid);
-      var unknownDR = {}, unknownMS = {}, unbucketedDR = {};
+      // A table whose migration has not been run must not abort the whole check.
+      async function tryAll(fn) { try { return await fn(); } catch (e) { return null; } }
+      var v = await tryAll(function () { return fetchAll('value_engineering', 'status', pid); });
+      // ⚠️ Org-wide: no project predicate. See fetchAllOrgWide.
+      var i = await tryAll(function () { return fetchAllOrgWide('initiatives', 'status,project_id'); });
+
+      var unknownDR = {}, unknownMS = {}, unknownVE = {}, unknownIN = {};
+      var unbucketedDR = {}, unbucketedVE = {};
       d.forEach(function (r) {
         var s = drStatus(r.status);
         if (DR_STATUSES.indexOf(s) === -1) unknownDR[s] = (unknownDR[s] || 0) + 1;
@@ -322,20 +519,42 @@
         var s = msStatus(r.status);
         if (MS_STATUSES.indexOf(s) === -1) unknownMS[s] = (unknownMS[s] || 0) + 1;
       });
+      (v || []).forEach(function (r) {
+        var s = veStatus(r.status);
+        if (VE_STATUSES.indexOf(s) === -1) unknownVE[s] = (unknownVE[s] || 0) + 1;
+        // The VE tiles partition on open / won / rejected — anything in none of
+        // the three is counted in `total` but in no tile.
+        if (!VE_OPEN[s] && !VE_WON[s] && s !== 'Rejected') unbucketedVE[s] = (unbucketedVE[s] || 0) + 1;
+      });
+      (i || []).forEach(function (r) {
+        var s = inStatus(r.status);
+        if (IN_STATUSES.indexOf(s) === -1) unknownIN[s] = (unknownIN[s] || 0) + 1;
+      });
 
+      function any(o) { return !!Object.keys(o).length; }
       var out = {
-        unrecognised: { drawing_register: unknownDR, material_submittal: unknownMS },
-        unbucketed:   { drawing_register: unbucketedDR },
-        ok: !Object.keys(unknownDR).length && !Object.keys(unknownMS).length &&
-            !Object.keys(unbucketedDR).length,
+        unrecognised: { drawing_register: unknownDR, material_submittal: unknownMS,
+                        value_engineering: unknownVE, initiatives: unknownIN },
+        unbucketed:   { drawing_register: unbucketedDR, value_engineering: unbucketedVE },
+        skipped: [].concat(v ? [] : ['value_engineering'], i ? [] : ['initiatives']),
+        ok: !any(unknownDR) && !any(unknownMS) && !any(unknownVE) && !any(unknownIN) &&
+            !any(unbucketedDR) && !any(unbucketedVE),
       };
-      if (Object.keys(unbucketedDR).length) {
+      if (any(unbucketedDR)) {
         console.warn('[EngData.selfTest] ✗ statuses in NO KPI bucket — the dashboard ' +
           'tiles UNDER-REPORT. Add to DR_BUCKET in engdata.js:', unbucketedDR);
       }
-      if (Object.keys(unknownDR).length || Object.keys(unknownMS).length) {
+      if (any(unbucketedVE)) {
+        console.warn('[EngData.selfTest] ✗ VE statuses in NO KPI bucket — the dashboard ' +
+          'tiles UNDER-REPORT. Add to VE_OPEN/VE_WON in engdata.js:', unbucketedVE);
+      }
+      if (any(unknownDR) || any(unknownMS) || any(unknownVE) || any(unknownIN)) {
         console.warn('[EngData.selfTest] ⚠️ statuses missing from the declared ' +
           'display order (cosmetic — they still render):', out.unrecognised);
+      }
+      if (out.skipped.length) {
+        console.warn('[EngData.selfTest] — not checked (table unreadable, migration ' +
+          'probably not run):', out.skipped);
       }
       if (out.ok) console.log('[EngData.selfTest] ✓ every status recognised and bucketed');
       return out;

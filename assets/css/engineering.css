@@ -23,6 +23,14 @@
 .eng-sec-link { margin-left: auto; font-size: 12.5px; color: var(--pd-red);
                 text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .eng-sec-link:hover { text-decoration: underline; }
+/* Scope caption beside a section title. Used by the Initiatives section, which
+   is the one section on the dashboard NOT reporting purely this project's own
+   data — it says what it is counting rather than leaving the reader to assume.
+   ⚠️ Sits BEFORE .eng-sec-link in the DOM, so the link's margin-left:auto still
+   pushes it to the right edge and this stays next to the heading. */
+.eng-sec-note { font-size: 11.5px; color: var(--pd-muted); white-space: nowrap;
+                border-left: 1px solid var(--pd-line); padding-left: 8px; }
+@media (max-width: 700px) { .eng-sec-note { display: none; } }
 
 /* ---- KPI cards ----------------------------------------------------------- */
 /* auto-fit rather than a fixed column count: the same grid then serves the
