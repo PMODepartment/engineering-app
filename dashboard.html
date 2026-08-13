@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <link rel="apple-touch-icon" href="assets/img/icon.png" />
-  <script src="assets/js/theme.js?v=20260813b"></script>
+  <script src="assets/js/theme.js?v=20260813c"></script>
   <title>Engineering Dashboard — Engineering App</title>
-  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260813b" />
-  <link rel="stylesheet" href="assets/css/engineering.css?v=20260813b" />
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260813c" />
+  <link rel="stylesheet" href="assets/css/engineering.css?v=20260813c" />
 </head>
 <body>
   <div class="pd-app">
@@ -32,7 +32,7 @@
       <div class="pd-main">
         <div class="eng-dash-head">
           <h2 id="welcome">Engineering Dashboard</h2>
-          <p id="dash-sub">Drawings, submittals and value engineering for the selected project, plus the initiatives that apply to it.</p>
+          <p id="dash-sub">Drawings, submittals, method statements and value engineering for the selected project, plus the initiatives that apply to it.</p>
         </div>
 
         <!-- Drawing Register ------------------------------------------------- -->
@@ -60,6 +60,20 @@
           <div class="eng-split">
             <div class="pd-card eng-bars"><div class="eng-card-title">Submittals by status</div><div id="ms-bars"></div></div>
             <div class="pd-card eng-bars"><div class="eng-card-title">Needs attention</div><div id="ms-attn"></div></div>
+          </div>
+        </section>
+
+        <!-- Method Register --------------------------------------------------- -->
+        <section class="eng-sec" id="sec-mr">
+          <div class="eng-sec-head">
+            <span class="eng-sec-ico" data-ico="clipboard" data-ico-size="18"></span>
+            <h3>Method Register</h3>
+            <a class="eng-sec-link" href="modules/method-register/index.html">Open module <span data-ico="arrowRight" data-ico-size="14"></span></a>
+          </div>
+          <div class="eng-kpis" id="mr-kpis"></div>
+          <div class="eng-split">
+            <div class="pd-card eng-bars"><div class="eng-card-title">Method statements by status</div><div id="mr-bars"></div></div>
+            <div class="pd-card eng-bars"><div class="eng-card-title">Most outstanding by trade</div><div id="mr-bytrade"></div></div>
           </div>
         </section>
 
@@ -112,14 +126,14 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="assets/js/config.js?v=20260813b"></script>
-  <script src="assets/js/auth.js?v=20260813b"></script>
-  <script src="assets/js/db.js?v=20260813b"></script>
-  <script src="assets/js/ui.js?v=20260813b"></script>
-  <script src="assets/js/icons.js?v=20260813b"></script>
-  <script src="assets/js/perm.js?v=20260813b"></script>
-  <script src="assets/js/nav.js?v=20260813b"></script>
-  <script src="assets/js/engdata.js?v=20260813b"></script>
+  <script src="assets/js/config.js?v=20260813c"></script>
+  <script src="assets/js/auth.js?v=20260813c"></script>
+  <script src="assets/js/db.js?v=20260813c"></script>
+  <script src="assets/js/ui.js?v=20260813c"></script>
+  <script src="assets/js/icons.js?v=20260813c"></script>
+  <script src="assets/js/perm.js?v=20260813c"></script>
+  <script src="assets/js/nav.js?v=20260813c"></script>
+  <script src="assets/js/engdata.js?v=20260813c"></script>
   <script>
   (function () {
     var pid = sessionStorage.getItem('pd_project');
@@ -222,10 +236,11 @@
 
     async function loadStats() {
       skeleton('dr-kpis', 6); skeleton('ms-kpis', 6);
-      skeleton('ve-kpis', 6); skeleton('in-kpis', 6);
+      skeleton('mr-kpis', 6); skeleton('ve-kpis', 6); skeleton('in-kpis', 6);
 
       var DR = 'modules/drawing-register/index.html';
       var MS = 'modules/material-submittal/index.html';
+      var MR = 'modules/method-register/index.html';
       var VE = 'modules/value-engineering/index.html';
       var IN = 'modules/initiatives/index.html';
 
@@ -282,6 +297,33 @@
       } catch (e) {
         document.getElementById('ms-kpis').innerHTML =
           '<div class="eng-err">Could not load submittal statistics: ' + Fmt.esc(e.message || e) + '</div>';
+      }
+
+      // Method Register -----------------------------------------------------
+      try {
+        var mr = await EngData.methodStats(pid);
+        document.getElementById('mr-kpis').innerHTML =
+          // ⚠️ "Total MS" is COUNTED items only (the workbook's N=1 gate) — the
+          // same figure the module's own Summary calls "Total MS", not a raw row
+          // count. See method-register/CLAUDE.md.
+          kpi('Total MS',       mr.total,      null,   MR, 'counted toward the target') +
+          kpi('Submitted',      mr.submitted,  'info', MR, 'approved, w/ comments or disapproved') +
+          kpi('Approved',       mr.approved,   'good', MR, mr.pctApproved + '% of target') +
+          kpi('Balance',        mr.balance,    mr.balance ? 'warn' : null, MR, 'not yet submitted') +
+          kpi('Progress',       mr.progress + '%', null, MR, 'submitted ÷ target') +
+          kpi('Ball-in unassigned', mr.unassigned, mr.unassigned ? 'bad' : null, MR, 'neither Engg nor Ops');
+        bars('mr-bars', mr.byStatus, mr.total);
+        document.getElementById('mr-bytrade').innerHTML = mr.byTrade.length
+          ? '<table class="pd-table eng-mini"><thead><tr><th>Trade</th><th>Total</th><th>Balance</th></tr></thead><tbody>' +
+            mr.byTrade.map(function (r) {
+              return '<tr><td>' + Fmt.esc(r.code) + '</td>' +
+                '<td>' + r.total + '</td>' +
+                '<td class="eng-overdue">' + (r.total - r.submitted) + '</td></tr>';
+            }).join('') + '</tbody></table>'
+          : '<div class="eng-empty">No method statements yet.</div>';
+      } catch (e) {
+        document.getElementById('mr-kpis').innerHTML =
+          '<div class="eng-err">Could not load method register statistics: ' + Fmt.esc(e.message || e) + '</div>';
       }
 
       // Value Engineering List --------------------------------------------

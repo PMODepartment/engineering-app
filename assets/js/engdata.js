@@ -13,14 +13,12 @@
 //   material-submittal/module.js → STATUSES, DONE, isOverdue()
 //   value-engineering/module.js  → STATUSES (its open/won flags), savingOf/realisedOf
 //   initiatives/module.js        → STATUSES (its closed flag), isOverdue()
+//   method-register/module.js    → STATUSES, LEGACY_STATUS, `counts` (the N=1 gate)
 // If a module's status list changes, change it here too or the dashboard will
 // quietly under-count. There is a self-check in EngData.selfTest() for this.
 //
 // ⚠️ `initiatives` is ORG-WIDE (nullable project_id) and is the one table here
 // that must NOT be read through fetchAll() — see fetchAllOrgWide().
-//
-// Not yet aggregated: method_register. It has no dashboard section, so no
-// vocabulary for it is duplicated here; add both together or not at all.
 //
 // Nothing here is hardcoded data — only vocabulary. Every count is a live query
 // scoped by project, and RLS guarantees a user aggregates only rows they may
@@ -143,6 +141,30 @@
     return 'eng-c-ns';
   }
 
+  // ---- Method Register vocabulary (mirrors module.js) ----------------------
+  // ⚠️ `counts` (the workbook's N=1 flag) gates EVERY figure here, exactly as it
+  // does in the module — a register that ignored it would over-report the
+  // programme by ~3x on the workbook it was built from. See method-register's
+  // CLAUDE.md.
+  var MR_STATUSES = ['Open', 'Approved', 'Approved w/ Comments', 'Disapproved'];
+  // The workbook writes 'Approved' with no qualifier and '-' for "nothing yet" —
+  // reproduced VERBATIM from the module's own LEGACY_STATUS.
+  var MR_LEGACY = { '-': '', 'approved w/comments': 'Approved w/ Comments',
+    'approved with comments': 'Approved w/ Comments', 'disapprove': 'Disapproved' };
+  function mrStatus(s) {
+    s = (s || '').trim();
+    var k = MR_LEGACY[s.toLowerCase()];
+    s = k === undefined ? s : k;
+    return s || 'Open';   // blank / '-' is the module's unnamed "not yet" state
+  }
+  function mrStatusCls(s) {
+    s = mrStatus(s);
+    if (s === 'Approved') return 'eng-c-ok';
+    if (s === 'Approved w/ Comments') return 'eng-c-okc';
+    if (s === 'Disapproved') return 'eng-c-bad';
+    return 'eng-c-ns';
+  }
+
   function todayISO() {
     var d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
@@ -206,11 +228,12 @@
 
   var EngData = {
     DR_STATUSES: DR_STATUSES, MS_STATUSES: MS_STATUSES,
-    VE_STATUSES: VE_STATUSES, IN_STATUSES: IN_STATUSES,
+    VE_STATUSES: VE_STATUSES, IN_STATUSES: IN_STATUSES, MR_STATUSES: MR_STATUSES,
     drStatus: drStatus, drStatusCls: drStatusCls,
     msStatus: msStatus, msStatusCls: msStatusCls,
     veStatus: veStatus, veStatusCls: veStatusCls,
     inStatus: inStatus, inStatusCls: inStatusCls,
+    mrStatus: mrStatus, mrStatusCls: mrStatusCls,
 
     // ---- Drawing Register ------------------------------------------------
     async drawingStats(pid) {
@@ -309,6 +332,63 @@
         pctApproved: rows.length ? Math.round((approved + approvedC) / rows.length * 100) : 0,
         byStatus: tally(rows, function (r) { return msStatus(r.status); }, MS_STATUSES, msStatusCls),
         attention: attention.slice(0, 8),
+      };
+    },
+
+    // ---- Method Register ---------------------------------------------------
+    // ⚠️ Mirrors the module's own totals(): every figure is a real SUM, INCLUDING
+    // the two percentages, over COUNTED items only (node_kind is null AND
+    // counts !== false). The module's Summary separately reproduces the source
+    // workbook's own AVERAGE-of-ratios total to prove it differs — that
+    // reconciliation is specific to the one workbook this module was built
+    // against and is not reproduced here; the dashboard reports the aggregate
+    // only, same as the sibling KPI rows do for their own modules.
+    async methodStats(pid) {
+      var rows = await fetchAll('method_register',
+        'id,node_kind,trade_code,status,ball_in,counts,target_date,updated_at', pid);
+      var items = rows.filter(function (r) { return !r.node_kind && r.counts !== false; });
+
+      var app = 0, awc = 0, dis = 0, engg = 0, ops = 0, closed = 0, unassigned = 0, unbucketed = [];
+      var byTrade = {};
+      items.forEach(function (r) {
+        var s = mrStatus(r.status);
+        if (s === 'Approved') app++;
+        else if (s === 'Approved w/ Comments') awc++;
+        else if (s === 'Disapproved') dis++;
+        else if (s !== 'Open') unbucketed.push(s);   // MR_STATUSES is closed, so this should never fire
+        var b = (r.ball_in || '').trim().toLowerCase();
+        if (b === 'engg') engg++; else if (b === 'ops') ops++;
+        else if (b === 'closed') closed++; else unassigned++;
+
+        var tc = r.trade_code || '(unassigned)';
+        if (!byTrade[tc]) byTrade[tc] = { code: tc, total: 0, submitted: 0 };
+        byTrade[tc].total++;
+        if (s === 'Approved' || s === 'Approved w/ Comments' || s === 'Disapproved') byTrade[tc].submitted++;
+      });
+      if (unbucketed.length) {
+        console.warn('[EngData] method_register statuses in no KPI bucket — dashboard ' +
+          'tiles will under-report. Add them to methodStats() in engdata.js:',
+          Array.from(new Set(unbucketed)));
+      }
+
+      var submitted = app + awc + dis;
+
+      // Trades with the most work still outstanding — what someone opening the
+      // dashboard can actually act on. Ties broken by trade code for a stable order.
+      var byTradeList = Object.keys(byTrade).map(function (k) { return byTrade[k]; })
+        .sort(function (a, b) {
+          return (b.total - b.submitted) - (a.total - a.submitted) || a.code.localeCompare(b.code);
+        }).slice(0, 8);
+
+      return {
+        total: items.length,
+        submitted: submitted, approved: app, awc: awc, disapproved: dis,
+        balance: items.length - submitted,
+        progress: items.length ? Math.round(submitted / items.length * 100) : 0,
+        pctApproved: items.length ? Math.round(app / items.length * 100) : 0,
+        unassigned: unassigned, engg: engg, ops: ops, closed: closed,
+        byStatus: tally(items, function (r) { return mrStatus(r.status); }, MR_STATUSES, mrStatusCls),
+        byTrade: byTradeList,
       };
     },
 
@@ -507,8 +587,9 @@
       var v = await tryAll(function () { return fetchAll('value_engineering', 'status', pid); });
       // ⚠️ Org-wide: no project predicate. See fetchAllOrgWide.
       var i = await tryAll(function () { return fetchAllOrgWide('initiatives', 'status,project_id'); });
+      var mr = await tryAll(function () { return fetchAll('method_register', 'status,node_kind,counts', pid); });
 
-      var unknownDR = {}, unknownMS = {}, unknownVE = {}, unknownIN = {};
+      var unknownDR = {}, unknownMS = {}, unknownVE = {}, unknownIN = {}, unknownMR = {};
       var unbucketedDR = {}, unbucketedVE = {};
       d.forEach(function (r) {
         var s = drStatus(r.status);
@@ -530,14 +611,22 @@
         var s = inStatus(r.status);
         if (IN_STATUSES.indexOf(s) === -1) unknownIN[s] = (unknownIN[s] || 0) + 1;
       });
+      // ⚠️ Only counted items (node_kind null, counts !== false) — the same gate
+      // methodStats() applies. A structural trade/group/subgroup row's own
+      // `status` column is always null and must not be reported as "unknown".
+      (mr || []).filter(function (r) { return !r.node_kind && r.counts !== false; }).forEach(function (r) {
+        var s = mrStatus(r.status);
+        if (MR_STATUSES.indexOf(s) === -1) unknownMR[s] = (unknownMR[s] || 0) + 1;
+      });
 
       function any(o) { return !!Object.keys(o).length; }
       var out = {
         unrecognised: { drawing_register: unknownDR, material_submittal: unknownMS,
-                        value_engineering: unknownVE, initiatives: unknownIN },
+                        value_engineering: unknownVE, initiatives: unknownIN,
+                        method_register: unknownMR },
         unbucketed:   { drawing_register: unbucketedDR, value_engineering: unbucketedVE },
-        skipped: [].concat(v ? [] : ['value_engineering'], i ? [] : ['initiatives']),
-        ok: !any(unknownDR) && !any(unknownMS) && !any(unknownVE) && !any(unknownIN) &&
+        skipped: [].concat(v ? [] : ['value_engineering'], i ? [] : ['initiatives'], mr ? [] : ['method_register']),
+        ok: !any(unknownDR) && !any(unknownMS) && !any(unknownVE) && !any(unknownIN) && !any(unknownMR) &&
             !any(unbucketedDR) && !any(unbucketedVE),
       };
       if (any(unbucketedDR)) {
@@ -548,7 +637,7 @@
         console.warn('[EngData.selfTest] ✗ VE statuses in NO KPI bucket — the dashboard ' +
           'tiles UNDER-REPORT. Add to VE_OPEN/VE_WON in engdata.js:', unbucketedVE);
       }
-      if (any(unknownDR) || any(unknownMS) || any(unknownVE) || any(unknownIN)) {
+      if (any(unknownDR) || any(unknownMS) || any(unknownVE) || any(unknownIN) || any(unknownMR)) {
         console.warn('[EngData.selfTest] ⚠️ statuses missing from the declared ' +
           'display order (cosmetic — they still render):', out.unrecognised);
       }

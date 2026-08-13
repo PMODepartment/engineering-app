@@ -91,6 +91,35 @@ M = the method statement) — by column index, never by fuzzy header matching.
 - ⚠️ **Not verified signed-in**, and **the migration has not been run**. Nobody
   has imported the workbook against the live DB.
 
+### Dashboard section (2026-08-13)
+`EngData.methodStats(pid)` + a section in `dashboard.html`, following the same
+pattern as the sibling modules' sections. ⚠️ **The status vocabulary and the
+`counts` gate are duplicated into `engdata.js`** (`MR_STATUSES` / `MR_LEGACY` /
+`mrStatus`) because the shell cannot import a module's constants — change it in
+both places or the tiles under-count. `methodStats()` filters to `node_kind`
+null AND `counts !== false` before computing anything, exactly as the module's
+own `totals()` does — a structural trade/group/subgroup row's `status` is always
+null and must never be reported as an "unrecognised status" by `selfTest()`.
+- **KPI tiles** reproduce the module's own Summary total row: Total MS,
+  Submitted, Approved, Balance, Progress %, Ball-in unassigned.
+- **NOT reproduced on the dashboard: the workbook's `legacyTotals()`
+  reconciliation.** That note explains a defect specific to the one workbook
+  this module was built against (an unweighted `AVERAGE` where every other total
+  is a `SUM`) — the dashboard reports the aggregate only, matching how the other
+  sections behave.
+- **"Most outstanding by trade"** is new to this dashboard (the sibling sections
+  use "latest revisions" / "needs attention" / "largest awaiting a decision" —
+  each module gets whatever second panel is actually useful, not a copy-pasted
+  one). Sorted by balance (total − submitted) descending, ties broken by trade
+  code.
+- **70 further automated checks** against the shipped `engdata.js` (shared
+  harness with VE/Initiatives), including: structural rows and uncounted (N=0)
+  rows excluded from every figure; the `counts`, `LEGACY_STATUS` and ball-in
+  case-insensitivity reproduced correctly; ball-in's four buckets summing to the
+  total (the workbook defect this module fixes); per-trade balance; the
+  project filter; and that `methodStats()` and the module's own `totals()`
+  agree exactly over the same rows.
+
 ### Not built (deliberate)
 Drag-reorder, bulk actions, inline cell editing, saved views, per-item file
 upload, live collaboration and offline writes — all present in the sibling
