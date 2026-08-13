@@ -3,23 +3,22 @@
    ⚠️ THIS IS THE ONLY ORG-WIDE MODULE IN THE APP. Every sibling register is
    scoped to one project and redirects to projects.html when none is selected.
    This one does the opposite on purpose: an initiative is a department-level
-   programme that MAY carry a project link, so the topbar selector is a FILTER
-   over `project_id` (All projects / Not project-linked / a project), not the
-   page's context. Three things follow, and each has bitten a sibling module in
-   the form it would take here:
-
-     1. ⚠️ NO REDIRECT, EVER. `init()` must not bounce to projects.html when
-        `pd_project` is empty — the register is meaningful with no project
-        chosen, and bouncing would make the module unreachable from a cold start.
-     2. ⚠️ THE SELECTOR IS DELIBERATELY NOT `UI.enhanceProjectSelect`. That
-        helper turns a <select> into a group-head browser built from the projects
-        table, and it can only ever offer real projects — so "All projects" and
-        "Not project-linked" would be selectable once and then unreachable, with
-        no way back. A plain <select> is the correct control here.
-     3. ⚠️ It still never falls back to `projects[0]`. The stored `pd_project` is
-        adopted as the INITIAL filter only when it is a project the user can
-        actually access; anything else opens on "All projects" rather than
-        silently adopting whichever project sorts first.
+   programme that MAY carry a project link, and there is deliberately NO project
+   filter or selector anywhere on this page — Overview and Registry always show
+   every initiative the signed-in user can see (org-wide rows, plus any pinned
+   to a project they have access to; RLS decides that, not this module). The
+   Registry's own "Project" column still shows the link per row, and the
+   Add/Edit form still lets a write optionally pin one.
+   ⚠️ NO REDIRECT, EVER. `init()` must not bounce to projects.html when
+   `pd_project` is empty — the register is meaningful with no project chosen,
+   and bouncing would make the module unreachable from a cold start.
+   (An earlier build carried a topbar project FILTER — All projects / Not
+   project-linked / a project — reasoning it would matter once initiatives got
+   pinned to projects. Removed 2026-08-13: at this app's actual scale a filter
+   nobody used yet was pure interface cost, and it read as contradicting the
+   "org-wide" pitch even though it never touched `pd_project`. If usage grows to
+   where the Registry needs faster narrowing, filter by department/category —
+   both already exist — before reintroducing a project-scoped control here.)
 
    ⚠️ NO SOURCE WORKBOOK — the schema was designed, not transcribed (owner
    confirmed there is no existing tracker). The Overview therefore carries a
@@ -62,13 +61,9 @@ window.Initiatives = (function () {
     'Safety', 'Sustainability', 'Capability & Training', 'Standardisation'];
   var BENEFITS = ['Cost', 'Time', 'Quality', 'Safety', 'Compliance', 'Capability'];
 
-  // ⚠️ The filter's two non-project sentinels. They are not project ids and must
-  // never be written to a row — `patch.project_id` is separate from this.
-  var ALL = '', NOPROJ = '__none__';
-
   var UID = null, rows = [], canWrite = false, isAdmin = false;
   var view = 'overview', projects = [], projName = {};
-  var filters = { q: '', project: ALL, category: '', status: '', department: '', hideClosed: false };
+  var filters = { q: '', category: '', status: '', department: '', hideClosed: false };
 
   // ---- helpers -------------------------------------------------------------
   var MNAME = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -148,14 +143,6 @@ window.Initiatives = (function () {
     return order.sort().map(function (k) { return { key: k, rows: m[k], st: stats(m[k]) }; });
   }
 
-  // The project filter, applied before anything else — every Overview figure is
-  // computed over THIS list so the two tabs can never disagree.
-  function scoped() {
-    if (filters.project === ALL) return rows;
-    if (filters.project === NOPROJ) return rows.filter(function (r) { return !r.project_id; });
-    return rows.filter(function (r) { return r.project_id === filters.project; });
-  }
-
   // ==========================================================================
   // Load
   // ==========================================================================
@@ -232,13 +219,7 @@ window.Initiatives = (function () {
   function renderOverview() {
     var host = document.getElementById('in-view');
     if (!rows.length) { host.innerHTML = emptyHTML(); wireEmpty(); return; }
-    var list = scoped(), T = stats(list);
-    if (!list.length) {
-      host.innerHTML = '<div class="pd-card in-empty"><h3>No initiatives in this view</h3>' +
-        '<p>Nothing matches the current project filter. Switch it back to ' +
-        '<strong>All projects</strong> to see everything.</p></div>';
-      return;
-    }
+    var list = rows, T = stats(list);
 
     var h = '<div class="in-kpis">' +
       kpi(T.count, 'Initiatives', T.unlinked + ' not project-linked') +
@@ -344,13 +325,9 @@ window.Initiatives = (function () {
   }
 
   // ⚠️ A drill whose destination count cannot match the number just clicked is
-  // worse than no drill at all, so each one clears the OTHER filters — but it
-  // KEEPS the project filter, because every Overview figure was already computed
-  // over that scope. Clearing it here would land on a bigger number than the one
-  // clicked, which is the exact failure the rule exists to prevent.
+  // worse than no drill at all, so each one clears every OTHER filter first.
   function drillTo(kind, value) {
-    var keepProject = filters.project;
-    filters = { q: '', project: keepProject, category: '', status: '', department: '', hideClosed: false };
+    filters = { q: '', category: '', status: '', department: '', hideClosed: false };
     if (kind === 'status') filters.status = value;
     else if (kind === 'category') filters.category = value === '(unspecified)' ? '' : value;
     else filters.department = value === '(unspecified)' ? '' : value;
@@ -387,8 +364,7 @@ window.Initiatives = (function () {
     return true;
   }
   function anyFilter() {
-    return !!(filters.q || filters.category || filters.status || filters.department ||
-      filters.hideClosed || filters.project !== ALL);
+    return !!(filters.q || filters.category || filters.status || filters.department || filters.hideClosed);
   }
 
   // ⚠️ HEAD is the SINGLE SOURCE OF TRUTH for the column count — the empty state
@@ -407,11 +383,8 @@ window.Initiatives = (function () {
   function renderRegistry() {
     var host = document.getElementById('in-view');
     if (!rows.length) { host.innerHTML = emptyHTML(); wireEmpty(); return; }
-    var pool = scoped();
-    var shown = pool.filter(matches);
-    document.getElementById('in-count').textContent =
-      'Showing ' + shown.length + ' of ' + pool.length +
-      (pool.length === rows.length ? '' : ' (' + rows.length + ' in all projects)');
+    var shown = rows.filter(matches);
+    document.getElementById('in-count').textContent = 'Showing ' + shown.length + ' of ' + rows.length;
 
     var HEAD = headCells(), SPAN = HEAD.length;
     var h = '<div class="pd-card in-tablecard"><table class="in-table"><thead><tr>' +
@@ -641,27 +614,23 @@ window.Initiatives = (function () {
   }
 
   // ⚠️ "Clear" here is NOT the sibling registers' "clear this project's rows".
-  // The table is org-wide, so the destructive scope depends on the current
-  // filter, and a button that silently means "everything in the company" is a
-  // trap. It clears exactly what the project filter selects, names that scope in
-  // the dialog, and requires it to be typed back.
+  // The table is org-wide with no view-narrowing filter any more, so this
+  // always means EVERY initiative the signed-in user can see — org-wide rows
+  // plus any pinned to a project they have access to. Says that plainly and
+  // requires "ALL" typed back, rather than a scope name that would suggest a
+  // narrower, safer deletion than what actually happens.
   async function clearAll() {
     if (!isAdmin) return;
-    var list = scoped();
-    var scope = filters.project === ALL ? 'ALL' :
-      filters.project === NOPROJ ? 'ORG-WIDE' : filters.project;
-    var label = filters.project === ALL ? 'every initiative you can see, across all projects' :
-      filters.project === NOPROJ ? 'every initiative with no project link' :
-      'every initiative attached to ' + scope;
+    var list = rows;
     var m = UI.modal('<h2 style="margin-top:0;">Clear initiatives</h2>' +
       '<p>This deletes <strong>' + list.length + '</strong> row' + (list.length === 1 ? '' : 's') +
-      ' — ' + esc(label) + '.</p>' +
-      '<p>Type <code>' + esc(scope) + '</code> to confirm:</p><input class="pd-input" id="in-confirm" />' +
+      ' — every initiative you can see, org-wide and across every project.</p>' +
+      '<p>Type <code>ALL</code> to confirm:</p><input class="pd-input" id="in-confirm" />' +
       '<div class="pd-modal-actions"><button class="pd-btn" id="in-cc">Cancel</button>' +
       '<button class="pd-btn pd-btn-danger" id="in-cok">Delete them</button></div>', { noBackdropClose: true });
     m.el.querySelector('#in-cc').onclick = m.close;
     m.el.querySelector('#in-cok').onclick = async function () {
-      if (m.el.querySelector('#in-confirm').value.trim() !== scope) { UI.toast('That does not match.', 'error'); return; }
+      if (m.el.querySelector('#in-confirm').value.trim() !== 'ALL') { UI.toast('That does not match.', 'error'); return; }
       try {
         // Delete by the ids actually on screen rather than by a filter
         // expression — the two cannot drift apart that way, and `is null` vs
@@ -967,10 +936,10 @@ window.Initiatives = (function () {
   }
 
   // ---- export --------------------------------------------------------------
-  // Exports the CURRENT project scope, and says so in the file name — an export
-  // that silently included every department would be a surprise.
+  // Exports everything the signed-in user can see, org-wide and across every
+  // project — there is no view-narrowing filter left to export a subset of.
   function exportExcel() {
-    var list = scoped(), T = stats(list);
+    var list = rows, T = stats(list);
     var sum = groupBy(list, 'department').map(function (g) {
       return { Department: g.key, Initiatives: g.st.count, 'In progress': g.st.active,
         Completed: g.st.done, Cancelled: g.st.cancelled, Overdue: g.st.overdue,
@@ -1000,12 +969,10 @@ window.Initiatives = (function () {
         'KPI target': num(r.kpi_target),
         Reference: r.reference_link || '', Remarks: r.remarks || '' };
     });
-    var scope = filters.project === ALL ? 'All projects'
-      : filters.project === NOPROJ ? 'Org-wide' : (projName[filters.project] || filters.project);
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sum), 'SUMMARY');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(reg), 'Initiatives');
-    XLSX.writeFile(wb, 'Initiatives - ' + scope + '.xlsx');
+    XLSX.writeFile(wb, 'Initiatives.xlsx');
   }
 
   // ==========================================================================
@@ -1059,30 +1026,13 @@ window.Initiatives = (function () {
       ['in-add', 'in-import'].forEach(function (id) { var b = document.getElementById(id); if (b) b.style.display = 'none'; });
     }
 
+    // ⚠️ `projects` is still loaded — NOT for a page-level filter (there is
+    // none), but because the Registry's "Project" column resolves a linked
+    // row's name from it, and the Add/Edit form still offers an optional
+    // project to pin an initiative to.
     try { projects = (await PDb.getProjects()) || []; } catch (e) { projects = []; }
     projects = projects.filter(function (p) { return !AppAuth.canAccessProject || AppAuth.canAccessProject(profile, p.id); });
     projects.forEach(function (p) { projName[p.id] = p.name || p.id; });
-
-    // ⚠️ A FILTER, not the page's context — hence the two sentinel options and
-    // the plain <select> (see the header note on why enhanceProjectSelect is
-    // wrong here). It does NOT write pd_project: leaving this module must not
-    // change which project the rest of the app thinks you are in.
-    var selEl = document.getElementById('in-project');
-    selEl.innerHTML = '<option value="">All projects</option>' +
-      '<option value="' + NOPROJ + '">Not project-linked</option>' +
-      projects.map(function (p) {
-        return '<option value="' + esc(p.id) + '">' + esc(p.name || p.id) + '</option>';
-      }).join('');
-    // Adopt the app-wide selection as the opening filter when it is a project
-    // this user can really access — never `projects[0]`, and never a redirect.
-    var stored = sessionStorage.getItem('pd_project');
-    filters.project = (stored && projects.some(function (p) { return String(p.id) === String(stored); }))
-      ? stored : ALL;
-    selEl.value = filters.project;
-    selEl.addEventListener('change', function () {
-      filters.project = selEl.value;
-      render();
-    });
 
     document.querySelectorAll('.in-tab').forEach(function (t) {
       t.onclick = function () { switchTab(t.dataset.view); };
@@ -1104,10 +1054,7 @@ window.Initiatives = (function () {
     document.getElementById('in-f-department').addEventListener('change', function (e) { filters.department = e.target.value; render(); });
     document.getElementById('in-f-hideclosed').addEventListener('change', function (e) { filters.hideClosed = e.target.checked; render(); });
     document.getElementById('in-f-clear').onclick = function () {
-      // ⚠️ Clearing the FILTERS does not reset the project scope — that control
-      // lives in the topbar beside the tabs, not in this bar, and silently
-      // widening it to every project would change what the Overview totals mean.
-      filters = { q: '', project: filters.project, category: '', status: '', department: '', hideClosed: false };
+      filters = { q: '', category: '', status: '', department: '', hideClosed: false };
       q.value = '';
       ['in-f-category', 'in-f-status', 'in-f-department'].forEach(function (id) { document.getElementById(id).value = ''; });
       document.getElementById('in-f-hideclosed').checked = false;
@@ -1121,7 +1068,7 @@ window.Initiatives = (function () {
     init: init,
     // Exposed so a verification harness runs the SHIPPED functions rather than a
     // reimplementation of them — the arrangement every sibling register uses.
-    _internals: { stats: stats, groupBy: groupBy, scoped: scoped, isOverdue: isOverdue,
+    _internals: { stats: stats, groupBy: groupBy, isOverdue: isOverdue,
       progressOf: progressOf, todayISO: todayISO, parseWorkbook: parseWorkbook,
       parseSheet: parseSheet, mapHeaders: mapHeaders, normHdr: normHdr, parseDate: parseDate,
       realDate: realDate, parseMoney: parseMoney, parsePct: parsePct, normStatus: normStatus,
@@ -1130,7 +1077,6 @@ window.Initiatives = (function () {
       setProjects: function (x) { projects = x; projName = {}; x.forEach(function (p) { projName[p.id] = p.name || p.id; }); },
       setFilters: function (x) { filters = x; },
       setCanWrite: function (x) { canWrite = x; },
-      STATUSES: STATUSES, CATEGORIES: CATEGORIES, BENEFITS: BENEFITS, SYN: SYN,
-      ALL: ALL, NOPROJ: NOPROJ }
+      STATUSES: STATUSES, CATEGORIES: CATEGORIES, BENEFITS: BENEFITS, SYN: SYN }
   };
 })();

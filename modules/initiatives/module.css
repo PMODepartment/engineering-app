@@ -26,21 +26,14 @@
 .pd-topbar #user-bar { margin-left:10px; padding-left:10px; border-left:1px solid var(--pd-line); flex:none; }
 .pd-topbar #pd-theme-toggle { width:34px; height:34px; padding:0; display:inline-flex; align-items:center; justify-content:center; margin-left:4px; flex:none; }
 
-/* ---- Topbar: project FILTER + tabs + tools ------------------------------- */
+/* ---- Topbar: tabs + tools --------------------------------------------------
+   No project selector — see the header note in module.js. This module is the
+   one place in the suite where the topbar goes straight from the title to the
+   view tabs. */
 .in-title-txt { white-space:nowrap; }
 @media (max-width:1150px){ .in-title-txt { display:none; } }   /* icon-only title when tight */
 .in-title-ico { color:var(--pd-red); vertical-align:-3px; }
 .in-modback { height:36px; width:36px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
-
-.in-projctx { display:flex; align-items:center; min-width:0; flex:0 1 auto; }
-/* ⚠️ Deliberately NOT `background:transparent; border-color:transparent` like
-   the sibling modules' project selectors. Theirs shows the page's context, which
-   is ambient; this one is a FILTER that changes every number on screen, so it
-   reads as a control at rest rather than only on hover. */
-.in-project { max-width:230px; min-width:140px; height:34px; font-weight:600; font-size:var(--in-fs-base); }
-.in-projlbl { font-size:var(--in-fs-micro); font-weight:700; letter-spacing:.05em; text-transform:uppercase;
-  color:var(--pd-muted); margin-right:6px; white-space:nowrap; }
-@media (max-width:1000px){ .in-projlbl { display:none; } }
 
 .in-tabs { display:inline-flex; border:1px solid var(--pd-line); border-radius:var(--pd-radius); overflow:hidden; flex:none; }
 .in-tab { border:0; background:var(--pd-card); color:var(--pd-ink); padding:6px 14px; font-weight:600;

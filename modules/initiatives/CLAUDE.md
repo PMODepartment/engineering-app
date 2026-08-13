@@ -20,7 +20,7 @@ Overview rather than a reconciliation note.
 
 An initiative is a department-level programme — a new standard, a tool, a
 training push. It **may** carry a project link and usually does not. So
-`initiatives.project_id` is **nullable**, and five things follow that are the
+`initiatives.project_id` is **nullable**, and four things follow that are the
 opposite of what every sibling module does:
 
 1. ⚠️ **RLS is NOT the standard 4-policy pattern.** `can_access_project(pid)`
@@ -38,21 +38,39 @@ opposite of what every sibling module does:
    would make it **unreachable from a cold start** — the only way to clear the
    gate is to pick a project it does not need. Hence the new **`orgWide: true`**
    flag in `assets/js/config.js`, which `nav.js` reads.
-3. ⚠️ **`init()` NEVER redirects to `projects.html`,** and still never falls back
-   to `projects[0]`. The stored `pd_project` is adopted as the **opening filter**
-   only when it is a project the user can really access; anything else opens on
-   "All projects".
-4. ⚠️ **The topbar selector is a FILTER, and is deliberately NOT
-   `UI.enhanceProjectSelect`.** That helper builds a group-head browser from the
-   projects table and can only ever offer real projects, so "All projects" and
-   "Not project-linked" would be selectable once and then **unreachable, with no
-   way back**. A plain `<select>` is the correct control. It is labelled
-   "Filter", styled as a control at rest rather than ambient context, and it
-   **does not write `pd_project`** — leaving this module must not change which
-   project the rest of the app thinks you are in.
-5. ⚠️ **`load()` has no `.eq('project_id', …)`.** RLS already limits the rows;
-   the filter is applied client-side by `scoped()`, and every Overview figure is
-   computed over that same list so the two tabs can never disagree.
+3. ⚠️ **`init()` NEVER redirects to `projects.html`,** and never reads or writes
+   `pd_project` at all. There is no notion of "the current project" on this page.
+4. ⚠️ **`load()` has no `.eq('project_id', …)`.** RLS already limits the rows to
+   what the signed-in user may see (org-wide, plus anything pinned to a project
+   they can access); Overview and Registry both render the full result unfiltered
+   by project, so the two tabs can never disagree about scope.
+
+### ⚠️ There is deliberately NO project selector or filter (removed 2026-08-13)
+The first build carried a topbar dropdown — All projects / Not project-linked /
+a project — reasoning it would matter once initiatives started getting pinned to
+projects. The owner asked why it was there on a module pitched as "org-wide";
+removed rather than re-justified. At this app's actual scale a filter nobody had
+used yet was pure interface cost, and it read as contradicting the org-wide
+framing even though it never touched `pd_project` (item 3 above predates the
+selector and stayed true throughout — it was never page CONTEXT, only ever an
+optional narrowing control, which is exactly why removing it changed nothing
+structural).
+- Overview and Registry now always show **every initiative the signed-in user
+  can see** — org-wide rows plus any pinned to an accessible project. No `list`
+  vs `rows` distinction remains in `module.js`; `renderOverview`/`renderRegistry`
+  read `rows` directly.
+- The **Registry's "Project" column** still shows the link per row (or
+  "org-wide"), and the **Add/Edit form** still lets a write optionally pin one —
+  neither of those was the removed control.
+- **`clearAll()` redesigned**: it no longer scopes to "whatever the filter
+  selects" (there is no filter). It always means every initiative the user can
+  see, says so plainly, and requires typing `ALL` — a named scope like a project
+  id would now suggest a narrower, safer deletion than what actually happens.
+- **`exportExcel()`** always exports everything visible; the filename dropped its
+  scope suffix.
+- If Registry-level narrowing is needed later, filter by department or category
+  first — both already exist as filters — before reintroducing a project-scoped
+  control.
 
 The audit trigger needed no change: `engineering_audit.project_id` is nullable
 and its read policy already handles `project_id is null`.
@@ -80,12 +98,10 @@ behind for its first eight hours and under-report overdue items.
 
 ### Destructive actions are scoped differently, on purpose
 - ⚠️ **"Clear" is not the siblings' "clear this project's rows".** The table is
-  org-wide, so the scope depends on the current filter, and a button that
-  silently means "everything in the company" is a trap. It clears exactly what
-  the filter selects, **names that scope in the dialog**, requires it typed back,
-  and deletes **by the ids actually on screen** rather than by a filter
-  expression — `is null` vs `eq` is precisely the predicate that gets
-  mistranslated.
+  org-wide with no view-narrowing filter, so "Clear" always means every
+  initiative the signed-in user can see. It says so plainly, requires `ALL`
+  typed back, and deletes **by the ids actually loaded** rather than by a filter
+  expression.
 - ⚠️ **Import is ADD-ONLY.** There is deliberately no "replace everything"
   checkbox: a replace here would delete other departments' initiatives. The
   siblings can offer it safely only because their delete is scoped to one
@@ -132,26 +148,26 @@ behind for its first eight hours and under-report overdue items.
   they diverge, the module is the authority.
 
 ### Verification
-- **137/137 automated checks** (shared harness with Value Engineering) against
+- **134/134 automated checks** (shared harness with Value Engineering) against
   the **shipped** `module.js`, running its own exported internals. Covers: the
   in-progress-only progress mean (including that a `Planned` row at 80% does not
   move it, and that an active row with no figure is excluded from the
   denominator); Cost-only benefit summation with a ₱999,999 Safety row proven
   excluded; every overdue boundary (past/future/today/no-date/completed/
-  cancelled); progress clamping and the Completed→100 implication; all four
-  project-scope cases including that an unmatched project id yields **empty, not
-  everything**; percent parsing across five notations; status synonym
-  normalisation; header mapping including the punctuation bug and the
-  `Target Date` / `KPI Target` collision; a full sheet parse proving an unknown
-  project code lands as `null` and is reported; and `headCells()` emitting
-  exactly one `<th>` per entry.
+  cancelled); progress clamping and the Completed→100 implication; `matches()`
+  with no project predicate to apply; percent parsing across five notations;
+  status synonym normalisation; header mapping including the punctuation bug and
+  the `Target Date` / `KPI Target` collision; a full sheet parse proving an
+  unknown project code lands as `null` and is reported; and `headCells()`
+  emitting exactly one `<th>` per entry.
+- **Migration `0015-initiatives.sql` has been run on the live DB (owner
+  confirmed 2026-08-13).**
 - `node --check` clean; CSS braces and comments balanced.
-- ⚠️ **NOT browser-verified and NOT verified signed-in.** The migration has not
-  been run. Layout at 375 / 768 / 1280 and dark-mode contrast are unmeasured
-  here, and **the org-wide RLS has not been exercised against two real accounts**
-  — that is the one check that matters most for this module: confirm a user with
-  no access to project X cannot see an initiative pinned to X, and that everyone
-  sees the unpinned ones.
+- ⚠️ **NOT browser-verified against real CRUD, and the org-wide RLS has not been
+  exercised against two real accounts** — that is the one check that matters
+  most for this module: confirm a user with no access to project X cannot see an
+  initiative pinned to X, and that everyone sees the unpinned ones. Layout at
+  375 / 768 / 1280 and dark-mode contrast are unmeasured.
 
 ### Not built (deliberate)
 No approval guard — an initiative has no review authority; `Completed` is the
@@ -163,14 +179,16 @@ offline writes.
 
 ## Status
 - [x] Read the module guide; chrome copied, not re-invented
-- [x] CRUD (add / edit / delete / scoped clear), `created_by` stamped
+- [x] CRUD (add / edit / delete / clear-all), `created_by` stamped
 - [x] `Fmt.esc()` on all user text injected into HTML
 - [x] List read keyset-paginated past 1000 rows
 - [x] Import (add-only, header-mapped, mapping shown) + export
 - [x] Audit trigger in the migration
 - [x] `orgWide: true` in `assets/js/config.js`; `nav.js` honours it
-- [x] `enabled: true`; assets `?v=20260813a`
-- [ ] **Migration run on the live DB**
+- [x] `enabled: true`; assets `?v=20260813d`
+- [x] **Migration run on the live DB** (owner confirmed 2026-08-13)
+- [x] No project selector/filter on the page (removed 2026-08-13)
 - [ ] **Org-wide RLS verified with two accounts** (see above)
-- [ ] Live click-through against a real login
+- [ ] Live click-through of CRUD against a real login (signed-in load confirmed
+      working; add/edit/import/delete not yet exercised live)
 - [ ] Responsive + dark-mode measured at 375 / 768 / 1280
