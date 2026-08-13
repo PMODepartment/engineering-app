@@ -63,10 +63,17 @@
 
     // Engineering modules — config-driven, permission-filtered. A module the
     // user's role cannot open is omitted entirely rather than shown disabled.
-    // Every module is project-scoped, so all of them gate on the selection.
+    //
+    // ⚠️ Gating is per-module, NOT blanket. Most modules are project-scoped and
+    // redirect to projects.html with nothing selected, so offering a link that
+    // silently undoes itself reads as broken — those gate. A module flagged
+    // `orgWide` in config.js (Initiatives) is meaningful with no project chosen,
+    // and gating it would make it unreachable from a cold start, since the only
+    // way to clear the gate is to pick a project it does not need.
     (APP_CONFIG.MODULES || []).forEach(function (m) {
       if (!m.enabled || !Perm.canModule(profile, m.key)) return;
-      html += link(m.path, m.icon, m.name, null, active === m.key, { disabled: noProject });
+      html += link(m.path, m.icon, m.name, null, active === m.key,
+        { disabled: noProject && !m.orgWide });
     });
 
     html += section('System');

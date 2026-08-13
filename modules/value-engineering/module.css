@@ -1,0 +1,230 @@
+/* Value Engineering List — module styles (all classes prefixed .ve-)
+   Chrome (topbar / tabs / tools / filter bar) is copied VERBATIM from
+   method-register/module.css, which took it from material-submittal, which took
+   it from drawing-register after a computed-style diff against the suite. Do not
+   re-invent it: see the 2026-07-20(c) note in material-submittal/CLAUDE.md for
+   what breaks when this block is dropped. */
+
+/* ------------------------------- TYPE SCALE -------------------------------
+   The SAME six steps as the three sibling registers — the modules sit in one
+   suite, so a heading here must be the size of a heading there. Never a raw px
+   font-size; `micro` is the readable floor. */
+:root {
+  --ve-fs-micro:11px;
+  --ve-fs-sm:12px;
+  --ve-fs-base:13px;
+  --ve-fs-lg:15px;
+  --ve-fs-xl:20px;
+  --ve-fs-kpi:32px;
+}
+
+/* ---- Shared topbar chrome (VERBATIM from drawing-register/module.css) -----
+   Without it the topbar inherits dashboard.css's `gap:14px` with no wrapping,
+   the avatar loses its left divider, and theme.js's injected toggle keeps its
+   default size instead of matching the 34x34 tool buttons — which reads as
+   "the buttons beside the profile icon are misplaced". */
+.pd-topbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; row-gap:8px; }
+.pd-topbar #user-bar { margin-left:10px; padding-left:10px; border-left:1px solid var(--pd-line); flex:none; }
+.pd-topbar #pd-theme-toggle { width:34px; height:34px; padding:0; display:inline-flex; align-items:center; justify-content:center; margin-left:4px; flex:none; }
+
+/* ---- Topbar: project selector + tabs + tools ----------------------------- */
+.ve-title-txt { white-space:nowrap; }
+@media (max-width:1150px){ .ve-title-txt { display:none; } }   /* icon-only title when tight */
+.ve-title-ico { color:var(--pd-red); vertical-align:-3px; }
+.ve-modback { height:36px; width:36px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+
+.ve-projctx { display:flex; align-items:center; min-width:0; flex:0 1 auto; }
+.ve-project { max-width:230px; min-width:120px; height:34px; font-weight:600; font-size:var(--ve-fs-base);
+  background:transparent; border-color:transparent; }
+.ve-project:hover, .ve-project:focus { background:var(--pd-card); border-color:var(--pd-line); }
+
+.ve-tabs { display:inline-flex; border:1px solid var(--pd-line); border-radius:var(--pd-radius); overflow:hidden; flex:none; }
+.ve-tab { border:0; background:var(--pd-card); color:var(--pd-ink); padding:6px 14px; font-weight:600;
+  cursor:pointer; font-size:var(--ve-fs-base); transition:background .12s; white-space:nowrap; }
+.ve-tab + .ve-tab { border-left:1px solid var(--pd-line); }
+.ve-tab:hover:not(.active) { background:var(--pd-bg); }
+.ve-tab.active { background:var(--pd-red); color:#fff; }
+
+.ve-topbar-tools { display:flex; align-items:center; gap:4px; margin-left:auto; }
+.ve-topbar-tools .pd-btn { height:34px; width:34px; padding:0; display:inline-flex; align-items:center; justify-content:center;
+  background:transparent; border-color:transparent; font-size:var(--ve-fs-base); }
+.ve-topbar-tools .pd-btn:hover { background:var(--pd-bg); border-color:var(--pd-line); }
+.ve-topbar-tools .pd-btn.ve-tb-labeled { width:auto; padding:0 12px; gap:6px; }
+.ve-topbar-tools .pd-btn.pd-btn-primary { background:var(--pd-red); border-color:var(--pd-red); color:#fff; }
+.ve-topbar-tools .pd-btn.pd-btn-primary:hover { filter:brightness(.94); }
+.ve-tb-sep { width:1px; align-self:stretch; margin:5px 3px; background:var(--pd-line); }
+.ve-clearbtn { color:var(--pd-bad,#dc2626); }
+.ve-clearbtn:hover { background:var(--pd-bad,#dc2626) !important; border-color:var(--pd-bad,#dc2626) !important; color:#fff; }
+
+/* ---- Filter bar --------------------------------------------------------- */
+.ve-filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px;
+  background:var(--pd-card); border:1px solid var(--pd-line); border-radius:var(--pd-radius); padding:8px 12px; }
+.ve-filt-ico { color:var(--pd-muted); flex:none; }
+.ve-filters .ve-search { flex:1 1 280px; min-width:170px; }
+.ve-filters .pd-select { flex:0 0 auto; max-width:190px; }
+.ve-chk { display:inline-flex; align-items:center; gap:6px; font-size:var(--ve-fs-base); color:var(--pd-ink); cursor:pointer; white-space:nowrap; }
+.ve-chk input { width:15px; height:15px; accent-color:var(--pd-red); cursor:pointer; }
+/* Ghost clear — only rendered when a filter is actually set (Progress Photos
+   lesson: a margin-left:auto button orphans itself onto a second line when the
+   row wraps). */
+.ve-clearfilt { display:inline-flex; align-items:center; gap:5px; border:0; background:none; cursor:pointer;
+  color:var(--pd-muted); font-size:var(--ve-fs-sm); font-weight:600; padding:4px 6px; border-radius:var(--pd-radius); }
+.ve-clearfilt:hover { background:var(--pd-bg); color:var(--pd-red); }
+.ve-clearfilt[hidden] { display:none; }
+.ve-count { color:var(--pd-muted); font-size:var(--ve-fs-base); margin-left:auto; white-space:nowrap; }
+
+/* ---- KPI row ------------------------------------------------------------- */
+.ve-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:18px; margin-bottom:16px; }
+.ve-kpi { padding:20px 22px; position:relative; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.05); transition:transform .12s, box-shadow .12s; }
+.ve-kpi:hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,.09); }
+.ve-kpi::before { content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--pd-line); }
+.ve-kpi.good::before { background:#12693A; }
+.ve-kpi.warn::before { background:#B45309; }
+.ve-kpi.bad::before  { background:var(--pd-red); }
+.ve-kpi-val { font-size:var(--ve-fs-kpi); font-weight:800; line-height:1.05; }
+.ve-kpi-lbl { font-size:var(--ve-fs-base); font-weight:600; margin-top:4px; }
+.ve-kpi-sub { font-size:var(--ve-fs-micro); color:var(--pd-muted); margin-top:2px; }
+
+/* ---- Summary panels ------------------------------------------------------ */
+/* align-items:start so a short panel does not stretch to match a tall one —
+   the fix drawing-register's KPI pass had to make retroactively. */
+.ve-grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px;
+  align-items:start; margin-bottom:16px; }
+.ve-panel { padding:18px 20px; }
+.ve-panel h3 { margin:0 0 10px; font-size:var(--ve-fs-lg); }
+.ve-panel-note { margin:10px 0 0; font-size:var(--ve-fs-sm); color:var(--pd-muted); line-height:1.5; }
+.ve-mini { width:100%; border-collapse:collapse; font-size:var(--ve-fs-base); }
+.ve-mini td { padding:6px 4px; border-bottom:1px solid var(--pd-line); }
+.ve-mini tr:last-child td { border-bottom:0; }
+.ve-drill { cursor:pointer; }
+.ve-drill:hover { background:var(--pd-bg); }
+
+/* ---- Tables -------------------------------------------------------------- */
+.ve-tablecard { padding:0; overflow:auto; }
+.ve-sumtable, .ve-table { width:100%; border-collapse:collapse; font-size:var(--ve-fs-base); }
+.ve-sumtable th, .ve-sumtable td, .ve-table th, .ve-table td {
+  padding:7px 10px; border-bottom:1px solid var(--pd-line); text-align:left; white-space:nowrap; }
+.ve-sumtable thead th, .ve-table thead th {
+  position:sticky; top:0; z-index:2; background:var(--pd-card); font-size:var(--ve-fs-micro);
+  font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--pd-muted); }
+.ve-sumtable tbody tr:hover { background:var(--pd-bg); cursor:pointer; }
+.ve-r { text-align:right !important; font-variant-numeric:tabular-nums; }
+.ve-b { font-weight:700; }
+.ve-mut { color:var(--pd-muted); }
+.ve-nowrap { white-space:nowrap; }
+.ve-sumtotal td { font-weight:800; border-top:2px solid var(--pd-line); background:var(--pd-bg); }
+/* Direction, not decoration: a saving reads green, an overrun red. Both are
+   token-free deliberate hues that already pass in both themes at this weight. */
+.ve-pos { color:#12693A; }
+.ve-neg { color:var(--pd-red); }
+
+/* ---- Registry ------------------------------------------------------------ */
+.ve-table { min-width:1720px; }
+.ve-code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:var(--ve-fs-sm); font-weight:700; }
+.ve-item { font-weight:600; white-space:normal; }
+.ve-sub { font-size:var(--ve-fs-micro); color:var(--pd-muted); white-space:normal; margin-top:2px; line-height:1.4; }
+/* A rejected proposal stays visible but recedes — it is history, not backlog. */
+.ve-rejected td { opacity:.6; }
+
+/* Frozen identity columns, same treatment as the sibling registers. */
+.ve-table th.ve-fz1, .ve-table td.ve-fz1 { position:sticky; left:0;   z-index:1; background:var(--pd-card); min-width:110px; }
+.ve-table th.ve-fz2, .ve-table td.ve-fz2 { position:sticky; left:110px; z-index:1; background:var(--pd-card); min-width:300px; max-width:400px; }
+.ve-table tbody tr:hover td.ve-fz1, .ve-table tbody tr:hover td.ve-fz2 { background:var(--pd-bg); }
+
+/* ---- Chips ---------------------------------------------------------------
+   Soft tint + dark text, never white on a saturated fill — the treatment the
+   2026-08-06 accessibility pass made the standard across the suite after 5 of 7
+   solid-fill pills failed WCAG AA at 11px. */
+.ve-pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:var(--ve-fs-micro);
+  font-weight:700; border:1px solid; background:color-mix(in srgb, var(--c) 16%, var(--pd-card));
+  border-color:color-mix(in srgb, var(--c) 42%, transparent); color:color-mix(in srgb, var(--c) 78%, var(--pd-ink)); }
+.ve-s-prop { --c:#8A8F98; }
+.ve-s-rev  { --c:#2563EB; }
+.ve-s-end  { --c:#7C3AED; }
+.ve-s-app  { --c:#12693A; }
+.ve-s-imp  { --c:#0F766E; }
+.ve-s-hold { --c:#B45309; }
+.ve-s-rej  { --c:#C42127; }
+
+.ve-qi { display:inline-block; padding:2px 8px; border-radius:5px; font-size:var(--ve-fs-micro);
+  font-weight:700; border:1px solid; background:color-mix(in srgb, var(--c) 14%, var(--pd-card));
+  border-color:color-mix(in srgb, var(--c) 38%, transparent); color:color-mix(in srgb, var(--c) 78%, var(--pd-ink)); }
+.ve-qi-none   { --c:#8A8F98; }
+.ve-qi-low    { --c:#12693A; }
+.ve-qi-medium { --c:#B45309; }
+.ve-qi-high   { --c:#C42127; }
+
+.ve-pri { display:inline-block; width:20px; height:20px; line-height:20px; text-align:center; border-radius:5px;
+  font-size:var(--ve-fs-micro); font-weight:800; }
+.ve-pri-1 { background:color-mix(in srgb,#C42127 18%,var(--pd-card)); color:#C42127; }
+.ve-pri-2 { background:color-mix(in srgb,#B45309 18%,var(--pd-card)); color:#B45309; }
+.ve-pri-3 { background:var(--pd-bg); color:var(--pd-muted); }
+
+.ve-doccol { width:52px; text-align:center !important; }
+.ve-filebtn { display:inline-flex; color:var(--pd-muted); }
+.ve-filebtn:hover { color:var(--pd-red); }
+.ve-actcol { width:76px; text-align:right !important; }
+.ve-iconbtn { padding:3px 6px; line-height:1; }
+.ve-iconbtn-del:hover { color:var(--pd-red); border-color:var(--pd-red); }
+
+/* ---- Method note --------------------------------------------------------- */
+.ve-note { margin-top:16px; border-left:3px solid #B45309; }
+.ve-note-hd { display:flex; align-items:center; gap:7px; font-weight:700; font-size:var(--ve-fs-base); margin-bottom:6px; }
+.ve-note ul { margin:0; padding-left:20px; }
+.ve-note li { font-size:var(--ve-fs-sm); color:var(--pd-muted); margin-bottom:6px; line-height:1.5; }
+.ve-note strong { color:var(--pd-ink); }
+.ve-note code { font-size:var(--ve-fs-micro); background:var(--pd-bg); padding:1px 4px; border-radius:3px; }
+
+/* ---- Empty + skeleton ---------------------------------------------------- */
+.ve-empty { padding:40px; text-align:center; }
+.ve-empty h3 { margin:0 0 6px; font-size:var(--ve-fs-lg); }
+.ve-empty p { color:var(--pd-muted); font-size:var(--ve-fs-base); margin:0 auto; max-width:520px; line-height:1.55; }
+.ve-skcard { padding:16px; }
+.ve-sk-head { display:flex; align-items:center; gap:8px; font-size:var(--ve-fs-base); color:var(--pd-muted); margin-bottom:12px; }
+.ve-spin { width:13px; height:13px; border:2px solid var(--pd-line); border-top-color:var(--pd-red);
+  border-radius:50%; animation:ve-spin .7s linear infinite; }
+@keyframes ve-spin { to { transform:rotate(360deg); } }
+.ve-sk-row { display:flex; gap:10px; margin-bottom:9px; }
+.ve-sk { height:11px; border-radius:4px; background:linear-gradient(90deg,var(--pd-line),var(--pd-bg),var(--pd-line));
+  background-size:200% 100%; animation:ve-sh 1.2s ease-in-out infinite; }
+@keyframes ve-sh { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+
+/* ---- Add/Edit form ------------------------------------------------------- */
+.ve-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin:14px 0; }
+.ve-fld { display:flex; flex-direction:column; gap:4px; }
+.ve-fld > span { font-size:var(--ve-fs-sm); font-weight:600; color:var(--pd-muted); }
+.ve-fld > small { font-size:var(--ve-fs-micro); color:var(--pd-muted); line-height:1.4; }
+.ve-fld-wide { grid-column:1/-1; }
+.ve-fld textarea { resize:vertical; font-family:inherit; }
+.ve-sectlbl { font-size:var(--ve-fs-micro); font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--pd-muted); border-bottom:1px solid var(--pd-line); padding-bottom:5px; margin-top:6px; }
+.ve-calc { display:flex; flex-wrap:wrap; gap:22px; background:var(--pd-bg); border:1px solid var(--pd-line);
+  border-radius:var(--pd-radius); padding:10px 14px; }
+.ve-calc-item { display:flex; flex-direction:column; gap:1px; }
+.ve-calc-item small { font-size:var(--ve-fs-micro); color:var(--pd-muted); font-weight:600; }
+.ve-calc-item strong { font-size:var(--ve-fs-lg); font-weight:800; }
+
+/* ---- Import mapping preview ---------------------------------------------- */
+.ve-impmap { margin-top:12px; background:var(--pd-bg); border:1px solid var(--pd-line);
+  border-radius:var(--pd-radius); padding:10px 14px; font-size:var(--ve-fs-sm); }
+.ve-impmap ul { margin:6px 0 0; padding-left:20px; columns:2; column-gap:24px; }
+.ve-impmap li { margin-bottom:3px; break-inside:avoid; }
+.ve-impmap code { font-size:var(--ve-fs-micro); background:var(--pd-card); padding:1px 4px; border-radius:3px; }
+@media (max-width:560px) { .ve-impmap ul { columns:1; } }
+
+/* ---- Registry fills the viewport (desktop only) --------------------------
+   Gated above the phone breakpoint so mobile keeps normal page scrolling —
+   the same rule, and the same reason, as the sibling registers. */
+@media (min-width:701px) {
+  body.ve-fit .pd-app { height:100dvh; overflow:hidden; }
+  body.ve-fit .pd-content { display:flex; flex-direction:column; min-height:0; }
+  body.ve-fit .pd-main { flex:1; min-height:0; display:flex; flex-direction:column; }
+  body.ve-fit .ve-tablecard { flex:1; min-height:0; }
+}
+
+@media print {
+  .pd-topbar, .ve-filters, .ve-actcol, .ve-doccol { display:none !important; }
+  .ve-tablecard { max-height:none; overflow:visible; }
+  .ve-table { min-width:0; font-size:var(--ve-fs-micro); }
+  .ve-table th.ve-fz1, .ve-table td.ve-fz1, .ve-table th.ve-fz2, .ve-table td.ve-fz2 { position:static; }
+}

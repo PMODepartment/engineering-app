@@ -75,6 +75,12 @@ Planners schema changed and the projection needs looking at.
 - `modules/material-submittal/` — live
 - `modules/method-register/` — live (Summary + Registry, migration `0013`);
   see `modules/method-register/CLAUDE.md`
+- `modules/value-engineering/` — live (Summary + Registry, migration `0014`);
+  see `modules/value-engineering/CLAUDE.md`
+- `modules/initiatives/` — live (Overview + Registry, migration `0015`).
+  ⚠️ **The only ORG-WIDE module** — read `modules/initiatives/CLAUDE.md` before
+  touching it; most of the project-scoping rules below are deliberately inverted
+  there.
 
 See `docs/MODULE_GUIDE.md` before adding or building out a module.
 
@@ -95,8 +101,17 @@ to stay in agreement or the shell and the modules contradict each other:
    shown as though the user had picked it.
    ⚠️ `location.replace()` does **not** halt the running script — the caller must
    bail as well (drawing-register's `loadProjects()` returns a boolean for this).
-3. **`nav.js` gates the project-scoped items** (Dashboard + every module) when
-   nothing is selected: inert, `href` → `projects.html`, tooltip "Select a project
-   first". Otherwise they would be links that bounce straight back, which reads as
-   broken. Projects / Notifications / Administration are not project-scoped and are
-   never gated.
+3. **`nav.js` gates the project-scoped items** (Dashboard + every project-scoped
+   module) when nothing is selected: inert, `href` → `projects.html`, tooltip
+   "Select a project first". Otherwise they would be links that bounce straight
+   back, which reads as broken. Projects / Notifications / Administration are not
+   project-scoped and are never gated.
+   ⚠️ **Gating is per-module, not blanket.** A module carrying `orgWide: true` in
+   `config.js` (today only **Initiatives**) is meaningful with no project chosen,
+   so it is never gated — gating it would make it **unreachable from a cold
+   start**, since the only way to clear the gate is to choose a project it does
+   not need. Such a module must correspondingly **never redirect to
+   `projects.html`** from its own `init()`, and its table's RLS cannot use a bare
+   `can_access_project(project_id)` — that is FALSE for a NULL project and would
+   hide the entire table. See `modules/initiatives/CLAUDE.md` and
+   `migrations/0015-initiatives.sql`.

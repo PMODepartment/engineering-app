@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="../../assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="../../assets/img/icon.png" />
+  <script src="../../assets/js/theme.js?v=20260813a"></script>
+  <title>Value Engineering List · Engineering App</title>
+  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260813a" />
+  <link rel="stylesheet" href="module.css?v=20260813a" />
+</head>
+<body>
+  <div class="pd-app">
+    <!-- Sidebar-less shell (matches the three sibling registers). -->
+    <div class="pd-content">
+      <div class="pd-topbar">
+        <a class="pd-btn ve-modback" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
+        <h1 class="ve-title" style="margin:0;"><span class="ve-title-ico" data-ico="calculator" data-ico-size="20"></span> <span class="ve-title-txt">Value Engineering List</span></h1>
+        <div class="ve-projctx">
+          <select class="pd-select ve-project" id="ve-project" title="Project"></select>
+        </div>
+        <div class="ve-tabs" role="tablist">
+          <button class="ve-tab active" data-view="summary">Summary</button>
+          <button class="ve-tab" data-view="registry">Registry</button>
+        </div>
+        <!-- Global tools sit beside the profile (theme.js injects the dark-mode toggle before #user-bar) -->
+        <div class="ve-topbar-tools" id="ve-topbar-tools">
+          <button class="pd-btn ve-tb-labeled pd-btn-primary" id="ve-add" data-perm="create" title="Add a VE proposal">+ Add</button>
+          <span class="ve-tb-sep"></span>
+          <button class="pd-btn" id="ve-import" data-perm="create" title="Import a VE spreadsheet"><span data-ico="upload" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="ve-export" title="Export to Excel"><span data-ico="download" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="ve-print" title="Print / PDF"><span data-ico="printer" data-ico-size="16"></span></button>
+          <button class="pd-btn ve-clearbtn" id="ve-clear" title="Clear the VE list for this project" style="display:none;"><span data-ico="trash" data-ico-size="16"></span></button>
+        </div>
+        <div id="user-bar"></div>
+      </div>
+
+      <div class="pd-main">
+        <!-- Filter bar — Registry view only. -->
+        <div class="ve-filters" id="ve-filters">
+          <span class="ve-filt-ico" data-ico="filter" data-ico-size="15"></span>
+          <input class="pd-input ve-search" id="ve-f-search" placeholder="Search title, proposal, element, VE no…" />
+          <select class="pd-select" id="ve-f-discipline"><option value="">All disciplines</option></select>
+          <select class="pd-select" id="ve-f-status"><option value="">All statuses</option></select>
+          <select class="pd-select" id="ve-f-quality"><option value="">Any quality impact</option></select>
+          <label class="ve-chk" title="Hide proposals that were turned down"><input type="checkbox" id="ve-f-hiderej" /> Hide rejected</label>
+          <button class="ve-clearfilt" id="ve-f-clear" title="Clear all filters" hidden><span data-ico="x" data-ico-size="13"></span> Clear</button>
+          <span class="ve-count" id="ve-count"></span>
+        </div>
+
+        <div id="ve-view"></div>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="ve-file" accept=".xlsx,.xls" style="display:none;" />
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="../../assets/js/config.js?v=20260813a"></script>
+  <script src="../../assets/js/auth.js?v=20260813a"></script>
+  <script src="../../assets/js/db.js?v=20260813a"></script>
+  <script src="../../assets/js/ui.js?v=20260813a"></script>
+  <script src="../../assets/js/icons.js?v=20260813a"></script>
+  <script src="../../assets/js/perm.js?v=20260813a"></script>
+  <script src="module.js?v=20260813a"></script>
+  <script>
+    AppAuth.requireLogin(function (user, profile) {
+      UI.renderUserBar(profile);
+      ValueEngineering.init(user, profile);
+      // Hide write actions this role may not perform. The DB enforces the same
+      // rules via RLS + the approval guard (0014) — this is only UX.
+      Perm.applyReadonly(document, profile);
+    });
+  </script>
+</body>
+</html>

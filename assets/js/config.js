@@ -30,6 +30,13 @@ window.APP_CONFIG = {
   // `path`    — entry page
   // `icon`    — icon name from assets/js/icons.js
   // `enabled` — flip to true as each module is delivered
+  // `orgWide` — OPTIONAL, default false. A module that is NOT scoped to a single
+  //             project. ⚠️ nav.js gates every project-scoped item behind a
+  //             project selection, because those pages bounce straight back to
+  //             projects.html otherwise. An org-wide module is meaningful with
+  //             nothing selected, so gating it would make it unreachable from a
+  //             cold start — set this and nav.js leaves it alone. The module
+  //             itself must then also NOT redirect to projects.html.
   //
   // Future engineering modules (RFI Management, Technical Submittals, Design
   // Review, Document Transmittal, Method Statements, Inspection Requests, NCR
@@ -40,6 +47,9 @@ window.APP_CONFIG = {
     { key: 'drawing-register',   name: 'Drawing Register',       path: 'modules/drawing-register/index.html',   icon: 'ruler',     enabled: true },
     { key: 'material-submittal', name: 'Material Submittal Log', path: 'modules/material-submittal/index.html', icon: 'box',       enabled: true },
     { key: 'method-register',    name: 'Method Register',        path: 'modules/method-register/index.html',    icon: 'clipboard', enabled: true },
+    { key: 'value-engineering',  name: 'Value Engineering List', path: 'modules/value-engineering/index.html',  icon: 'calculator', enabled: true },
+    // ⚠️ The only org-wide module. See `orgWide` above before copying this line.
+    { key: 'initiatives',        name: 'Initiatives',            path: 'modules/initiatives/index.html',        icon: 'bulb',      enabled: true, orgWide: true },
   ],
 };
 

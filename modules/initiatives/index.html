@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="../../assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="../../assets/img/icon.png" />
+  <script src="../../assets/js/theme.js?v=20260813a"></script>
+  <title>Initiatives · Engineering App</title>
+  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260813a" />
+  <link rel="stylesheet" href="module.css?v=20260813a" />
+</head>
+<body>
+  <div class="pd-app">
+    <!-- Sidebar-less shell (matches the sibling registers). -->
+    <div class="pd-content">
+      <div class="pd-topbar">
+        <a class="pd-btn in-modback" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
+        <h1 class="in-title" style="margin:0;"><span class="in-title-ico" data-ico="bulb" data-ico-size="20"></span> <span class="in-title-txt">Initiatives</span></h1>
+        <!-- ⚠️ This selector is a FILTER over project_id, not the page's project
+             context. It is labelled as one, it offers "All projects" and "Not
+             project-linked", and it deliberately does NOT write pd_project —
+             leaving this module must not change which project the rest of the
+             app thinks you are in. See the header note in module.js. -->
+        <div class="in-projctx">
+          <span class="in-projlbl">Filter</span>
+          <select class="pd-select in-project" id="in-project" title="Show initiatives for"></select>
+        </div>
+        <div class="in-tabs" role="tablist">
+          <button class="in-tab active" data-view="overview">Overview</button>
+          <button class="in-tab" data-view="registry">Registry</button>
+        </div>
+        <!-- Global tools sit beside the profile (theme.js injects the dark-mode toggle before #user-bar) -->
+        <div class="in-topbar-tools" id="in-topbar-tools">
+          <button class="pd-btn in-tb-labeled pd-btn-primary" id="in-add" data-perm="create" title="Add an initiative">+ Add</button>
+          <span class="in-tb-sep"></span>
+          <button class="pd-btn" id="in-import" data-perm="create" title="Import an initiatives tracker"><span data-ico="upload" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="in-export" title="Export to Excel"><span data-ico="download" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="in-print" title="Print / PDF"><span data-ico="printer" data-ico-size="16"></span></button>
+          <button class="pd-btn in-clearbtn" id="in-clear" title="Delete the initiatives in the current filter" style="display:none;"><span data-ico="trash" data-ico-size="16"></span></button>
+        </div>
+        <div id="user-bar"></div>
+      </div>
+
+      <div class="pd-main">
+        <!-- Filter bar — Registry view only. The project filter is NOT here: it
+             scopes the Overview totals too, so it lives in the topbar where it
+             is visible on both tabs. -->
+        <div class="in-filters" id="in-filters">
+          <span class="in-filt-ico" data-ico="filter" data-ico-size="15"></span>
+          <input class="pd-input in-search" id="in-f-search" placeholder="Search title, description, owner, KPI…" />
+          <select class="pd-select" id="in-f-category"><option value="">All categories</option></select>
+          <select class="pd-select" id="in-f-status"><option value="">All statuses</option></select>
+          <select class="pd-select" id="in-f-department"><option value="">All departments</option></select>
+          <label class="in-chk" title="Hide completed and cancelled initiatives"><input type="checkbox" id="in-f-hideclosed" /> Hide closed</label>
+          <button class="in-clearfilt" id="in-f-clear" title="Clear all filters" hidden><span data-ico="x" data-ico-size="13"></span> Clear</button>
+          <span class="in-count" id="in-count"></span>
+        </div>
+
+        <div id="in-view"></div>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="in-file" accept=".xlsx,.xls" style="display:none;" />
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="../../assets/js/config.js?v=20260813a"></script>
+  <script src="../../assets/js/auth.js?v=20260813a"></script>
+  <script src="../../assets/js/db.js?v=20260813a"></script>
+  <script src="../../assets/js/ui.js?v=20260813a"></script>
+  <script src="../../assets/js/icons.js?v=20260813a"></script>
+  <script src="../../assets/js/perm.js?v=20260813a"></script>
+  <script src="module.js?v=20260813a"></script>
+  <script>
+    AppAuth.requireLogin(function (user, profile) {
+      UI.renderUserBar(profile);
+      Initiatives.init(user, profile);
+      // Hide write actions this role may not perform. The DB enforces the same
+      // rules via RLS — this is only UX.
+      Perm.applyReadonly(document, profile);
+    });
+  </script>
+</body>
+</html>

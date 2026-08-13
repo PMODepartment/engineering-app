@@ -269,6 +269,9 @@
       var MOD = {
         drawing_register: 'Drawing',
         material_submittal: 'Submittal',
+        method_register: 'Method statement',
+        value_engineering: 'VE proposal',
+        initiatives: 'Initiative',
         users: 'access for'
       };
       var when = a.at ? new Date(a.at) : null;
