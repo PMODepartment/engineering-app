@@ -178,13 +178,24 @@ begin
   update drawing_register set scope = 'Main Contract'
    where coalesce(scope, '') = '';
 
-  ------------------------------------- 3b. remember the Temporary Works sub-tree
-  -- Captured BEFORE the fold, because the fold erases the only evidence.
-  create temporary table _dr_twd on commit drop as
-    select id, project_id, node_kind
+  ----------------------------------------- 3b. remember every FOLDED sub-tree
+  -- Captured BEFORE the fold, because the fold erases the only evidence. Three
+  -- former top levels become level-2 children of For Construction Drawings; each
+  -- row remembers WHICH one, so 3f can give each its own node.
+  create temporary table _dr_fold on commit drop as
+    select id, project_id, node_kind,
+           case
+             when phase ~* 'temporary[[:space:]]*works|(^|[^a-z])tw[dg]([^a-z]|$)'
+                  then 'Temporary Works'
+             when phase ~* 'combined[[:space:]]*service|(^|[^a-z])csd([^a-z]|$)'
+                  then 'Combined Services'
+             else 'As-Built'
+           end as fold_label
       from drawing_register
-     where phase ~* 'temporary[[:space:]]*works|(^|[^a-z])tw[dg]([^a-z]|$)';
-  select count(*) into n_twd from _dr_twd;
+     where phase ~* 'temporary[[:space:]]*works|(^|[^a-z])tw[dg]([^a-z]|$)'
+        or phase ~* 'combined[[:space:]]*service|(^|[^a-z])csd([^a-z]|$)'
+        or phase ~* 'as[- ]?built|(^|[^a-z])abd([^a-z]|$)';
+  select count(*) into n_twd from _dr_fold;
 
   ------------------------------------------------- 3c. fold to the four top levels
   -- ISD is tested first so its trailing "(ISD)" can never be read as an SD stage.
@@ -197,6 +208,15 @@ begin
        when phase ~* 'temporary[[:space:]]*works|(^|[^a-z])tw[dg]([^a-z]|$)'
                                                                       then 'For Construction Drawings'
        -- SD1 and SD2 merge completely. "Scheme n" is already on `scope` (3a).
+       -- Combined Services and As-Built are coordination/record deliverables
+       -- PRODUCED FOR construction, not design stages of their own, so they fold in
+       -- beside Temporary Works as level-2 children rather than becoming a fifth and
+       -- sixth top level. Same mechanism, same reasoning (see 3f).
+       when phase ~* 'combined[[:space:]]*service|(^|[^a-z])csd([^a-z]|$)'
+                                                                      then 'For Construction Drawings'
+       when phase ~* 'as[- ]?built|(^|[^a-z])abd([^a-z]|$)'            then 'For Construction Drawings'
+       -- A Drawing Review Checklist is a review artefact, not a drawing type; it has
+       -- no natural home in a four-stage register, so it is reported, not guessed at.
        when phase ~* 'schematic|scheme|(^|[^a-z])sd[12]?([^a-z]|$)'    then 'Schematic Design'
        when phase ~* 'construction|contract|(^|[^a-z])fcd([^a-z]|$)'   then 'For Construction Drawings'
        else phase
@@ -231,7 +251,7 @@ begin
   -- mistaken for the real FCD root: if it were, 3g would join it to itself and set
   -- its own id as its parent — a self-referencing cycle that makes the recursive
   -- CTE in 3h drop the whole sub-tree. So every existence/survivor test below
-  -- deliberately ignores the rows captured in _dr_twd.
+  -- deliberately ignores the rows captured in _dr_fold.
   insert into drawing_register (project_id, node_kind, level, phase, title, sort_order)
   select d.project_id, 'phase', 1, d.phase, d.phase,
          coalesce(min(d.sort_order), 0)
@@ -242,7 +262,7 @@ begin
         where p.project_id = d.project_id
           and p.node_kind  = 'phase'
           and p.phase      = d.phase
-          and p.id not in (select id from _dr_twd))
+          and p.id not in (select id from _dr_fold))
    group by d.project_id, d.phase;
 
   -- Deduplicate: the fold can collapse two phase nodes (SD1 + SD2) onto one name.
@@ -252,8 +272,8 @@ begin
    using drawing_register k
    where d.node_kind = 'phase' and k.node_kind = 'phase'
      and d.project_id = k.project_id and d.phase = k.phase
-     and d.id not in (select id from _dr_twd)
-     and k.id not in (select id from _dr_twd)
+     and d.id not in (select id from _dr_fold)
+     and k.id not in (select id from _dr_fold)
      and (k.sort_order, k.id) < (d.sort_order, d.id);
 
   ------------------------------------- 3f. fold Temporary Works under FCD, in place
@@ -267,10 +287,10 @@ begin
   update drawing_register d
      set node_kind  = 'discipline',
          level      = 2,
-         discipline = 'Temporary Works',
-         title      = 'Temporary Works',
+         discipline = t.fold_label,
+         title      = t.fold_label,
          parent_id  = fcd.id
-    from _dr_twd t
+    from _dr_fold t
     join drawing_register fcd
       on fcd.project_id = t.project_id
      and fcd.node_kind  = 'phase'
@@ -279,13 +299,25 @@ begin
      and t.node_kind = 'phase'
      -- never adopt yourself as your own parent (see the note in 3e)
      and fcd.id <> d.id
-     and fcd.id not in (select id from _dr_twd)
+     and fcd.id not in (select id from _dr_fold)
      and d.parent_id is distinct from fcd.id;
 
-  -- Everything that was under Temporary Works inherits the new phase text.
+  -- Everything inside a folded sub-tree inherits the new phase text.
   update drawing_register set phase = 'For Construction Drawings'
-   where id in (select id from _dr_twd)
+   where id in (select id from _dr_fold)
      and phase is distinct from 'For Construction Drawings';
+
+  -- ⚠️ A folded drawing with NO discipline of its own would have no candidate parent
+  -- inside its own fold class (the fold node's discipline is the fold label, which
+  -- matches nothing), so it was left unparented on the first run and only adopted by
+  -- the generic link on a second one — the state moved between runs. Giving it the
+  -- fold label as its discipline makes the fold node the natural deepest match.
+  update drawing_register d
+     set discipline = t.fold_label
+    from _dr_fold t
+   where d.id = t.id
+     and coalesce(t.node_kind, 'drawing') = 'drawing'
+     and coalesce(d.discipline, '') = '';
 
   ---------------------------------------------------------- 3g. link the tree up
   -- ⚠️ EVERY LINK BELOW IS GUARDED ON `parent_id is null`, i.e. it INITIALISES an
@@ -297,23 +329,27 @@ begin
   --
   -- ⚠️ The Temporary Works sub-tree is a separate MEMBERSHIP CLASS. Its disciplines
   -- are textually indistinguishable from For Construction's own, so a text join
-  -- would hoist them to the wrong parent. `_dr_twd` is the partition: a TW row may
+  -- would hoist them to the wrong parent. `_dr_fold` is the partition: a TW row may
   -- only ever be parented inside the TW sub-tree, and a non-TW row only outside it.
 
   -- level 1 is a root.
   update drawing_register set parent_id = null
    where node_kind = 'phase' and parent_id is not null;
 
-  -- Temporary Works' own disciplines -> the Temporary Works node.
+  -- A folded sub-tree's own disciplines -> that sub-tree's node. Joined on
+  -- fold_label so Temporary Works' trades can never land under Combined Services.
   update drawing_register d
-     set parent_id = tw.id
-    from drawing_register tw
-   where d.parent_id is null
-     and d.id in (select id from _dr_twd where coalesce(node_kind,'drawing') <> 'phase')
+     set parent_id = fold.id
+    from _dr_fold td
+    join _dr_fold tp on tp.project_id = td.project_id
+                    and tp.fold_label = td.fold_label
+                    and tp.node_kind  = 'phase'
+    join drawing_register fold on fold.id = tp.id
+   where d.id = td.id
+     and d.parent_id is null
+     and coalesce(td.node_kind, 'drawing') <> 'phase'
      and d.node_kind = 'discipline'
-     and tw.id in (select id from _dr_twd where node_kind = 'phase')
-     and tw.project_id = d.project_id
-     and tw.id <> d.id;
+     and fold.id <> d.id;
 
   -- level 2 (old 'discipline') -> its phase node. Non-TW rows only.
   update drawing_register d
@@ -321,7 +357,7 @@ begin
     from drawing_register p
    where d.parent_id is null
      and d.node_kind = 'discipline'
-     and d.id not in (select id from _dr_twd)
+     and d.id not in (select id from _dr_fold)
      and p.node_kind = 'phase'
      and p.project_id = d.project_id
      and p.phase = d.phase;
@@ -336,7 +372,7 @@ begin
      and p.project_id = d.project_id
      and p.phase = d.phase
      and coalesce(p.discipline, '') = coalesce(d.discipline, '')
-     and (d.id in (select id from _dr_twd)) = (p.id in (select id from _dr_twd));
+     and (d.id in (select id from _dr_fold)) = (p.id in (select id from _dr_fold));
 
   -- Drawings -> the DEEPEST node that matches their text, within the same class.
   -- Sheets are left alone: their parent is already the drawing they belong to.
@@ -352,7 +388,7 @@ begin
          and n.phase = x.phase
          and (n.level < 2 or coalesce(n.discipline, '') = coalesce(x.discipline, ''))
          and (n.level < 3 or coalesce(n.category,   '') = coalesce(x.category,   ''))
-         and (x.id in (select id from _dr_twd)) = (n.id in (select id from _dr_twd))
+         and (x.id in (select id from _dr_fold)) = (n.id in (select id from _dr_fold))
        where coalesce(x.node_kind, 'drawing') = 'drawing'
          and coalesce(x.phase, '') <> ''
          and x.parent_id is null
@@ -440,7 +476,7 @@ begin
      and (coalesce(no_of_sheets, 1) <> 1 or coalesce(approved_sheets, 0) > 1)
      and not exists (select 1 from drawing_register s where s.parent_id = drawing_register.id);
 
-  raise notice '0017 backfill: % scoped Change Order, % phases folded, % Temporary Works rows re-parented',
+  raise notice '0017 backfill: % scoped Change Order, % phases folded, % rows folded under For Construction',
                n_scope, n_fold, n_twd;
 end
 $mig$;
