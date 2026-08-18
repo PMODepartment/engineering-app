@@ -498,6 +498,10 @@ window.DrawingRegister = (function () {
       if (view !== 'registry') { view = 'registry'; saveUI(); render(); }
       setTimeout(function () { window.print(); }, 60);
     };
+    var fitBtn = document.getElementById('dr-fitcols');
+    if (fitBtn) fitBtn.onclick = autofitAll;
+    var rstBtn = document.getElementById('dr-resetcols');
+    if (rstBtn) rstBtn.onclick = resetColWidths;
     var clearBtn = document.getElementById('dr-clear');
     if (clearBtn) { clearBtn.style.display = canWrite ? '' : 'none'; clearBtn.onclick = clearAll; }
     // "+ Level" menu: add a sublevel inside the selected level, or name the levels
@@ -1560,7 +1564,11 @@ window.DrawingRegister = (function () {
         '<button class="pd-btn pd-btn-sm" id="dr-selclear">Clear</button>' +
         '<button class="pd-btn pd-btn-sm pd-btn-danger" id="dr-seldel">Delete selected</button>' +
       '</div>' +
-      (canWrite ? '<div class="dr-hint">Click to select · Shift-click range · double-click a cell to edit · Enter=add · Del=delete</div>' : '') +
+      (canWrite ? '<div class="dr-hint">Click a cell · Shift-click or drag for a range · type or F2 to edit · '+
+        '<kbd>Tab</kbd>/<kbd>↵</kbd> move · <kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy-paste (Excel) · '+
+        '<kbd>Ctrl</kbd>+<kbd>D</kbd> fill down · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Del</kbd> clear · '+
+        '<kbd>Esc</kbd> back to rows</div>' +
+        '<span class="dr-cellinfo" id="dr-cellinfo"></span>' : '') +
     '</div>';
 
     if (!draws.length && !structuralNodes().length) {
@@ -1910,6 +1918,33 @@ window.DrawingRegister = (function () {
     var grid = host.querySelector('.dr-grid');
     if (grid) grid.onkeydown = onGridKey;
 
+    // ---- cell cursor: click to place, shift-click to extend, drag to select ----
+    // Bound on mousedown, NOT click: a click fires after mouseup and would clobber
+    // the range a drag had just built.
+    if (grid) {
+      grid.onmousedown = function (e){
+        var td = e.target.closest && e.target.closest('td[data-f]');
+        if (!td) return;
+        // Let the existing controls (checkbox, buttons, status select) keep working.
+        if (e.target.closest('input,select,button,a')) return;
+        var tr = td.closest('tr.dr-drow'); if (!tr) return;
+        setCur(tr.dataset.id, td.dataset.f, e.shiftKey);
+        grid.focus && grid.focus();
+        _dragCell = true;
+      };
+      grid.onmousemove = function (e){
+        if (!_dragCell) return;
+        var td = e.target.closest && e.target.closest('td[data-f]');
+        if (!td) return;
+        var tr = td.closest('tr.dr-drow'); if (!tr) return;
+        if (_cur && _cur.id === tr.dataset.id && _cur.f === td.dataset.f) return;
+        _cur = { id: tr.dataset.id, f: td.dataset.f };
+        paintCells();
+      };
+    }
+    // Re-place the cursor after a re-render, so an edit doesn't lose your position.
+    if (_cur) paintCells();
+
     refreshSel(host);
   }
 
@@ -2026,8 +2061,58 @@ window.DrawingRegister = (function () {
     if (!canWrite) return;
     var tag=(e.target.tagName||'').toLowerCase();
     if (tag==='input'||tag==='select'||tag==='textarea'||e.target.isContentEditable) return;
+    var mod = e.ctrlKey || e.metaKey;
+
+    // ---- CELL mode: active as soon as a cell has been clicked or navigated to.
+    // Everything below falls through to the original ROW behaviour when there is no
+    // cell cursor, so the pre-existing row workflow is untouched.
+    if (_cur) {
+      if (e.key==='Escape'){ _cur=null; _anchor=null; paintCells(); selected={}; lastClickedId=null; refreshSel(document); return; }
+      if (mod && (e.key==='a'||e.key==='A')){
+        e.preventDefault();
+        var cs=cellCols();
+        if (visibleIds.length && cs.length){
+          _cur={id:visibleIds[visibleIds.length-1], f:cs[cs.length-1].f};
+          _anchor={id:visibleIds[0], f:cs[0].f};
+          paintCells();
+          selected={}; visibleIds.forEach(function(id){selected[id]=true;}); refreshSel(document);
+        }
+        return;
+      }
+      if (mod && (e.key==='d'||e.key==='D')){ e.preventDefault(); fillDown(); return; }
+      if (mod && (e.key==='z'||e.key==='Z')){ e.preventDefault(); undoLast(); return; }
+      // Ctrl+C / Ctrl+V are handled by the copy/paste listeners so the real system
+      // clipboard is used (and Excel interop works); nothing to do here.
+      if (mod && /^[cvx]$/i.test(e.key)) return;
+      var dirs = { ArrowUp:[-1,0], ArrowDown:[1,0], ArrowLeft:[0,-1], ArrowRight:[0,1] };
+      if (dirs[e.key]){ e.preventDefault(); moveCur(dirs[e.key][0], dirs[e.key][1], e.shiftKey, mod); return; }
+      if (e.key==='Tab'){ e.preventDefault(); moveCur(0, e.shiftKey?-1:1, false, false); return; }
+      if (e.key==='Home'){ e.preventDefault(); var c0=cellCols()[0]; if(c0) setCur(mod?visibleIds[0]:_cur.id, c0.f, e.shiftKey); return; }
+      if (e.key==='End'){ e.preventDefault(); var cl=cellCols(); if(cl.length) setCur(mod?visibleIds[visibleIds.length-1]:_cur.id, cl[cl.length-1].f, e.shiftKey); return; }
+      if (e.key==='Delete'||e.key==='Backspace'){ e.preventDefault(); clearRange(); return; }
+      if (e.key==='F2'){ e.preventDefault(); var td=cellTd(_cur.id,_cur.f); if(td) beginEdit(td); return; }
+      if (e.key==='Enter'){
+        e.preventDefault();
+        var td2=cellTd(_cur.id,_cur.f);
+        if (td2 && td2.classList.contains('dr-ed')) beginEdit(td2); else moveCur(1,0,false,false);
+        return;
+      }
+      // Type-to-replace, exactly like Excel: a printable key opens the editor and
+      // seeds it with that character instead of being swallowed.
+      if (!mod && !e.altKey && e.key.length===1){
+        var td3=cellTd(_cur.id,_cur.f);
+        if (td3 && td3.classList.contains('dr-ed')){
+          e.preventDefault(); beginEdit(td3);
+          var inp=td3.querySelector('input');
+          if (inp){ inp.value = (inp.type==='number'||inp.type==='date') ? inp.value : e.key; inp.select && inp.type==='text' && inp.setSelectionRange(1,1); }
+        }
+        return;
+      }
+      return;
+    }
+
     if (e.key==='Escape'){ selected={}; lastClickedId=null; refreshSel(document); return; }
-    if ((e.ctrlKey||e.metaKey) && (e.key==='a'||e.key==='A')){ e.preventDefault(); visibleIds.forEach(function(id){selected[id]=true;}); refreshSel(document); return; }
+    if (mod && (e.key==='a'||e.key==='A')){ e.preventDefault(); visibleIds.forEach(function(id){selected[id]=true;}); refreshSel(document); return; }
     if (e.key==='ArrowDown'||e.key==='ArrowUp'){
       e.preventDefault();
       var idx = lastClickedId ? visibleIds.indexOf(lastClickedId) : -1;
@@ -2075,6 +2160,318 @@ window.DrawingRegister = (function () {
     return true;
   }
 
+  // ==========================================================================
+  // EXCEL-LIKE CELL LAYER (2026-08-18)
+  // --------------------------------------------------------------------------
+  // The register already had ROW multi-select (click / shift-click / Ctrl+A /
+  // arrows), drag-resize columns and double-click auto-fit. What it lacked was a
+  // CELL model: a cursor you can drive with the keyboard, rectangular ranges, and
+  // clipboard interop with Excel itself.
+  //
+  // ⚠️ THE COORDINATE SPACE IS DRAWING ROWS ONLY. `visibleIds` (drawings and sheets
+  // in display order) is the row axis and the editable `td[data-f]` cells are the
+  // column axis. GROUP ROWS ARE DELIBERATELY OUTSIDE IT — they carry no data-f
+  // cells, so a range can never select one and a paste can never land on one. If you
+  // add a decorative row later, keep it attribute-free the same way; the moment it
+  // carries a data-f cell it becomes addressable and the whole model breaks.
+  //
+  // ⚠️ Ranges are rectangular over the VISIBLE row order, so a range can span two
+  // different levels. That is intentional (it is what makes "fill this column down
+  // the whole trade" work), and it is safe because every write goes through
+  // patchFor() per row rather than assuming the rows are siblings.
+  var _cur = null;        // {id, f} — the active cell
+  var _anchor = null;     // {id, f} — the other corner of a range
+  var _undo = [];         // batches of {id, f, t, prev} for Ctrl+Z
+  var UNDO_MAX = 50;
+  var _dragCell = false;
+  document.addEventListener('mouseup', function (){ _dragCell = false; });
+  // Real clipboard events, so Ctrl+C / Ctrl+V use the SYSTEM clipboard and the TSV
+  // round-trips with Excel in both directions.
+  document.addEventListener('copy', function (e){
+    if (!_cur || !document.querySelector('td.dr-cell-cur')) return;
+    var t = (e.target.tagName||'').toLowerCase();
+    if (t==='input'||t==='select'||t==='textarea') return;
+    e.clipboardData.setData('text/plain', rangeTSV());
+    e.preventDefault();
+  });
+  document.addEventListener('paste', function (e){
+    if (!_cur || !canWrite || !document.querySelector('td.dr-cell-cur')) return;
+    var t = (e.target.tagName||'').toLowerCase();
+    if (t==='input'||t==='select'||t==='textarea') return;
+    var txt = e.clipboardData.getData('text/plain');
+    if (!txt) return;
+    e.preventDefault();
+    pasteBlock(txt);
+  });
+
+  function cellCols(){
+    // Read the columns off the DOM so this can never drift from what is rendered.
+    var tr = document.querySelector('tr.dr-drow');
+    if (!tr) return [];
+    return Array.prototype.map.call(tr.querySelectorAll('td[data-f]'), function (td){
+      return { f: td.dataset.f, t: td.dataset.t || 'text' };
+    });
+  }
+  function cellTd(id, f){
+    return document.querySelector('tr.dr-drow[data-id="'+id+'"] td[data-f="'+f+'"]');
+  }
+  function isEditableCell(id, f){
+    var td = cellTd(id, f);
+    return !!td && td.classList.contains('dr-ed');
+  }
+  function rowOf(id){ return rowById[id] || rows.find(function (x){ return x.id === id; }) || null; }
+
+  // The rectangle between the cursor and the anchor, as {ids:[], fs:[]}.
+  function curRange(){
+    if (!_cur) return { ids: [], fs: [] };
+    var cols = cellCols().map(function (c){ return c.f; });
+    var a = _anchor || _cur;
+    var r1 = visibleIds.indexOf(a.id), r2 = visibleIds.indexOf(_cur.id);
+    var c1 = cols.indexOf(a.f),        c2 = cols.indexOf(_cur.f);
+    if (r1 < 0 || r2 < 0 || c1 < 0 || c2 < 0) return { ids: [_cur.id], fs: [_cur.f] };
+    return { ids: visibleIds.slice(Math.min(r1,r2), Math.max(r1,r2)+1),
+             fs:  cols.slice(Math.min(c1,c2), Math.max(c1,c2)+1) };
+  }
+  function paintCells(){
+    document.querySelectorAll('td.dr-cell-cur,td.dr-cell-rng').forEach(function (td){
+      td.classList.remove('dr-cell-cur','dr-cell-rng');
+    });
+    if (!_cur) { setCellInfo(0,0,0); return; }
+    var rg = curRange();
+    rg.ids.forEach(function (id){ rg.fs.forEach(function (f){
+      var td = cellTd(id, f); if (td) td.classList.add('dr-cell-rng');
+    }); });
+    var cd = cellTd(_cur.id, _cur.f);
+    if (cd){ cd.classList.remove('dr-cell-rng'); cd.classList.add('dr-cell-cur'); }
+    setCellInfo(rg.ids.length * rg.fs.length, rg.ids.length, rg.fs.length);
+  }
+  // An explicit readout, because a highlight alone leaves you guessing whether the
+  // block you dragged is really selected.
+  function setCellInfo(n, nr, nc){
+    var el = document.getElementById('dr-cellinfo');
+    if (!el) return;
+    el.textContent = n > 1 ? (n + ' cells (' + nr + ' × ' + nc + ')') : '';
+  }
+  function setCur(id, f, extend){
+    if (!id || !f) return;
+    _cur = { id: id, f: f };
+    if (!extend || !_anchor) _anchor = extend ? (_anchor || { id: id, f: f }) : { id: id, f: f };
+    paintCells();
+    var td = cellTd(id, f);
+    if (td) td.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    // Keep the row-level selection in step so the existing bulk actions still apply
+    // to what the user can see is selected.
+    var rg = curRange();
+    selected = {}; rg.ids.forEach(function (x){ selected[x] = true; });
+    lastClickedId = id;
+    refreshSel(document);
+  }
+  // Excel's Ctrl+Arrow: from a filled cell stop at the last filled cell before a
+  // gap; from an empty one (or when the next is empty) skip to the next filled cell.
+  function jumpEdge(id, f, dr, dc){
+    var cols = cellCols().map(function (c){ return c.f; });
+    var ri = visibleIds.indexOf(id), ci = cols.indexOf(f);
+    if (ri < 0 || ci < 0) return { id: id, f: f };
+    function filled(r, c){
+      var row = rowOf(visibleIds[r]);
+      return !!(row && String(cellValueOf(row, cols[c]) || '').trim());
+    }
+    var lim = dr ? visibleIds.length : cols.length;
+    var pos = dr ? ri : ci, step = dr || dc;
+    var startFilled = filled(ri, ci);
+    var nextPos = pos + step;
+    if (nextPos < 0 || nextPos >= lim) return { id: visibleIds[ri], f: cols[ci] };
+    var nextFilled = dr ? filled(nextPos, ci) : filled(ri, nextPos);
+    var want = startFilled && nextFilled;   // ride the block, else skip the gap
+    var p = pos;
+    while (true) {
+      var q = p + step;
+      if (q < 0 || q >= lim) break;
+      var fl = dr ? filled(q, ci) : filled(ri, q);
+      if (want && !fl) break;
+      p = q;
+      if (!want && fl) break;
+    }
+    return dr ? { id: visibleIds[p], f: cols[ci] } : { id: visibleIds[ri], f: cols[p] };
+  }
+  function moveCur(dr, dc, extend, jump){
+    if (!_cur) { if (visibleIds.length) { var cs = cellCols(); if (cs.length) setCur(visibleIds[0], cs[0].f, false); } return; }
+    var t;
+    if (jump) t = jumpEdge(_cur.id, _cur.f, dr, dc);
+    else {
+      var cols = cellCols().map(function (c){ return c.f; });
+      var ri = visibleIds.indexOf(_cur.id), ci = cols.indexOf(_cur.f);
+      ri = Math.max(0, Math.min(visibleIds.length - 1, ri + dr));
+      ci = Math.max(0, Math.min(cols.length - 1, ci + dc));
+      t = { id: visibleIds[ri], f: cols[ci] };
+    }
+    setCur(t.id, t.f, extend);
+  }
+
+  // ---- clipboard (real TSV, so it round-trips with Excel) --------------------
+  function rangeTSV(){
+    var rg = curRange();
+    return rg.ids.map(function (id){
+      var row = rowOf(id);
+      return rg.fs.map(function (f){
+        var v = row ? String(cellValueOf(row, f) || '') : '';
+        // A tab or newline inside a value would silently add a column or a row on
+        // the way back in, so they are flattened to spaces.
+        return v.replace(/[\t\r\n]+/g, ' ');
+      }).join('\t');
+    }).join('\n');
+  }
+  // Write a block of values starting at the cursor, clamped to the grid, skipping
+  // any cell that isn't editable (derived counters on a sheet parent, a sheet's own
+  // scope) and reporting how many were refused rather than failing silently.
+  async function pasteBlock(text){
+    if (!_cur || !canWrite) return;
+    var grid = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').map(function (l){ return l.split('\t'); });
+    var cols = cellCols().map(function (c){ return c.f; });
+    var types = {}; cellCols().forEach(function (c){ types[c.f] = c.t; });
+    var r0 = visibleIds.indexOf(_cur.id), c0 = cols.indexOf(_cur.f);
+    if (r0 < 0 || c0 < 0) return;
+    var batch = [], writes = [], skipped = 0;
+    for (var i = 0; i < grid.length; i++) {
+      var ri = r0 + i; if (ri >= visibleIds.length) break;
+      for (var j = 0; j < grid[i].length; j++) {
+        var ci = c0 + j; if (ci >= cols.length) break;
+        var id = visibleIds[ri], f = cols[ci];
+        if (!isEditableCell(id, f)) { skipped++; continue; }
+        var row = rowOf(id); if (!row) continue;
+        var val = String(grid[i][j] == null ? '' : grid[i][j]).trim();
+        if (String(cellValueOf(row, f)) === val) continue;      // no-op, keep undo clean
+        batch.push({ id: id, f: f, t: types[f], prev: cellValueOf(row, f) });
+        writes.push({ row: row, patch: patchFor(row, f, types[f], val) });
+      }
+    }
+    if (!writes.length){
+      UI.toast(skipped ? 'Nothing pasted — those cells are calculated and cannot be typed into' : 'Nothing to paste','warn');
+      return;
+    }
+    pushUndo(batch);
+    await applyWrites(writes);
+    UI.toast('Pasted ' + writes.length + ' cell' + (writes.length>1?'s':'') +
+             (skipped ? ' · ' + skipped + ' skipped (calculated)' : ''), 'ok');
+  }
+  async function applyWrites(writes){
+    for (var i = 0; i < writes.length; i++) {
+      await persistCell(writes[i].row, writes[i].patch);
+      if (isSheet(writes[i].row)) await syncParent(writes[i].row.parent_id);
+    }
+    render(); flushDeferredRemote();
+  }
+  function pushUndo(batch){
+    if (!batch || !batch.length) return;
+    _undo.push(batch);
+    if (_undo.length > UNDO_MAX) _undo.shift();
+  }
+  async function undoLast(){
+    var batch = _undo.pop();
+    if (!batch){ UI.toast('Nothing to undo','warn'); return; }
+    var writes = [];
+    batch.forEach(function (b){
+      var row = rowOf(b.id); if (!row) return;
+      writes.push({ row: row, patch: patchFor(row, b.f, b.t, String(b.prev == null ? '' : b.prev)) });
+    });
+    await applyWrites(writes);
+    UI.toast('Undid ' + writes.length + ' cell' + (writes.length>1?'s':''), 'ok');
+  }
+  // Ctrl+D — copy the top row of the range down over the rest, per column.
+  async function fillDown(){
+    var rg = curRange();
+    if (rg.ids.length < 2){ UI.toast('Select the cell to copy plus the rows to fill','warn'); return; }
+    var types = {}; cellCols().forEach(function (c){ types[c.f] = c.t; });
+    var src = rowOf(rg.ids[0]);
+    var batch = [], writes = [], skipped = 0;
+    rg.fs.forEach(function (f){
+      var val = String(cellValueOf(src, f) || '');
+      rg.ids.slice(1).forEach(function (id){
+        if (!isEditableCell(id, f)) { skipped++; return; }
+        var row = rowOf(id); if (!row) return;
+        if (String(cellValueOf(row, f)) === val) return;
+        batch.push({ id:id, f:f, t:types[f], prev: cellValueOf(row, f) });
+        writes.push({ row: row, patch: patchFor(row, f, types[f], val) });
+      });
+    });
+    if (!writes.length){ UI.toast(skipped ? 'Those cells are calculated and cannot be filled' : 'Nothing to fill','warn'); return; }
+    pushUndo(batch);
+    await applyWrites(writes);
+    UI.toast('Filled ' + writes.length + ' cell' + (writes.length>1?'s':''), 'ok');
+  }
+  // Del over a range clears it (a row-level Delete still deletes rows — that only
+  // applies when no cell cursor is active).
+  async function clearRange(){
+    var rg = curRange();
+    var types = {}; cellCols().forEach(function (c){ types[c.f] = c.t; });
+    var batch = [], writes = [];
+    rg.ids.forEach(function (id){ rg.fs.forEach(function (f){
+      if (!isEditableCell(id, f)) return;
+      var row = rowOf(id); if (!row) return;
+      if (!String(cellValueOf(row, f) || '')) return;
+      batch.push({ id:id, f:f, t:types[f], prev: cellValueOf(row, f) });
+      writes.push({ row: row, patch: patchFor(row, f, types[f], '') });
+    }); });
+    if (!writes.length) return;
+    pushUndo(batch);
+    await applyWrites(writes);
+  }
+  // Fit every column to its content in one go, and reset to the defaults.
+  function autofitAll(){
+    var host = document.getElementById('dr-view'); if (!host) return;
+    Object.keys(COL_DEFAULTS).forEach(function (key){
+      var widest = 0;
+      host.querySelectorAll('td.dr-c-'+key+', th.dr-c-'+key).forEach(function (el){
+        widest = Math.max(widest, el.scrollWidth);
+      });
+      if (widest) {
+        var w = Math.max(COL_MIN[key] || 40, Math.min(widest + 16, 600));
+        colWidths[key] = w; host.style.setProperty('--c-'+key, w+'px');
+      }
+    });
+    saveColWidths();
+    UI.toast('Columns fitted to content','ok');
+  }
+  function resetColWidths(){
+    var host = document.getElementById('dr-view'); if (!host) return;
+    Object.keys(COL_DEFAULTS).forEach(function (k){
+      colWidths[k] = COL_DEFAULTS[k]; host.style.setProperty('--c-'+k, COL_DEFAULTS[k]+'px');
+    });
+    saveColWidths();
+    UI.toast('Column widths reset','ok');
+  }
+
+  // ⚠️ THE single definition of "how a typed value becomes a patch". Typing, paste,
+  // fill-down and undo all go through here — a second copy is how a paste ends up
+  // writing a field differently from an edit of the same cell (the same class of bug
+  // approvedOf() exists to prevent for counts).
+  function patchFor(r, f, t, val){
+    var patch = {};
+    if (f==='code'){ patch.dwg_number=val; patch.drawing_no=val; patch.drawing_code=val; }
+    else if (f==='latest_sub'){
+      // update the latest revision's actual submission date (create one if none)
+      var subs = Array.isArray(r.submissions) ? r.submissions.slice() : [];
+      if (subs.length){ subs[subs.length-1] = Object.assign({}, subs[subs.length-1], { actual: val||null }); }
+      else subs = [{ rev:0, planned:null, actual: val||null }];
+      patch.submissions = subs; patch.issue_date = val||null;
+    }
+    else if (t==='num'){ patch[f]=num(val); }
+    else if (t==='date'){ patch[f]=val||null; }
+    else patch[f]=val;
+    return patch;
+  }
+  // The raw value of a cell, for copy / fill / undo. Deliberately NOT the rendered
+  // text: the Sh/Appr cells render a "%" suffix and the date cells a display format,
+  // neither of which round-trips back through patchFor().
+  function cellValueOf(r, f){
+    if (f==='code') return r.drawing_code || r.drawing_no || r.dwg_number || '';
+    if (f==='latest_sub') return latestSub(r,'actual') || '';
+    if (f==='no_of_sheets') return String(num(r.no_of_sheets) || 0);
+    if (f==='approved_sheets') return String(approvedOf(r));
+    var v = r[f];
+    return v == null ? '' : String(v);
+  }
+
   function beginEdit(td){
     if (!canWrite || td.classList.contains('dr-editing')) return;
     var tr=td.closest('tr.dr-drow'); if(!tr) return;
@@ -2094,18 +2491,7 @@ window.DrawingRegister = (function () {
       td.classList.remove('dr-editing');
       broadcastSel(r.id, f, false);
       if (!save) { render(); flushDeferredRemote(); return; }
-      var val=input.value.trim(), patch={};
-      if (f==='code'){ patch.dwg_number=val; patch.drawing_no=val; patch.drawing_code=val; }
-      else if (f==='latest_sub'){
-        // update the latest revision's actual submission date (create one if none)
-        var subs = Array.isArray(r.submissions) ? r.submissions.slice() : [];
-        if (subs.length){ subs[subs.length-1] = Object.assign({}, subs[subs.length-1], { actual: val||null }); }
-        else subs = [{ rev:0, planned:null, actual: val||null }];
-        patch.submissions = subs; patch.issue_date = val||null;
-      }
-      else if (t==='num'){ patch[f]=num(val); }
-      else if (t==='date'){ patch[f]=val||null; }
-      else patch[f]=val;
+      var patch = patchFor(r, f, t, input.value.trim());
       persistCell(r, patch).then(function(){
         return isSheet(r) ? syncParent(r.parent_id) : null;   // roll the change up to the drawing
       }).then(function(){ render(); flushDeferredRemote(); });

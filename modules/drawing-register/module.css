@@ -741,3 +741,23 @@ td.dr-editing { padding:2px 4px; }
   font-size:var(--dr-fs-micro); font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
 .dr-unithint { display:inline-block; margin-left:7px; color:var(--pd-mut);
   font-size:var(--dr-fs-micro); font-style:italic; cursor:help; }
+
+/* ---- Excel-like cell layer (2026-08-18) ----------------------------------
+   The active cell gets a real 2px cursor ring; the rest of the range is a
+   translucent OVERLAY rather than a background.
+   ⚠️ box-shadow, not background: a cell already carries a background from the
+   zebra/frozen/selected-row rules, and a competing `background` only ever shows
+   one winner — the range would silently vanish under a row hover. An inset
+   box-shadow paints on top of whatever is already there. */
+td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(238,49,36,.14); }
+td.dr-cell-cur { outline:2px solid var(--pd-red); outline-offset:-2px; position:relative; z-index:2; }
+html.pd-dark td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.20); }
+/* The grid owns the keyboard, so it must be focusable — but the app-wide
+   :focus-visible ring would then draw a red box around the WHOLE table while a
+   cell is selected, which reads as a rendering fault. The cell cursor is a far
+   more precise indicator, so the container ring is suppressed only while one
+   exists; with no cell selected a keyboard user still gets the container ring. */
+.dr-grid:focus-visible:has(td.dr-cell-cur) { outline:none !important; }
+.dr-cellinfo { margin-left:10px; color:var(--pd-mut); font-size:var(--dr-fs-micro); white-space:nowrap; }
+.dr-hint kbd { display:inline-block; padding:0 4px; border:1px solid var(--pd-line); border-bottom-width:2px;
+  border-radius:3px; background:var(--pd-bg); font-family:inherit; font-size:.92em; line-height:1.5; }
