@@ -3917,19 +3917,75 @@ window.DrawingRegister = (function () {
             planned_approval:p.planned_approval, actual_approval:p.actual_approval,
             issue_date:(subs[0]&&subs[0].actual)||null,
             due_date:(subs[0]&&subs[0].planned)||null,
-            remarks:p.remarks
+            remarks:p.remarks,
+            scope: p.scope || SCOPES[0],
+            level: p.level || null,
+            // path keys, stripped before the write — see the two-pass insert below
+            _pkey: p._pkey || null, _parent: p._parent || null
           };
         });
-        // chunked insert; yield to the event loop between chunks so the
-        // progress text repaints and the tab never looks frozen
-        for (var i=0; i<recs.length; i+=200) {
-          var chunk = recs.slice(i, i+200);
-          var ins = await sb().from(TABLE).insert(chunk); if (ins.error) throw ins.error;
-          go.textContent = 'Importing '+Math.min(i+200,recs.length)+' / '+recs.length+'…';
+
+        // ⚠️ TWO-PASS INSERT, and it has to be two passes: the tree is parent_id-linked
+        // now, and a row's parent id does not exist until its parent has been written.
+        // Pass 1 inserts the LEVEL rows shallowest-first, collecting id-by-path-key;
+        // pass 2 inserts the drawings with their parent_id resolved. A one-pass insert
+        // would import a flat register with every drawing unparented.
+        var nodeRecs = recs.filter(function (r){ return (r.node_kind||'drawing') !== 'drawing'; })
+                           .sort(function (a,b){ return (a.level||1) - (b.level||1); });
+        var drawRecs = recs.filter(function (r){ return (r.node_kind||'drawing') === 'drawing'; });
+        var idByPath = {};
+        function strip(r){
+          var o = {}; Object.keys(r).forEach(function (k){ if (k[0] !== '_') o[k] = r[k]; });
+          return o;
+        }
+        // Levels are inserted one depth at a time so every parent is already in
+        // idByPath by the time its children are written.
+        var depths = {};
+        nodeRecs.forEach(function (r){ (depths[r.level||1] = depths[r.level||1] || []).push(r); });
+        var lvls = Object.keys(depths).map(Number).sort(function(a,b){return a-b;});
+        for (var li = 0; li < lvls.length; li++) {
+          var batch = depths[lvls[li]].map(function (r){
+            var o = strip(r);
+            o.parent_id = r._parent ? (idByPath[r._parent] || null) : null;
+            return o;
+          });
+          for (var bi = 0; bi < batch.length; bi += 200) {
+            var nb = batch.slice(bi, bi+200);
+            var nres = await sb().from(TABLE).insert(nb).select('id,level,phase,discipline,category,title');
+            if (nres.error) throw nres.error;
+            // Map each inserted level back to its path key by position — the insert
+            // preserves order, and matching on text would be ambiguous the moment two
+            // levels share a name under different parents (which 0017 makes routine).
+            (nres.data || []).forEach(function (row, k){
+              var srcRec = depths[lvls[li]][bi + k];
+              if (srcRec && srcRec._pkey) idByPath[srcRec._pkey] = row.id;
+            });
+          }
+          go.textContent = 'Importing levels '+(li+1)+' / '+lvls.length+'…';
           await new Promise(function (r){ setTimeout(r, 0); });
         }
-        var dc = recs.filter(function(x){return (x.node_kind||'drawing')==='drawing';}).length;
-        UI.toast('Imported '+dc+' drawings', 'ok'); m.close(); load({ reset:true });
+        // chunked insert; yield to the event loop between chunks so the
+        // progress text repaints and the tab never looks frozen
+        for (var i=0; i<drawRecs.length; i+=200) {
+          var chunk = drawRecs.slice(i, i+200).map(function (r){
+            var o = strip(r);
+            o.parent_id = r._parent ? (idByPath[r._parent] || null) : null;
+            return o;
+          });
+          var ins = await sb().from(TABLE).insert(chunk); if (ins.error) throw ins.error;
+          go.textContent = 'Importing '+Math.min(i+200,drawRecs.length)+' / '+drawRecs.length+'…';
+          await new Promise(function (r){ setTimeout(r, 0); });
+        }
+        var dc = drawRecs.length;
+        UI.toast('Imported '+dc+' drawings into '+nodeRecs.length+' levels', 'ok');
+        // Anything the fold could not classify becomes a top level of its own, which
+        // is a data question — say so rather than letting it pass unnoticed.
+        var un = parsed && parsed._unclassifiedTops;
+        if (un && un.length) {
+          UI.toast('Not one of the four drawing types, imported under its own name: '+un.join(', ')+
+                   ' — reclassify or rename these blocks in the workbook.', 'warn');
+        }
+        m.close(); load({ reset:true });
       } catch (e) { UI.toast(e.message, 'error'); go.disabled=false; go.textContent='Import'; }
     };
   }
@@ -4103,7 +4159,7 @@ window.DrawingRegister = (function () {
     function intOf(v){ var n=parseInt(String(v).replace(/[^\d.-]/g,''),10); return isFinite(n)?n:0; }
 
     var recs = [];
-    var cur = { phase:'', discipline:'', category:'', building:'', responsible:'' };
+    var cur = { phase:'', discipline:'', category:'', building:'', responsible:'', scope:'', fold:'' };
     // Anchored so only genuine phase-block titles match — NOT category/sheet
     // titles that merely contain "schematic"/"construction" (e.g. "Schematic
     // Diagrams", "Construction Notes", "Neighbor's As-Built and Crack Mapping").
@@ -4118,6 +4174,11 @@ window.DrawingRegister = (function () {
     // per-file and cannot regress anyone else.
     var PHASE_RE = /^\s*(concept design|schematic design\s*\d|design development|design analysis|detailed design|contract document|for\s+construction|construction drawing|as[- ]?built drawing|as[- ]?built\s*$|pre[- ]?engineering|tender)\b/i;
     var DISC_RE  = /^(architectural|structural|civil|electrical|auxil|plumbing|mechanical|fire|site develop|landscape)/i;
+    // A BUILDING/ZONE reference code as the workbook's own "Coding Reference" sheet
+    // defines it: TW1..TW5 (towers, sometimes a range like TW1-5), PB1 (parking
+    // building), SD (site development), plus the TW-n0000 temporary-works blocks.
+    var BUILDING_CODE_RE = /^(tw\s*-?\s*\d{4,5}|tw\d?(\s*-\s*\d)?|pb\d?(\s*-\s*\d)?|sd)$/i;
+    var unclassifiedTops = {};
 
     // ⚠️ ATTEMPTED AND REVERTED (second time now, by a different route): recognising the OPS
     // template's other top-level blocks — "TEMPORARY WORKS DWG (TWG)" / "INDIVIDUAL SERVICES DWG
@@ -4155,8 +4216,17 @@ window.DrawingRegister = (function () {
       var lvl = norm(cell(row, ci.level));
       if (lvl) {
         if (lvl === 'phase') {
-          cur.phase = cleanPhase(indentText); cur.discipline=''; cur.category='';
-          recs.push(nodeRec('phase', noCode, indentText)); continue;
+          setTopLevel(indentText);
+          recs.push(nodeRec('phase', noCode, cur.phase));
+          if (cur.fold) recs.push(nodeRec('discipline', '', cur.fold));
+          continue;
+        }
+        // A named BUILDING / ZONE level (Tower, Parking Building, Site Development).
+        // In the SLN101 layout this and the trade share a column and are told apart by
+        // their code, but an explicit "Row Level" column always wins.
+        if (lvl === 'building' || lvl === 'zone') {
+          cur.building = indentText; cur.discipline=''; cur.category='';
+          recs.push(nodeRec('building', noCode, indentText)); continue;
         }
         if (lvl === 'discipline') {
           cur.discipline = disciplineHeader(indentText) || mapDiscipline(indentText); cur.category='';
@@ -4178,8 +4248,12 @@ window.DrawingRegister = (function () {
       // PHASE header (top of the outline): keep the *exact* block name so design
       // iterations (Schematic Design 1/2/3/4, FCD, Scheme 1/2…) stay distinct.
       if (!lvl && indentText && PHASE_RE.test(indentText) && !desc && !dwgno) {
-        cur.phase = cleanPhase(indentText); cur.discipline=''; cur.category='';
-        recs.push(nodeRec('phase', noCode, indentText)); continue;
+        setTopLevel(indentText);
+        recs.push(nodeRec('phase', noCode, cur.phase));
+        // Temporary Works / Combined Services / As-Built are no longer top levels —
+        // they arrive as a level-2 node under For Construction Drawings.
+        if (cur.fold) recs.push(nodeRec('discipline', '', cur.fold));
+        continue;
       }
       // DISCIPLINE header: the title *is* a discipline name (exact-ish match)
       var discHead = !lvl ? disciplineHeader(indentText) : null;
@@ -4188,9 +4262,20 @@ window.DrawingRegister = (function () {
         var rp = String(cell(row, ci.resp)).trim(); if (rp) cur.responsible = rp;
         recs.push(nodeRec('discipline', noCode, indentText)); continue;
       }
-      // BUILDING / TOWER header (kept on `cur`, not a render level)
-      if (!lvl && indentText && /^(tower|podium|basement|building|amenity)\b/i.test(indentText) && !desc && !dwgno) {
-        cur.building = indentText; continue;
+      // BUILDING / ZONE header — now a REAL level-2 node.
+      // ⚠️ It used to be parsed onto `cur.building` and emit NO level at all, so the
+      // whole Tower / Parking Building / Site Development tier of the SLN101 workbook
+      // was silently discarded on import.
+      // In that layout the building and the trade sit in the SAME column and are told
+      // apart by the code beside them: a building ref (TW1-5, PB-1, SD, TW-10000) vs a
+      // trade code (AR-000, ST-000, ME-00000…). disciplineFromCode() already knows the
+      // trade prefixes, so anything it does NOT recognise as a trade, that reads like a
+      // building, is a building.
+      if (!lvl && indentText && !desc && !dwgno &&
+          (/^(tower|podium|basement|building|parking|site\s*develop|amenity|temfacil|safety|equipment)\b/i.test(indentText)
+           || (BUILDING_CODE_RE.test(noCode) && !disciplineFromCode(noCode)))) {
+        cur.building = indentText; cur.discipline=''; cur.category='';
+        recs.push(nodeRec('building', noCode, indentText)); continue;
       }
       // CATEGORY header: a sub-group label with no dates and no description
       if (!lvl && indentText && !hasDates && !desc) {
@@ -4246,19 +4331,69 @@ window.DrawingRegister = (function () {
         status: normalizeStatus(String(cell(row, ci.status)).trim()),
         planned_approval: dateOf(cell(row, ci.papp)),
         actual_approval: dateOf(cell(row, ci.aapp)),
-        remarks: [String(cell(row, ci.rem)).trim(), fileRef ? ('File: '+fileRef) : ''].filter(Boolean).join(' · ')
+        remarks: [String(cell(row, ci.rem)).trim(), fileRef ? ('File: '+fileRef) : ''].filter(Boolean).join(' · '),
+        // Main Contract vs Change Order comes from the block header ("(Scheme 2)"),
+        // not from anything on the drawing's own row.
+        scope: cur.scope || SCOPES[0],
+        // The level this drawing belongs to, as a path key openImport() resolves to a
+        // real parent_id once the nodes have ids. Deepest populated tier wins.
+        _parent: pathKey([cur.phase, cur.building, cur.discipline, cur.category]) || null
       });
+    }
+    // Surface anything the fold could not classify instead of letting it quietly
+    // become a fifth top level nobody notices.
+    if (Object.keys(unclassifiedTops).length) {
+      recs._unclassifiedTops = Object.keys(unclassifiedTops);
     }
     return recs;
 
+    // Non-empty tiers only, joined by a separator that cannot occur in a label.
+    function pathKey(parts){
+      return parts.filter(function (v){ return v != null && String(v) !== ''; }).join('\u0001');
+    }
+    // The tier chain a node of this kind sits at, deepest last.
+    function pathChain(kind){
+      if (kind === 'phase')    return pathKey([cur.phase]) ? [cur.phase] : [];
+      if (kind === 'building') return [cur.phase, cur.building].filter(Boolean);
+      if (kind === 'discipline') return [cur.phase, cur.building, cur.discipline].filter(Boolean);
+      return [cur.phase, cur.building, cur.discipline, cur.category].filter(Boolean);
+    }
+
     // A structural node (phase/discipline/category) carrying its code + rollup.
+    // Fold a top-level header onto `cur`. Keeps the four-value vocabulary and the
+    // Main Contract / Change Order split in ONE place, shared with the heuristic and
+    // the explicit "Row Level" paths so they cannot disagree.
+    function setTopLevel(text){
+      var f = foldTopLevel(text);
+      cur.phase = f.top || f.raw;          // unclassifiable keeps its own name
+      cur.scope = f.scope;
+      cur.fold  = f.fold;
+      cur.building = f.fold || '';         // a folded block IS the level-2 node
+      cur.discipline = ''; cur.category = '';
+      if (!f.top && f.raw) unclassifiedTops[f.raw] = 1;
+    }
+    // ⚠️ `level` and `_pkey` are what let openImport() rebuild the real parent_id
+    // tree after insert. `_pkey` is the node's own path key; `_parent` is its
+    // parent's. They are stripped before the row is written (the `_`-prefix rule).
     function nodeRec(kind, code, label){
-      return { node_kind:kind,
+      var name  = label||'';
+      // ⚠️ ONE definition of a level's path, shared with the drawing records below —
+      // they must agree exactly or a drawing resolves to no parent. Empty tiers are
+      // SKIPPED (a register with no building level is 3 deep, not 4 with a blank), so
+      // both sides build the chain the same way: pathKey().
+      var chain = pathChain(kind);
+      var lvlNo = chain.length;
+      var pkey  = pathKey(chain);
+      var prnt  = lvlNo > 1 ? pathKey(chain.slice(0, -1)) : null;
+      return { node_kind: kind==='building' ? 'discipline' : kind,   // legacy vocabulary on the wire
+        level: lvlNo,
         phase: cur.phase,
-        discipline: kind==='phase' ? '' : cur.discipline,
+        discipline: kind==='phase' ? '' : (kind==='building' ? name : cur.discipline),
         category: kind==='category' ? cur.category : '',
+        scope: cur.scope || SCOPES[0],
         dwg_number: code||'', drawing_no: code||'', drawing_code: code||'',
-        title: label||'',
+        title: name,
+        _pkey: pkey, _parent: prnt,
         no_of_sheets: 0, approved_sheets: 0, submissions: [], status: '' };
     }
 
@@ -4340,23 +4475,32 @@ window.DrawingRegister = (function () {
   // iterations stay distinct — do NOT normalise 3/4 down to 1.
   // Title-case a block name, but keep the template's acronyms upper — otherwise a raw import reads
   // "Temporary Works Dwg (Twg)" / "Individual Services Dwg (Isd)".
-  var PHASE_ACRONYMS = ['FCD','TWG','TWD','ISD','DED','BIM','CBW','SD','AB'];
-  function cleanPhase(s) {
-    var out = String(s||'').replace(/\s+/g,' ').trim()
-      .toLowerCase().replace(/\b([a-z])/g, function(m,c){ return c.toUpperCase(); });
-    PHASE_ACRONYMS.forEach(function (a){ out = out.replace(new RegExp('\\b'+a+'\\b','ig'), a); });
-    return out.replace(/\bDwg\b/g,'Dwg');
-  }
-
-  function mapPhase(s) {
+  // ⚠️ THE IMPORTER'S FOLD, and it must agree with migration 0017's exactly — the
+  // register would otherwise be shaped one way by a backfill and another way by the
+  // next import of the same workbook.
+  //
+  // Returns { top, scope, fold }:
+  //   top   — one of the four fixed top levels
+  //   scope — 'Change Order' when the sheet said "(Scheme 2)", else 'Main Contract'
+  //   fold  — a level-2 name when the block is one of the three that fold under For
+  //           Construction (Temporary Works / Combined Services / As-Built), else ''
+  // A block we cannot classify keeps its own name and is reported, never guessed at.
+  function foldTopLevel(s){
     var t = norm(s);
-    if (/concept/.test(t)) return 'Concept Design';
-    if (/schematic.*2|scheme *2|sd2/.test(t)) return 'Schematic Design 2';
-    if (/schematic|scheme *1|sd1/.test(t)) return 'Schematic Design 1';
-    if (/construction|fcd|for const/.test(t)) return 'For Construction';
-    if (/as.?built/.test(t)) return 'As-Built';
-    if (/contract/.test(t)) return 'For Construction';
-    return s.replace(/\b\w/g,function(m){return m.toUpperCase();});
+    // "(Scheme 2)" is a change order, not a design stage. Read it BEFORE the fold,
+    // because the fold discards the suffix.
+    var scope = /scheme\s*2/.test(t) ? 'Change Order' : 'Main Contract';
+    var top = '', fold = '';
+    if (/concept|\becd\b/.test(t)) top = 'Concept Design';
+    else if (/individual\s*service|\bisd\b/.test(t)) top = 'Individual Services Drawings';
+    else if (/temporary\s*works|\btw[dg]\b/.test(t)) { top = 'For Construction Drawings'; fold = 'Temporary Works'; }
+    else if (/combined\s*service|\bcsd\b/.test(t))   { top = 'For Construction Drawings'; fold = 'Combined Services'; }
+    else if (/as[- ]?built|\babd\b/.test(t))          { top = 'For Construction Drawings'; fold = 'As-Built'; }
+    // SD1 and SD2 merge completely — the LOD distinction is deliberately dropped.
+    else if (/schematic|scheme|\bsd[12]?\b/.test(t)) top = 'Schematic Design';
+    else if (/construction|contract|\bfcd\b/.test(t)) top = 'For Construction Drawings';
+    return { top: top, scope: scope, fold: fold,
+             raw: String(s||'').replace(/\s+/g,' ').trim() };
   }
 
   // ========================================================== PRINT TOP SHEET =
