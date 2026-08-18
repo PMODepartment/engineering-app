@@ -727,3 +727,17 @@ td.dr-editing { padding:2px 4px; }
   .dr-rowbtn { min-width: 34px; min-height: 34px; }
   .dr-prog { min-width: 70px; }
 }
+
+/* ---- 0-or-100 progress units (migration 0017) ----------------------------
+   Concept / Schematic / For Construction are counted in UNITS the technical
+   officer designates — typically the trade — rather than in sheets. The marker
+   is a quiet outline until it is on, so an undesignated register doesn't read
+   as broken. */
+.dr-lvlunit { background:none; border:0; padding:2px; cursor:pointer; color:var(--pd-mut); opacity:.55; }
+.dr-lvlunit:hover { opacity:1; color:var(--pd-red); }
+.dr-lvlunit-on { opacity:1; color:var(--pd-red); }
+.dr-unittag { display:inline-block; margin-left:7px; padding:0 6px; border-radius:9px;
+  background:var(--pd-red-light); color:var(--pd-red-dark, var(--pd-red)); border:1px solid var(--pd-red-mid);
+  font-size:var(--dr-fs-micro); font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.dr-unithint { display:inline-block; margin-left:7px; color:var(--pd-mut);
+  font-size:var(--dr-fs-micro); font-style:italic; cursor:help; }

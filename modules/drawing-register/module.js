@@ -867,6 +867,72 @@ window.DrawingRegister = (function () {
     return { tot: tot, ap: ap, pct: tot ? Math.round(ap / tot * 100) : 0,
              minPlanned: minPlanned, maxActual: allAppr ? maxActual : null, allApproved: allAppr };
   }
+  // ---- BINARY progress: equal-weight tracking units --------------------------
+  // ⚠️ rollup() above is SHEET-WEIGHTED, which is right for Individual Services
+  // Drawings and wrong for the other three. There a drawing is one sheet, approved
+  // or not, and progress is counted in UNITS the technical officer designates —
+  // typically the trade node ("Architectural Drawings 0 → 100"). A unit carries the
+  // same weight whatever its size, so a trade with 40 drawings does not drown one
+  // with 3.
+  //
+  // A unit is approved only when EVERY drawing beneath it is approved (and there is
+  // at least one): a level row is a promise about a body of work, so it is not
+  // partially kept.
+  function unitApproved(u){
+    if (!isNode(u)) return isApprovedStatus(statusOf(u.status));
+    var list = drawsUnder(u);
+    if (!list.length) return false;
+    return list.every(function (r){ return isApprovedStatus(statusOf(r.status)); });
+  }
+  function drawsUnder(node){
+    var out = (drawsOf[node.id] || []).slice();
+    (nodeKidsOf[node.id] || []).forEach(function (c){ out = out.concat(drawsUnder(c)); });
+    return out;
+  }
+  // The tracking units at or below a node. A flagged node IS the unit, so the walk
+  // stops there — otherwise a unit would also count its own descendants and the
+  // percentages would not sum to 100.
+  //
+  // ⚠️ FALLBACK, and it must not be sheet-based. With nothing flagged, every leaf
+  // DRAWING is its own unit. Falling back to sheet counts would give a For
+  // Construction drawing with 12 sheets and 7 approved a 58% partial credit, which
+  // is precisely what "0 or 100 only" forbids.
+  function trackingUnitsUnder(node){
+    if (node.is_tracking_unit) return [node];
+    var out = [];
+    (nodeKidsOf[node.id] || []).forEach(function (c){ out = out.concat(trackingUnitsUnder(c)); });
+    // A drawing sitting loose in an unflagged level still has to count for
+    // something, so it is its own unit — otherwise its work would be invisible in a
+    // branch that mixes flagged sub-levels with directly-held drawings.
+    (drawsOf[node.id] || []).forEach(function (d){ out.push(d); });
+    return out;
+  }
+  function usingUnitFallback(node){
+    return !hasFlaggedUnit(node);
+  }
+  function hasFlaggedUnit(node){
+    if (node.is_tracking_unit) return true;
+    return (nodeKidsOf[node.id] || []).some(hasFlaggedUnit);
+  }
+  // Roll-up for a level row, in whichever mode its top level uses. Returns the same
+  // shape either way so groupRowHTML and the progress tables don't have to care:
+  // `tot`/`ap` are sheets in 'sheets' mode and UNITS in 'binary' mode, and `unitMode`
+  // says which so the UI can label the columns honestly.
+  function rollupFor(node, list){
+    var dates = rollup(list);
+    if (!node || modeOf(node) !== 'binary') {
+      return { tot:dates.tot, ap:dates.ap, pct:dates.pct, unitMode:false,
+               minPlanned:dates.minPlanned, maxActual:dates.maxActual,
+               allApproved:dates.allApproved, fallback:false };
+    }
+    var units = trackingUnitsUnder(node);
+    var ap = units.filter(unitApproved).length;
+    var tot = units.length;
+    return { tot:tot, ap:ap, pct: tot ? Math.round(ap / tot * 100) : 0, unitMode:true,
+             minPlanned:dates.minPlanned, maxActual:dates.maxActual,
+             allApproved: tot > 0 && ap >= tot, fallback: usingUnitFallback(node) };
+  }
+
   // Shared with agingDays()'s guard: a legacy import sentinel like "2000-01-06" is
   // not a real date and must not win a min()/max().
   function validDate(d){
@@ -1545,7 +1611,10 @@ window.DrawingRegister = (function () {
     // commitment (min planned) and — only once everything under it is approved —
     // the day the last one landed (max actual). Same rule at every level, so a
     // discipline, a category and a per-sheet drawing all read the same way.
-    var roll = rollup(item.list);
+    // ⚠️ Binary levels count UNITS, not sheets — see rollupFor(). A level in a
+    // binary top level whose numbers were sheet-weighted would silently reintroduce
+    // partial credit at the roll-up even though every leaf is 0-or-100.
+    var roll = rollupFor(item.node, item.list);
     var tot = roll.tot, ap = roll.ap, pct = roll.pct;
     var ids = item.list.map(function(r){return r.id;}).join(',');
     var grpCb = CB ? '<td class="dr-cb dr-freeze dr-freeze-cb"><input type="checkbox" data-selgrp="'+ids+'" title="Select group"></td>' : '';
@@ -1557,7 +1626,14 @@ window.DrawingRegister = (function () {
         ' data-phase="'+Fmt.esc(item.ctx.phase||'')+'" data-disc="'+Fmt.esc(item.ctx.discipline||'')+'" data-cat="'+Fmt.esc(item.ctx.category||'')+'">' + grpCb +
       '<td colspan="'+COLSPAN_LABEL+'" class="dr-indent dr-freeze dr-freeze-grp"><span class="dr-grplabel">'+caret+
         (item.code?'<span class="dr-gcode">'+Fmt.esc(item.code)+'</span> ':'')+
-        '<strong class="dr-glabel">'+Fmt.esc(item.label)+'</strong> <span class="dr-count">'+item.list.length+' dwg</span></span></td>' +
+        '<strong class="dr-glabel">'+Fmt.esc(item.label)+'</strong> <span class="dr-count">'+item.list.length+' dwg</span>'+
+        (item.unit?'<span class="dr-unittag" title="One 0-or-100 progress unit">unit</span>':'')+
+        // A binary top level with nothing designated is counting each drawing as its
+        // own unit. Say so on the row rather than letting the percentage look like a
+        // deliberate breakdown.
+        (roll.unitMode && item.level===1 && roll.fallback && roll.tot
+          ? '<span class="dr-unithint" title="No tracking unit set on this drawing type, so each drawing counts as one. Use the target button on a level to designate it.">counting each drawing</span>' : '')+
+        '</span></td>' +
       '<td colspan="2">'+progressBar(pct)+'</td>' +   // Rev + Status
       '<td class="dr-r">'+tot+'</td>' +
       '<td class="dr-r">'+ap+'</td>' +
@@ -1568,7 +1644,11 @@ window.DrawingRegister = (function () {
         : '<span class="dr-mut" title="Not all approved yet">—</span>')+'</td>' +
       '<td></td>' +   // Resp.
       '<td></td>' +   // Scope
-      '<td class="dr-nowrap dr-actcol">'+(canWrite?'<button class="dr-lvldel" title="Delete this level and everything under it">'+ico('trash',15)+'</button>':'')+'</td></tr>';
+      '<td class="dr-nowrap dr-actcol">'+(canWrite?
+          (roll.unitMode && item.level>1 ? '<button class="dr-lvlunit'+(item.unit?' dr-lvlunit-on':'')+'" title="'+
+             (item.unit ? 'This level is a 0-or-100 progress unit — click to stop counting it as one'
+                        : 'Count this level as one 0-or-100 progress unit')+'">'+ico('target',15)+'</button>' : '')+
+          '<button class="dr-lvldel" title="Delete this level and everything under it">'+ico('trash',15)+'</button>':'')+'</td></tr>';
   }
 
   function progressBar(pct) {
@@ -1613,8 +1693,12 @@ window.DrawingRegister = (function () {
       ? '<span class="dr-caret dr-scaret'+(isCollapsed(item.skey)?' dr-caret-col':'')+'" data-sgrp="'+item.skey+'" title="Show / hide this drawing’s sheets">'+ico('chevronDown',12)+'</span>'
       : '';
     var sheetTag = kids ? ' <span class="dr-sheettag" title="Tracked per sheet">'+kids.length+' sheets</span>' : '';
-    return '<tr class="dr-drow dr-lvl-'+(item.level||4)+(kids?' dr-sheetparent':'')+(sheet?' dr-sheetrow':'')+
-        (selected[r.id]?' dr-selrow':'')+(isDup?' dr-dup':'')+'" data-id="'+r.id+'"'+
+    // Pre-existing break-outs inside what is now a binary top level stay READABLE and
+    // merge-only — auto-merging would delete rows, and there is no per-sheet history
+    // to restore them from. They simply count as one unit, via derivedStatus.
+    var canBreakOut = !sheet && !isBinary(r);
+    return '<tr class="dr-drow dr-lvl-'+Math.min(item.level||4,5)+(kids?' dr-sheetparent':'')+(sheet?' dr-sheetrow':'')+
+        (selected[r.id]?' dr-selrow':'')+(isDup?' dr-dup':'')+'" data-id="'+r.id+'" style="--dr-depth:'+(item.level||4)+'"'+
         (kids?' data-sgrprow="'+item.skey+'"':'')+((reorderEnabled() && !kids)?' draggable="true"':'')+'>' + cb +
       '<td class="dr-indent dr-freeze dr-freeze-code'+ed+'" data-f="code" data-t="text">'+caret+'<span class="dr-code">'+Fmt.esc(code)+'</span>'+dupMark+'</td>' +
       '<td class="dr-c-title dr-freeze dr-freeze-title'+ed+'" data-f="title" data-t="text">'+Fmt.esc(r.title)+sheetTag+(r.description?'<div class="dr-sub">'+Fmt.esc(r.description)+'</div>':'')+'</td>' +
@@ -1635,7 +1719,7 @@ window.DrawingRegister = (function () {
       '<td class="dr-c-scope'+(kids?'':ed)+'" data-f="scope" data-t="text">'+
         '<span class="dr-scopetag'+((r.scope||SCOPES[0])==='Change Order'?' dr-co':'')+'">'+Fmt.esc(r.scope||SCOPES[0])+'</span></td>' +
       '<td class="dr-nowrap dr-actcol">'+(r.file_url?'<button class="dr-iconbtn" data-view="'+Fmt.esc(r.file_url)+'" title="View approved file">'+ico('eye',15)+'</button>':'')+
-        (canWrite && !sheet ? '<button class="dr-iconbtn" data-sheets="'+r.id+'" title="'+(kids?'Manage sheets':'Break out into one row per sheet')+'">'+ico('columns',15)+'</button>' : '')+
+        (canWrite && (canBreakOut || kids) ? '<button class="dr-iconbtn" data-sheets="'+r.id+'" title="'+(kids?'Manage sheets':'Break out into one row per sheet')+'">'+ico('columns',15)+'</button>' : '')+
         '<button class="dr-iconbtn" data-edit="'+r.id+'" title="Full editor">'+ico('pencil',15)+'</button>' +
         '<button class="dr-iconbtn dr-rowbtn-del" data-del="'+r.id+'" title="Delete">'+ico('trash',15)+'</button></td>' +
     '</tr>';
@@ -1706,6 +1790,8 @@ window.DrawingRegister = (function () {
         saveUI(); render();
       });
       if (glabel && canWrite) glabel.ondblclick = function(e){ e.stopPropagation(); beginRenameGroup(tr, glabel); };
+      var ub = tr.querySelector('.dr-lvlunit');
+      if (ub) ub.onclick = function(e){ e.stopPropagation(); toggleTrackingUnit(tr.dataset.nodeid); };
       var dl = tr.querySelector('.dr-lvldel');
       if (dl) dl.onclick = function(e){ e.stopPropagation(); deleteLevel(tr.dataset); };
     });
@@ -2134,6 +2220,50 @@ window.DrawingRegister = (function () {
   }
   function uniqueName(base, taken){ var n=base, i=2; while(taken.indexOf(n)!==-1){ n=base+' '+(i++); } return n; }
 
+  // Designate (or stand down) a level as one 0-or-100 progress unit.
+  //
+  // ⚠️ NESTING IS REFUSED, not silently resolved. If a node and its own ancestor
+  // were both units, the ancestor's percentage would count the inner one twice —
+  // once as itself and once inside its own subtree — and the numbers would stop
+  // summing to 100 with nothing on screen to explain why. Better to say no.
+  async function toggleTrackingUnit(nodeId){
+    var node = nodeId ? rowById[nodeId] : null;
+    if (!node || !isNode(node)) return;
+    if (modeOf(node) !== 'binary'){
+      UI.toast('Individual Services Drawings are tracked by approved sheets, not 0-or-100 units','warn');
+      return;
+    }
+    var on = !node.is_tracking_unit;
+    if (on) {
+      var clash = null;
+      // an ancestor already designated?
+      for (var a = node.parent_id ? rowById[node.parent_id] : null; a; a = a.parent_id ? rowById[a.parent_id] : null) {
+        if (a.is_tracking_unit){ clash = nodeName(a) + ' (above this one)'; break; }
+      }
+      // or a descendant?
+      if (!clash) {
+        (function scan(n){
+          (nodeKidsOf[n.id] || []).forEach(function (c){
+            if (clash) return;
+            if (c.is_tracking_unit) clash = nodeName(c) + ' (inside this one)';
+            else scan(c);
+          });
+        })(node);
+      }
+      if (clash){
+        UI.toast('“'+clash+'” is already a progress unit — a unit cannot sit inside another, '+
+                 'or its work would be counted twice. Stand that one down first.','warn');
+        return;
+      }
+    }
+    var res = await sb().from(TABLE).update({ is_tracking_unit: on }).eq('id', node.id);
+    if (res.error){ UI.toast(res.error.message,'error'); return; }
+    node.is_tracking_unit = on;
+    UI.toast(on ? '“'+nodeName(node)+'” now counts as one 0-or-100 unit'
+                : '“'+nodeName(node)+'” is no longer a progress unit', 'ok');
+    render();
+  }
+
   // ⚠️ Was addLevel(kind) with kind in phase|discipline|category, i.e. depth was
   // declared in code. Now depth is created by the USER: this adds a child ONE LEVEL
   // BELOW whichever level row is selected, to any depth, and the level's meaning is
@@ -2219,6 +2349,16 @@ window.DrawingRegister = (function () {
 
   function openSheetsDialog(p){
     if (!p) return;
+    // ⚠️ REFUSED on a binary branch, not merely ignored. Concept / Schematic / For
+    // Construction are 0-or-100 per unit, so a partial sheet count there is a
+    // contradiction, not a display preference. If the inputs merely had no effect a
+    // technical officer would type 7-of-12 and watch nothing happen.
+    if (isBinary(p)) {
+      var t = topLevelOf(p);
+      UI.toast(nodeName(t || p) + ' is tracked 0-or-100 on the designated level, so its drawings '+
+               'are one sheet each. Per-sheet break-out applies to Individual Services Drawings.', 'warn');
+      return;
+    }
     var kids = sheetsOf(p);
     var have = kids.length;
     var m = UI.modal(
@@ -2721,12 +2861,17 @@ window.DrawingRegister = (function () {
       '</svg><div style="min-width:200px;flex:1;">'+legend+'</div></div>';
   }
 
+  // ⚠️ `approved` comes from approvedOf(), NOT the raw `approved_sheets` column.
+  // This read the column directly while the grid read approvedOf(), which is the
+  // two-definitions-of-one-number bug approvedOf() was written to end: approving a
+  // sheet through the full editor leaves the parent's stored counter stale, so the
+  // progress tables and the grid disagreed on the same register.
   function groupAgg(key) {
     var m = {};
     drawingRows().forEach(function (r) {
       var k = r[key] || '—';
       var g = m[k] || (m[k]={label:k, dwg:0, sheets:0, submitted:0, approved:0});
-      var t=num(r.no_of_sheets)||0, a=num(r.approved_sheets)||0;
+      var t=num(r.no_of_sheets)||0, a=approvedOf(r);
       g.dwg++; g.sheets+=t; g.approved+=a;
       if (latestSub(r,'actual')) g.submitted+=t;
     });

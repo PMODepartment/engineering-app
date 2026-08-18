@@ -53,6 +53,8 @@
     triangleUp:  '<path d="M12 6 4 18h16z"/>',
     triangleDown:'<path d="M12 18 4 6h16z"/>',
     layers:      '<path d="M12 3 3 8l9 5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+    // A 0-or-100 progress unit marker (drawing-register level designation).
+    target:      '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2"/>',
     check:       '<polyline points="4 12.5 9 17.5 20 6.5"/>',
     bell:        '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
     clock:       '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>',
