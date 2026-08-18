@@ -141,11 +141,26 @@ tr.dr-grp .dr-glabel { cursor:text; }      /* except the label: dblclick renames
    at 1440px and lost roughly half the code at the 1080px min-width. Measured,
    not guessed: see _ui_test.html. 12px steps keep a legible ladder and leave
    the deepest row 66px of code space even at the narrowest table width. */
+/* ⚠️ GENERIC DEPTH (2026-08-18, migration 0017). This was five hardcoded rules,
+   which capped the tree at five levels; SLN101 needs six (top level › Building ›
+   Trade › Category › drawing › sheet) and another project can configure more. The
+   depth now travels as an inline `--dr-depth` custom property set by the renderer,
+   so one rule covers any depth. The 12px step and the 8px base are UNCHANGED, so
+   levels 1-5 render pixel-identically to before.
+   The measured constraint still applies: levels 4+ sit inside the 130px frozen Code
+   column, and at 12px per step level 6 leaves ~54px for the code at the 1080px min
+   width. Past that the ladder is CLAMPED rather than allowed to eat the column —
+   deeper levels stay legible at the cost of not being visually distinct, which is
+   the right trade when the alternative is a clipped drawing code. */
+.dr-indent { padding-left: calc(8px + min(var(--dr-depth, 1), 6) * 12px - 12px); }
+/* Explicit fallbacks for rows that don't carry --dr-depth (sheets, plain drawings). */
 .dr-lvl-1 .dr-indent { padding-left:8px; }
 .dr-lvl-2 .dr-indent { padding-left:20px; }
 .dr-lvl-3 .dr-indent { padding-left:32px; }
 .dr-lvl-4 .dr-indent { padding-left:44px; }
 .dr-lvl-5 .dr-indent { padding-left:56px; }   /* individual sheets under a drawing */
+/* A row that DOES carry a depth wins over the level fallback above. */
+.dr-grp[style*="--dr-depth"] .dr-indent { padding-left: calc(8px + min(var(--dr-depth, 1), 6) * 12px - 12px); }
 
 /* A coloured rail on the first cell marks the level at a glance.
    ⚠️ THREE of the five rails were effectively invisible before this, each in a

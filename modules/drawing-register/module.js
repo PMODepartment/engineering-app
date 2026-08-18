@@ -137,13 +137,35 @@ window.DrawingRegister = (function () {
   // sequence that doesn't exist. The stored column is still `phase` — renaming
   // it would need a migration across every register for no functional gain —
   // but every user-facing label says "drawing type".
-  // This list only supplies the DISPLAY ORDER and the default dropdown options;
-  // any value actually present in a project is picked up dynamically, so a
-  // register using its own names (GPR101's "For Construction Drawings (FCD)")
-  // still orders by first appearance via phaseOrderKey().
-  var PHASES = ['Concept Design','Schematic Design','For Construction Drawing',
-                'Temporary Works Drawing','Individual Services Drawing',
-                'Combined Services Drawing','As-Built Drawing'];
+  // This list supplies the DISPLAY ORDER and the default dropdown options; a value
+  // migration 0017 could not classify still appears (ranked last) rather than being
+  // dropped, so nothing is ever hidden by not being in the vocabulary.
+  // ⚠️ CLOSED SET OF FOUR (2026-08-18, migration 0017). Was seven, which mixed
+  // design stages with document types. What changed and why it must not drift back:
+  //   • Schematic Design 1 and 2 (LOD 100 / LOD 200) MERGE COMPLETELY — one level.
+  //     The workbook's own registry carries both; the merge is deliberate.
+  //   • Temporary Works, Combined Services and As-Built are NO LONGER top levels.
+  //     They are level-2 children of For Construction Drawings, because they are
+  //     produced FOR construction rather than being stages of their own.
+  //   • "(Scheme 1)" / "(Scheme 2)" were never stages either — they are `scope`
+  //     (Main Contract / Change Order). Scheme 1 is RETAINED even when superseded,
+  //     because it is the baseline a change order's cost and time impact is
+  //     measured against.
+  // The stored column is still `phase` (renaming it would need a migration across
+  // every register for no functional gain), but every user-facing label reads
+  // "drawing type", and TOP_LEVELS is the display order.
+  var TOP_LEVELS = ['Concept Design','Schematic Design',
+                    'For Construction Drawings','Individual Services Drawings'];
+  // Progress semantics per top level, and they cannot share a percentage:
+  //   'sheets' → a leaf carries many sheets with PARTIAL credit (ISD: the real
+  //              workbook has "Rebar Cutting List" at 83 sheets / 50 approved).
+  //   'binary' → a leaf is one sheet, approved or not. The 0-or-100 unit is a NODE
+  //              the technical officer designates (typically the trade), and a
+  //              parent's percent is approved units / total units, EQUAL WEIGHT.
+  var TRACK_MODE = { 'Individual Services Drawings':'sheets' };   // default 'binary'
+  function trackModeOfName(name){ return TRACK_MODE[name] || 'binary'; }
+  // Kept as an alias so the many `PHASES`-era call sites keep reading naturally.
+  var PHASES = TOP_LEVELS;
   // Order = the actual lifecycle:
   //   Not Started → In Progress → Submitted → Approved w/ comments
   //                     ↺ Resubmit          → Approved  → Cancelled
@@ -167,6 +189,74 @@ window.DrawingRegister = (function () {
   // Canonical display value for whatever is stored on a row.
   function statusOf(s){ return (s && LEGACY_STATUS[s]) || s || ''; }
   function statusLabel(s){ return statusOf(s) || NOT_STARTED; }
+  // ---- Level names ---------------------------------------------------------
+  // Level 1 is the fixed top level. Levels 2..N are USER-DEFINED per project and
+  // named in `drawing_level_defs` (migration 0017) — SLN101 uses Building › Trade
+  // › Category, another project can use anything at any depth. `levelDefs` is
+  // loaded per project; a level with no row falls back to "Level N", so an
+  // unconfigured project still works.
+  var levelDefs = {};                 // level_no -> label
+  var MAX_LEVEL = 12;                 // matches the CHECK in drawing_level_defs
+  function levelLabel(n){
+    if (n <= 1) return 'Drawing Type';
+    return levelDefs[n] || ('Level ' + n);
+  }
+  var LEVEL_TABLE = 'drawing_level_defs';
+  async function loadLevelDefs(){
+    levelDefs = {};
+    if (!pid) return;
+    var res = await sb().from(LEVEL_TABLE).select('level_no,label').eq('project_id', pid);
+    // Deploy-order safe: the module must keep working before migration 0017 is run,
+    // so a missing table just means "no names configured" and every level falls back
+    // to "Level N" rather than the register failing to render.
+    if (res.error) return;
+    (res.data || []).forEach(function (d){ levelDefs[d.level_no] = d.label; });
+  }
+  // The per-project level-name editor — this is what makes the sublevels
+  // user-defined rather than hardcoded. It names levels 2..deepest-in-use, plus one
+  // spare so a level can be named before it exists.
+  function openLevelNames(){
+    if (!pid){ UI.toast('Select a project first','warn'); return; }
+    var deepest = 1;
+    structuralNodes().forEach(function (n){ if ((n.level||1) > deepest) deepest = n.level; });
+    var upto = Math.min(Math.max(deepest + 1, 4), MAX_LEVEL);
+    var body = '';
+    for (var n = 2; n <= upto; n++) {
+      body += field('Level ' + n,
+        '<input class="pd-input" id="f-lvl-' + n + '" maxlength="40" value="' +
+        Fmt.esc(levelDefs[n] || '') + '" placeholder="' + Fmt.esc(levelLabel(n)) + '">');
+    }
+    var m = UI.modal(
+      '<h2 style="margin-top:0;">Name the levels</h2>' +
+      '<p class="dr-mut" style="margin-top:0;">The four drawing types are fixed. Everything below them is ' +
+      'yours to structure — name the levels to match how this project is actually broken down ' +
+      '(SLN101 uses <strong>Building › Trade › Category</strong>). Blank falls back to “Level N”.</p>' +
+      body +
+      '<div style="text-align:right;margin-top:14px;"><button class="pd-btn" id="f-lvl-cancel" type="button">Cancel</button> ' +
+      '<button class="pd-btn pd-btn-primary" id="f-lvl-save" type="button">Save</button></div>');
+    m.el.querySelector('#f-lvl-cancel').onclick = m.close;
+    m.el.querySelector('#f-lvl-save').onclick = async function (){
+      var ups = [], dels = [];
+      for (var n = 2; n <= upto; n++) {
+        var el = m.el.querySelector('#f-lvl-' + n); if (!el) continue;
+        var v = el.value.trim();
+        if (v) ups.push({ project_id: pid, level_no: n, label: v, sort_order: n, created_by: uid });
+        else if (levelDefs[n]) dels.push(n);
+      }
+      if (ups.length) {
+        var r1 = await sb().from(LEVEL_TABLE).upsert(ups, { onConflict: 'project_id,level_no' });
+        if (r1.error){ UI.toast(r1.error.message,'error'); return; }
+      }
+      if (dels.length) {
+        var r2 = await sb().from(LEVEL_TABLE).delete().eq('project_id', pid).in('level_no', dels);
+        if (r2.error){ UI.toast(r2.error.message,'error'); return; }
+      }
+      m.close();
+      await loadLevelDefs();
+      render();
+      UI.toast('Level names saved','ok');
+    };
+  }
   var NODE_LABELS = { phase:'Drawing Type', discipline:'Discipline', category:'Category', drawing:'Drawing' };
 
   // selection ordering (display order of drawing ids) for shift-click + arrows
@@ -239,8 +329,13 @@ window.DrawingRegister = (function () {
 
   // A drawing's group = the phase → discipline → category bucket it renders in
   // (same keys buildModel() groups by). Reordering never crosses a group.
+  // A drawing's group is now literally its level node, so drag-reorder identity is
+  // the parent id. The old three-part text key could not tell apart two same-named
+  // levels under different parents (Structural under both Temporary Works and
+  // Combined Services, which migration 0017 creates), so a drag could silently
+  // re-deal sort_order across two unrelated groups.
   function groupKeyOf(r){
-    return (r.phase||'Ungrouped') + '|' + (r.discipline||'—') + '|' + ((r.category||'').trim());
+    return r.parent_id || ('T|' + (r.phase || 'Ungrouped'));
   }
 
   // buildModel() walks `rows` in ARRAY order, which is only the sort_order order
@@ -405,16 +500,35 @@ window.DrawingRegister = (function () {
     };
     var clearBtn = document.getElementById('dr-clear');
     if (clearBtn) { clearBtn.style.display = canWrite ? '' : 'none'; clearBtn.onclick = clearAll; }
-    // "+ Level" menu: build the phase/discipline/category skeleton
+    // "+ Level" menu: add a sublevel inside the selected level, or name the levels
     var lvlBtn = document.getElementById('dr-addlevel'), lvlMenu = document.getElementById('dr-addlevel-menu');
     if (lvlBtn) {
       lvlBtn.style.display = canWrite ? '' : 'none';
       if (!canWrite && document.getElementById('dr-add')) document.getElementById('dr-add').style.display='none';
-      lvlBtn.onclick = function (e){ e.stopPropagation(); lvlMenu.hidden = !lvlMenu.hidden; };
+      // ⚠️ Rebuilt on every open, not once at wire-up: what it offers depends on
+      // which level is selected and on this project's own level names, both of
+      // which change while the page is open.
+      lvlBtn.onclick = function (e){
+        e.stopPropagation();
+        if (!lvlMenu.hidden){ lvlMenu.hidden = true; return; }
+        var ctx = selCtx || {};
+        var parent = ctx.nodeId ? rowById[ctx.nodeId] : null;
+        var lvl = parent ? (parent.level || 1) + 1 : 0;
+        lvlMenu.innerHTML =
+          (parent && lvl <= MAX_LEVEL
+            ? '<button data-act="add">Add ' + Fmt.esc(levelLabel(lvl)) +
+              ' inside “' + Fmt.esc(nodeName(parent)) + '”</button>'
+            : '<button disabled title="Click a level row first">Select a level to add inside</button>') +
+          '<button data-act="names">Name levels…</button>';
+        lvlMenu.querySelectorAll('[data-act]').forEach(function (b){
+          b.onclick = function (){
+            lvlMenu.hidden = true;
+            if (b.dataset.act === 'add') addLevel(); else openLevelNames();
+          };
+        });
+        lvlMenu.hidden = false;
+      };
       document.addEventListener('click', function(){ if (lvlMenu) lvlMenu.hidden = true; });
-      lvlMenu.querySelectorAll('[data-add]').forEach(function (b){
-        b.onclick = function(){ lvlMenu.hidden = true; addLevel(b.dataset.add); };
-      });
     }
     document.getElementById('dr-project').onchange = function (e) {
       pid = e.target.value; sessionStorage.setItem('pd_project', pid);
@@ -571,14 +685,21 @@ window.DrawingRegister = (function () {
     });
     rows = all;
     if (!fromCache && window.PDSync) PDSync.cachePut('dr:' + pid, all);   // refresh the offline cache
+    await loadLevelDefs();
     if (opts.reset) {
       // fresh view (project switch / import / clear): reset selection; restore
       // the saved per-project view + collapse state, else default to phases collapsed
-      selected = {}; lastClickedId = null; selCtx = { phase:'', discipline:'', category:'', level:0 };
+      selected = {}; lastClickedId = null;
+      selCtx = { phase:'', discipline:'', category:'', nodeId:null, level:null };
       collapsed = {}; fCollapsed = {};
       bkAging = '';        // a drill-through aging filter must not leak across projects
       bkShowAll = false;
-      if (!restoreUI()) rows.forEach(function (r){ collapsed['P:' + (r.phase || 'Ungrouped')] = true; });
+      // Collapse keys are node ids now, so the default collapses the level-1 ROWS
+      // rather than a text key that no longer exists.
+      if (!restoreUI()) {
+        indexSheets();
+        rows.forEach(function (r){ if (isNode(r) && !r.parent_id) collapsed['G:' + r.id] = true; });
+      }
     }
     render();
   }
@@ -643,22 +764,62 @@ window.DrawingRegister = (function () {
   // the same `no_of_sheets`/`approved_sheets` fields they always did.
   var kidsOf = {};          // parent id -> [sheet rows], in display order
   var rowById = {};
+  var nodeKidsOf = {};      // node id -> [child GROUP nodes]
+  var drawsOf    = {};      // node id -> [child DRAWINGS]
   function indexSheets(){
-    kidsOf = {}; rowById = {};
+    kidsOf = {}; rowById = {}; nodeKidsOf = {}; drawsOf = {};
     rows.forEach(function (r){ rowById[r.id] = r; });
     rows.forEach(function (r){
-      if (!r.parent_id || isNode(r)) return;
+      if (!r.parent_id) return;
       // Defensive: a child whose parent is missing (deleted out from under it, or
       // filtered out of a partial cache) must not vanish from the register — it is
       // re-adopted as a plain drawing by leaving it out of the index, since
       // drawingRows() only excludes rows whose parent actually exists.
-      if (!rowById[r.parent_id]) return;
+      var p = rowById[r.parent_id];
+      if (!p) return;
+      // ⚠️ `parent_id` now carries THREE kinds of edge (migration 0017), and which
+      // one it is depends on the PARENT, not on the child:
+      //   group  -> group    the level tree
+      //   group  -> drawing  a drawing sitting in its level
+      //   drawing-> drawing  a SHEET of that drawing
+      // Before 0017 only the last existed, so "has a parent_id" meant "is a sheet".
+      // Keeping that test would have made every drawing a phantom sheet of its own
+      // level node — hasSheets() would fire on group rows and every roll-up would
+      // double-count. A sheet is a child WHOSE PARENT IS ITSELF A DRAWING.
+      if (isNode(r))      { (nodeKidsOf[r.parent_id] = nodeKidsOf[r.parent_id] || []).push(r); return; }
+      if (isNode(p))      { (drawsOf[r.parent_id]    = drawsOf[r.parent_id]    || []).push(r); return; }
       (kidsOf[r.parent_id] = kidsOf[r.parent_id] || []).push(r);
     });
   }
   function sheetsOf(r){ return kidsOf[r.id] || []; }
   function hasSheets(r){ return !!(kidsOf[r.id] && kidsOf[r.id].length); }
-  function isSheet(r){ return !!(r.parent_id && rowById[r.parent_id]); }
+  function isSheet(r){
+    if (!r.parent_id) return false;
+    var p = rowById[r.parent_id];
+    return !!p && !isNode(p) && !isNode(r);
+  }
+  function nodeKids(n){ return nodeKidsOf[n.id] || []; }
+  function nodeDraws(n){ return drawsOf[n.id] || []; }
+  // The level-1 ancestor of any row — the top level whose rules it plays by.
+  function topLevelOf(r){
+    var seen = 0;
+    while (r && r.parent_id && seen++ < MAX_LEVEL + 4) {
+      var p = rowById[r.parent_id];
+      if (!p) break;
+      r = p;
+    }
+    return r || null;
+  }
+  // 'binary' | 'sheets'. The stored copy wins (every row carries one after 0017);
+  // otherwise it is derived from the top level's name, so an un-migrated row still
+  // behaves correctly instead of silently defaulting to partial credit.
+  function modeOf(r){
+    if (!r) return 'binary';
+    if (r.track_mode) return r.track_mode;
+    var t = topLevelOf(r);
+    return trackModeOfName((t && (t.phase || t.title)) || r.phase || '');
+  }
+  function isBinary(r){ return modeOf(r) === 'binary'; }
   function parentOf(r){ return r.parent_id ? (rowById[r.parent_id] || null) : null; }
   // Fields that belong to the WHOLE drawing, answered by the parent when a sheet
   // doesn't carry its own. The planned approval date is the headline case: the
@@ -1141,8 +1302,6 @@ window.DrawingRegister = (function () {
     return out;
   }
 
-  function phaseRank(p){ var i = PHASES.indexOf(p); return i === -1 ? 99 : i; }
-
   // ⚠️ DATA-LOSS GUARD. The Add/Edit form's drawing-type <select> used to be
   // built from PHASES alone, so a drawing whose type wasn't in that hardcoded
   // list had NO matching option — the select fell back to the blank "—" and
@@ -1161,77 +1320,100 @@ window.DrawingRegister = (function () {
   }
   var SEP = '';
 
-  // First-appearance order (by sort_order) so imported design iterations read
-  // in workbook order instead of being force-sorted into a fixed vocabulary.
-  function phaseOrderKey(ph){
-    var min = Infinity;
-    rows.forEach(function(r){ if((r.phase||'Ungrouped')===ph){ var s=r.sort_order||0; if(s<min) min=s; } });
-    return min===Infinity ? 1e9 : min;
-  }
   function nodeCode(n){ return n && n.dwg_number ? n.dwg_number : ''; }
 
   // Build an ordered flat display model that merges explicit structural node
   // rows (node_kind phase/discipline/category) with groups derived from the
   // drawings' phase/discipline/category text. Also fills `visibleIds`.
+  // ⚠️ REWRITTEN 2026-08-18 (migration 0017). This used to be a hardcoded THREE-level
+  // walk: it indexed nodes into pNode/dNode/cNode keyed by
+  // `phase + SEP + discipline + SEP + category`, bucketed drawings into a
+  // byP -> disc -> cat nesting, and emitted levels 1/2/3 with drawings at 3/4.
+  // SLN101 needs four grouping levels (Building > Trade > Category) and another
+  // project will want a different number, so depth now comes from `parent_id` and
+  // this is a plain recursion over it.
+  //
+  // ⚠️ COLLAPSE KEYS ARE NODE IDS ('G:'+id), not concatenated text. That also fixes
+  // two latent bugs the text keys carried: a rename had to rewrite its own collapse
+  // key by hand, and two same-named levels under different parents (Structural under
+  // both Temporary Works and Combined Services, which 0017 now creates) collided
+  // into one key and collapsed together.
   function buildModel() {
     var draws = filtered();
-    var nodes = structuralNodes();
-    var pNode={}, dNode={}, cNode={};
-    nodes.forEach(function (n){
-      if (n.node_kind==='phase')       pNode[n.phase||n.title||'(unnamed)'] = n;
-      else if (n.node_kind==='discipline') dNode[(n.phase||'')+SEP+(n.discipline||'')] = n;
-      else if (n.node_kind==='category')   cNode[(n.phase||'')+SEP+(n.discipline||'')+SEP+(n.category||'')] = n;
-    });
-
-    // group drawings
-    var byP = {};
-    draws.forEach(function (r) {
-      var ph=r.phase||'Ungrouped', d=r.discipline||'—', c=(r.category||'').trim();
-      var P=(byP[ph]=byP[ph]||{disc:{},order:[]});
-      var D=P.disc[d]; if(!D){ D=P.disc[d]={cat:{},order:[],nocat:[]}; P.order.push(d); }
-      if(c){ if(!D.cat[c]){ D.cat[c]=[]; D.order.push(c); } D.cat[c].push(r); } else D.nocat.push(r);
-    });
+    // Which drawings survive the filter — a node is kept when anything under it did.
+    var keep = {};
+    draws.forEach(function (r){ keep[r.id] = true; });
 
     var filt = anyFilter();
-    var phaseSet={}; Object.keys(pNode).forEach(function(p){phaseSet[p]=1;}); Object.keys(byP).forEach(function(p){phaseSet[p]=1;});
-    var phases=Object.keys(phaseSet).sort(function(a,b){return phaseOrderKey(a)-phaseOrderKey(b) || phaseRank(a)-phaseRank(b) || a.localeCompare(b);});
+    var disp = []; visibleIds = [];
 
-    var disp=[]; visibleIds=[];
-    phases.forEach(function (ph) {
-      var P=byP[ph]||{disc:{},order:[]};
-      var pDraws=collectDraws(P);
-      if (filt && !pDraws.length) return;
-      var pkey='P:'+ph;
-      disp.push({type:'phase',level:1,key:pkey,label:ph,code:nodeCode(pNode[ph]),ctx:{phase:ph},nodeId:node_(pNode[ph]),list:pDraws});
-      if (isCollapsed(pkey)) return;
-
-      var discSet={}; Object.keys(dNode).forEach(function(k){var p=k.split(SEP); if(p[0]===ph)discSet[p[1]]=1;});
-      (P.order||[]).forEach(function(d){discSet[d]=1;});
-      Object.keys(discSet).sort().forEach(function (d) {
-        var D=P.disc[d]||{cat:{},order:[],nocat:[]};
-        var dDraws=collectDisc(D);
-        if (filt && !dDraws.length) return;
-        var dkey='D:'+ph+'|'+d;
-        var dlabel=DISCIPLINES[d]?DISCIPLINES[d]+' ('+d+')':disciplineName(d);
-        disp.push({type:'disc',level:2,key:dkey,label:dlabel,code:nodeCode(dNode[ph+SEP+d]),ctx:{phase:ph,discipline:d},nodeId:node_(dNode[ph+SEP+d]),list:dDraws});
-        if (isCollapsed(dkey)) return;
-
-        // no-category drawings sit directly under the discipline (level 3)
-        regSortList(D.nocat).forEach(function(r){ pushDrawing(r, 3); });
-
-        var catSet={}; Object.keys(cNode).forEach(function(k){var p=k.split(SEP); if(p[0]===ph&&p[1]===d)catSet[p[2]]=1;});
-        (D.order||[]).forEach(function(c){catSet[c]=1;});
-        Object.keys(catSet).forEach(function (c) {
-          var list=D.cat[c]||[];
-          if (filt && !list.length) return;
-          var ckey='C:'+ph+'|'+d+'|'+c;
-          disp.push({type:'cat',level:3,key:ckey,label:c,code:nodeCode(cNode[ph+SEP+d+SEP+c]),ctx:{phase:ph,discipline:d,category:c},nodeId:node_(cNode[ph+SEP+d+SEP+c]),list:list});
-          if (isCollapsed(ckey)) return;
-          regSortList(list).forEach(function(r){ pushDrawing(r, 4); });
-        });
-      });
+    // Roots: level-1 nodes, ordered by the closed top-level list, then anything a
+    // register invented (or 0017 could not classify) by first appearance.
+    var roots = structuralNodes().filter(function (n){ return !n.parent_id; });
+    roots.sort(function (a, b){
+      var ra = topRank(nodeName(a)), rb = topRank(nodeName(b));
+      return ra - rb || (a.sort_order || 0) - (b.sort_order || 0)
+             || nodeName(a).localeCompare(nodeName(b));
     });
+
+    // Drawings whose level node is missing (deleted out from under them, or a
+    // queued offline re-parent replayed against a node someone else removed) would
+    // otherwise vanish from the register entirely. Same defensive stance as
+    // indexSheets(): show them at the end under their own heading rather than
+    // silently dropping real work.
+    var orphans = draws.filter(function (r){
+      return !isSheet(r) && (!r.parent_id || !rowById[r.parent_id]);
+    });
+
+    roots.forEach(function (n){ walk(n, 1); });
+
+    if (orphans.length) {
+      var okey = 'G:__orphans__';
+      disp.push({ type:'group', level:1, key:okey, label:'Unfiled drawings',
+                  code:'', ctx:{}, nodeId:null, list:orphans, orphan:true });
+      if (!isCollapsed(okey)) regSortList(orphans).forEach(function (r){ pushDrawing(r, 2); });
+    }
     return disp;
+
+    // ---- recursion ---------------------------------------------------------
+    function walk(node, level){
+      var list = collect(node);
+      // Under an active filter a level with nothing left in it is hidden entirely,
+      // exactly as the three-level version did.
+      if (filt && !list.length) return;
+      var key = 'G:' + node.id;
+      disp.push({ type:'group', level:level, key:key, label:nodeName(node),
+                  code:nodeCode(node), ctx:ctxOf(node), nodeId:node.id, list:list,
+                  node:node, trackMode:modeOf(node), unit:!!node.is_tracking_unit });
+      if (isCollapsed(key)) return;
+      // Drawings sitting directly in this level come before its sub-levels, so a
+      // level that mixes both reads top-down rather than hiding its own drawings
+      // below every child level.
+      regSortList(nodeDraws(node).filter(pass)).forEach(function (r){ pushDrawing(r, level + 1); });
+      if (level < MAX_LEVEL) {
+        sortNodes(nodeKids(node)).forEach(function (c){ walk(c, level + 1); });
+      }
+    }
+
+    function pass(r){ return !filt || keep[r.id]; }
+    function sortNodes(ns){
+      return ns.slice().sort(function (a, b){
+        return (a.sort_order || 0) - (b.sort_order || 0)
+               || nodeName(a).localeCompare(nodeName(b));
+      });
+    }
+    // Every drawing at or below this node, for the level row's own roll-up.
+    function collect(node){
+      var out = nodeDraws(node).filter(pass);
+      nodeKids(node).forEach(function (c){ out = out.concat(collect(c)); });
+      return out;
+    }
+    // The legacy text triple, still handed to the row so filters, the editor form
+    // and drill-through keep working unchanged.
+    function ctxOf(node){
+      return { phase: node.phase || null, discipline: node.discipline || null,
+               category: node.category || null, nodeId: node.id, level: node.level || null };
+    }
 
     // A drawing with sheets under it renders as its own collapsible level: the
     // drawing row still shows its code/title (and stays inline-editable), but its
@@ -1243,8 +1425,8 @@ window.DrawingRegister = (function () {
       if (!kids.length){ disp.push({type:'drawing',level:level,row:r}); visibleIds.push(r.id); return; }
       var shown = kids.filter(function (k){ return matchesFilters(k, {skipDups:true}); });
       // Under an active filter, keep the parent visible when it OR any of its
-      // sheets match — otherwise filtering by "Revise & Resubmit" would hide the
-      // very sheets you are looking for, because the parent's derived status is
+      // sheets match — otherwise filtering by "Resubmit" would hide the very
+      // sheets you are looking for, because the parent's derived status is
       // "In Progress".
       var skey = 'S:'+r.id;
       disp.push({type:'drawing',level:level,row:r,sheets:kids,shownSheets:shown,skey:skey});
@@ -1255,10 +1437,20 @@ window.DrawingRegister = (function () {
         visibleIds.push(k.id);
       });
     }
-
-    function node_(n){ return n ? n.id : null; }
-    function collectDraws(P){ var a=[]; Object.keys(P.disc).forEach(function(d){ a=a.concat(collectDisc(P.disc[d])); }); return a; }
-    function collectDisc(D){ var a=D.nocat.slice(); D.order.forEach(function(c){ a=a.concat(D.cat[c]); }); return a; }
+  }
+  // Display name of a level row: its own title, else the legacy text column that
+  // used to carry it, else a placeholder.
+  function nodeName(n){
+    return n.title || n.category || n.discipline || n.phase || '(unnamed)';
+  }
+  function isTopItem(x){ return x.type === 'group' && x.level === 1; }
+  // The stylesheet's group tints predate generic levels and are keyed by the three
+  // old names. Levels 1-3 keep them so nothing needs restyling; deeper levels reuse
+  // the 'cat' tint, and the real depth travels separately as --dr-depth/data-level.
+  function grpCls(level){ return level === 1 ? 'phase' : level === 2 ? 'disc' : 'cat'; }
+  function topRank(name){
+    var i = TOP_LEVELS.indexOf(name);
+    return i === -1 ? 99 : i;
   }
 
   function renderRegister() {
@@ -1269,8 +1461,8 @@ window.DrawingRegister = (function () {
     var shown = disp.filter(function(x){return x.type==='drawing';}).length;
 
     var CB = canWrite;
-    var anyOpen = disp.some(function (x){ return x.type==='phase' && !isCollapsed(x.key); });
-    var phaseItems = disp.filter(function(x){ return x.type==='phase'; });
+    var anyOpen = disp.some(function (x){ return isTopItem(x) && !isCollapsed(x.key); });
+    var phaseItems = disp.filter(isTopItem);
     var jump = phaseItems.length > 1 ?
       '<select class="pd-select pd-btn-sm dr-jump" id="dr-jump" title="Jump to a drawing type">' +
         '<option value="">Jump to drawing type…</option>' +
@@ -1359,9 +1551,9 @@ window.DrawingRegister = (function () {
     var grpCb = CB ? '<td class="dr-cb dr-freeze dr-freeze-cb"><input type="checkbox" data-selgrp="'+ids+'" title="Select group"></td>' : '';
     var isCol = isCollapsed(item.key);
     var caret = '<span class="dr-caret'+(isCol?' dr-caret-col':'')+'">'+ico('chevronDown',12)+'</span>';
-    return '<tr class="dr-grp dr-grp-'+item.type+' dr-lvl-'+item.level+(isCol?' dr-collapsed':'')+
-        (item.key===activeGrpKey?' dr-grpactive':'')+'"'+
-        ' data-grp="'+Fmt.esc(item.key)+'" data-kind="'+item.type+'" data-nodeid="'+(item.nodeId||'')+'"'+
+    return '<tr class="dr-grp dr-grp-'+grpCls(item.level)+' dr-lvl-'+Math.min(item.level,5)+(isCol?' dr-collapsed':'')+
+        (item.key===activeGrpKey?' dr-grpactive':'')+'" style="--dr-depth:'+item.level+'"'+
+        ' data-grp="'+Fmt.esc(item.key)+'" data-kind="'+grpCls(item.level)+'" data-level="'+item.level+'" data-nodeid="'+(item.nodeId||'')+'"'+
         ' data-phase="'+Fmt.esc(item.ctx.phase||'')+'" data-disc="'+Fmt.esc(item.ctx.discipline||'')+'" data-cat="'+Fmt.esc(item.ctx.category||'')+'">' + grpCb +
       '<td colspan="'+COLSPAN_LABEL+'" class="dr-indent dr-freeze dr-freeze-grp"><span class="dr-grplabel">'+caret+
         (item.code?'<span class="dr-gcode">'+Fmt.esc(item.code)+'</span> ':'')+
@@ -1479,7 +1671,7 @@ window.DrawingRegister = (function () {
 
     var xall = host.querySelector('#dr-xall');
     if (xall) xall.onclick = function(){
-      var pkeys = disp.filter(function(x){return x.type==='phase';}).map(function(x){return x.key;});
+      var pkeys = disp.filter(isTopItem).map(function(x){return x.key;});
       // Acts on whichever map is live, so "expand all" works during a filter too.
       var anyOpen = pkeys.some(function (k){ return !isCollapsed(k); });
       if (anyFilter()) { fCollapsed = {}; if (anyOpen) pkeys.forEach(function (k){ fCollapsed[k] = true; }); }
@@ -1651,11 +1843,11 @@ window.DrawingRegister = (function () {
   // --------------------------------------------------------- drag reorder ----
   // Reorder a drawing within its own group (Project Schedule's row drag).
   //
-  // Phase order is derived from each phase's MINIMUM sort_order (phaseOrderKey),
-  // so renumbering rows freely would silently reshuffle the phases. Instead we
-  // take the group's OWN existing sort_order values as a pool and re-deal them in
-  // the new order: the multiset of values per phase is unchanged, so the phase
-  // min — and therefore the phase order — cannot move. `rows` arrives ordered by
+  // Level order comes from each node's own sort_order, and a drawing's group is its
+  // parent node, so re-dealing values INSIDE one group is what keeps the tree
+  // stable. We take the group's OWN existing sort_order values as a pool and
+  // re-deal them in the new order: the multiset per group is unchanged, so no
+  // level's ordering relative to its siblings can move. `rows` arrives ordered by
   // sort_order (NULLs last), so the pool is already in display order and a NULL
   // simply re-deals to whichever row should sort last.
   async function reorderDrop(draggedId, targetId, before){
@@ -1712,13 +1904,19 @@ window.DrawingRegister = (function () {
     });
   }
 
+  // `nodeId` is the load-bearing field now (a level is a row, not a text triple);
+  // the phase/discipline/category triple is retained as a display convenience and
+  // for the legacy filters that still read it.
   function setContextFromRow(tr){
     if (tr.classList.contains('dr-drow')) {
       var r = rows.find(function(x){return x.id===tr.dataset.id;});
-      if (r) selCtx = { phase:r.phase||'', discipline:r.discipline||'', category:(r.category||'').trim(), level:4 };
+      if (r) selCtx = { phase:r.phase||'', discipline:r.discipline||'', category:(r.category||'').trim(),
+                        nodeId: r.parent_id && isNode(rowById[r.parent_id]) ? r.parent_id : null,
+                        level: null };
     } else {
       selCtx = { phase:tr.dataset.phase||'', discipline:tr.dataset.disc||'', category:tr.dataset.cat||'',
-                 level: tr.dataset.kind==='phase'?1 : tr.dataset.kind==='disc'?2 : 3 };
+                 nodeId: tr.dataset.nodeid || null,
+                 level: +(tr.dataset.level || 0) || null };
     }
   }
 
@@ -1837,8 +2035,10 @@ window.DrawingRegister = (function () {
 
   // ----------------------------------------------- rename a structural level --
   function beginRenameGroup(tr, glabel){
-    var kind=tr.dataset.kind;
-    var oldLabel = kind==='phase'?tr.dataset.phase : kind==='disc'?tr.dataset.disc : tr.dataset.cat;
+    var nodeId = tr.dataset.nodeid;
+    var node = nodeId ? rowById[nodeId] : null;
+    if (!node){ UI.toast('This level has no row to rename','warn'); return; }
+    var oldLabel = nodeName(node);
     var input=document.createElement('input'); input.className='dr-editin'; input.value=oldLabel||'';
     glabel.replaceWith(input); input.focus(); input.select();
     var done=false;
@@ -1846,61 +2046,128 @@ window.DrawingRegister = (function () {
       if (done) return; done=true;
       var v=input.value.trim();
       if (!save || !v || v===oldLabel){ render(); return; }
-      renameGroup(tr.dataset, kind, oldLabel, v).then(function(){ load(); });
+      renameGroup(nodeId, v).then(function(){ load(); });
     }
     input.onkeydown=function(e){ if(e.key==='Enter'){e.preventDefault();commit(true);} else if(e.key==='Escape'){e.preventDefault();commit(false);} };
     input.onblur=function(){ commit(true); };
   }
 
-  async function renameGroup(ds, kind, oldVal, newVal){
-    var patch = kind==='phase'?{phase:newVal} : kind==='disc'?{discipline:newVal} : {category:newVal};
-    var q = sb().from(TABLE).update(patch).eq('project_id', pid);
-    if (kind==='phase') q=q.eq('phase', oldVal);
-    else if (kind==='disc') q=q.eq('phase', ds.phase).eq('discipline', oldVal);
-    else q=q.eq('phase', ds.phase).eq('discipline', ds.disc).eq('category', oldVal);
-    var res=await q; if (res.error) UI.toast(res.error.message,'error');
-    // keep collapse state under the renamed key
-    if (kind==='phase'){ if(collapsed['P:'+oldVal]){ collapsed['P:'+newVal]=true; delete collapsed['P:'+oldVal]; } }
+  // ⚠️ Was a BULK TEXT UPDATE across every drawing whose phase/discipline/category
+  // matched — which is why two same-named levels under different parents could not
+  // be renamed independently, and why the collapse key had to be migrated by hand.
+  // A level is now one row, so a rename is one row's title.
+  async function renameGroup(nodeId, newVal){
+    var node = rowById[nodeId];
+    if (!node) return;
+    var patch = { title: newVal };
+    // Keep the legacy text mirror in step, so the Discipline filter, the progress
+    // tables, the Excel export and the cross-app Design Development sync (which
+    // keys off `discipline`) all keep seeing the name the user sees.
+    var lvl = node.level || 1;
+    if (lvl === 1) { UI.toast('The four drawing types are fixed and cannot be renamed','warn'); return; }
+    if (lvl === 2) patch.discipline = newVal; else patch.category = newVal;
+    var res = await sb().from(TABLE).update(patch).eq('id', nodeId);
+    if (res.error){ UI.toast(res.error.message,'error'); return; }
+    // Descendant drawings mirror the same text columns, so they follow the rename.
+    var col = lvl === 2 ? 'discipline' : 'category';
+    var kidIds = descendantIds(node).filter(function (id){ return id !== nodeId; });
+    if (kidIds.length) {
+      var patch2 = {}; patch2[col] = newVal;
+      for (var i = 0; i < kidIds.length; i += 200) {
+        var res2 = await sb().from(TABLE).update(patch2).in('id', kidIds.slice(i, i+200));
+        if (res2.error){ UI.toast(res2.error.message,'error'); return; }
+      }
+    }
+    // No collapse-key migration needed any more — the key is the node id.
+  }
+  // Every row at or below a node, nodes and drawings and sheets alike.
+  function descendantIds(node){
+    var out = [node.id];
+    (nodeKidsOf[node.id] || []).forEach(function (c){ out = out.concat(descendantIds(c)); });
+    (drawsOf[node.id]    || []).forEach(function (d){
+      out.push(d.id);
+      (kidsOf[d.id] || []).forEach(function (sh){ out.push(sh.id); });
+    });
+    return out;
   }
 
   // Delete a whole level (phase / discipline / category) and everything under it.
+  // ⚠️ Was a BULK TEXT DELETE, which stranded any row whose text no longer matched
+  // (a renamed sheet child survived its own deleted level). `parent_id` is
+  // `on delete cascade`, so deleting the one node now removes its sub-tree.
+  //
+  // ⚠️ THE CASCADE IS SILENT, so the uploaded revision files have to be collected
+  // FIRST. allFilesOf() only ever recursed into sheets, so without this sweep every
+  // file under a deleted level would be orphaned in the storage bucket with nothing
+  // left pointing at it.
   async function deleteLevel(ds){
-    var kind=ds.kind, label = kind==='phase'?ds.phase : kind==='disc'?ds.disc : ds.cat;
-    // count affected drawings for the confirm message
-    var n = drawingRows().filter(function(r){
-      if (kind==='phase') return (r.phase||'')===ds.phase;
-      if (kind==='disc')  return (r.phase||'')===ds.phase && (r.discipline||'')===ds.disc;
-      return (r.phase||'')===ds.phase && (r.discipline||'')===ds.disc && ((r.category||'').trim())===ds.cat;
-    }).length;
-    if (!confirm('Delete "'+label+'" and everything under it'+(n?' ('+n+' drawing'+(n>1?'s':'')+')':'')+'? This cannot be undone.')) return;
-    var q = sb().from(TABLE).delete().eq('project_id', pid);
-    if (kind==='phase') q=q.eq('phase', ds.phase);
-    else if (kind==='disc') q=q.eq('phase', ds.phase).eq('discipline', ds.disc);
-    else q=q.eq('phase', ds.phase).eq('discipline', ds.disc).eq('category', ds.cat);
-    var res=await q; if (res.error){ UI.toast(res.error.message,'error'); return; }
+    var node = ds.nodeid ? rowById[ds.nodeid] : null;
+    if (!node){ UI.toast('Select a level to delete','warn'); return; }
+    if ((node.level || 1) === 1){
+      UI.toast('The four drawing types are fixed — delete the levels inside it instead','warn');
+      return;
+    }
+    var ids = descendantIds(node);
+    var nDraw = ids.filter(function (id){ var r = rowById[id]; return r && !isNode(r); }).length;
+    if (!confirm('Delete "'+nodeName(node)+'" and everything under it'+
+                 (nDraw?' ('+nDraw+' drawing'+(nDraw>1?'s':'')+')':'')+'? This cannot be undone.')) return;
+    var files = [];
+    ids.forEach(function (id){
+      var r = rowById[id];
+      if (r && !isNode(r)) files = files.concat(allFilesOf(r));
+    });
+    var res = await sb().from(TABLE).delete().eq('id', node.id);
+    if (res.error){ UI.toast(res.error.message,'error'); return; }
+    if (files.length) await removeFiles(files);
     UI.toast('Deleted', 'ok'); load();
   }
 
   // ------------------------------------------------ add levels / drawings -----
   function nextOrder(){ return (rows.length ? Math.max.apply(null, rows.map(function(x){return x.sort_order||0;})) : 0) + 1; }
   function phaseNames(){ var s={}; rows.forEach(function(r){ if(r.phase)s[r.phase]=1; }); return Object.keys(s); }
-  function discNames(ph){ var s={}; rows.forEach(function(r){ if((r.phase||'')===ph && r.discipline)s[r.discipline]=1; }); return Object.keys(s); }
-  function catNames(ph,d){ var s={}; rows.forEach(function(r){ if((r.phase||'')===ph&&(r.discipline||'')===d&&r.category)s[r.category]=1; }); return Object.keys(s); }
+  // Names already used by a node's own children — the only scope a new level has to
+  // be unique within, now that identity is the parent id rather than a text triple.
+  function siblingNames(parentId){
+    return structuralNodes()
+      .filter(function (n){ return (n.parent_id || null) === (parentId || null); })
+      .map(nodeName);
+  }
   function uniqueName(base, taken){ var n=base, i=2; while(taken.indexOf(n)!==-1){ n=base+' '+(i++); } return n; }
 
-  async function addLevel(kind){
+  // ⚠️ Was addLevel(kind) with kind in phase|discipline|category, i.e. depth was
+  // declared in code. Now depth is created by the USER: this adds a child ONE LEVEL
+  // BELOW whichever level row is selected, to any depth, and the level's meaning is
+  // whatever that project named it in drawing_level_defs.
+  // The four top levels are fixed and cannot be added to (migration 0017).
+  async function addLevel(){
     if (!pid){ UI.toast('Select a project first','warn'); return; }
-    var ctx=selCtx||{};
-    var data={ project_id:pid, created_by:uid, node_kind:kind, no_of_sheets:0, approved_sheets:0, sort_order:nextOrder() };
-    if (kind==='phase'){ data.phase=uniqueName('New Phase', phaseNames()); }
-    else if (kind==='discipline'){ if(!ctx.phase){ UI.toast('Select a phase first','warn'); return; } data.phase=ctx.phase; data.discipline=uniqueName('New Discipline', discNames(ctx.phase)); }
-    else if (kind==='category'){ if(!ctx.phase||!ctx.discipline){ UI.toast('Select a discipline first','warn'); return; } data.phase=ctx.phase; data.discipline=ctx.discipline; data.category=uniqueName('New Category', catNames(ctx.phase,ctx.discipline)); }
-    data.title = data.category||data.discipline||data.phase;
+    var ctx = selCtx || {};
+    var parent = ctx.nodeId ? rowById[ctx.nodeId] : null;
+    if (!parent || !isNode(parent)) {
+      UI.toast('Select a level first — a sublevel is added inside the level you pick','warn');
+      return;
+    }
+    var level = (parent.level || 1) + 1;
+    if (level > MAX_LEVEL){ UI.toast('Maximum nesting depth reached ('+MAX_LEVEL+' levels)','warn'); return; }
+    var label = uniqueName('New ' + levelLabel(level), siblingNames(parent.id));
+    var data = {
+      project_id:pid, created_by:uid,
+      // node_kind stays in the legacy vocabulary so isNode() and the existing
+      // stylesheet keep working; `level` is what actually carries depth now.
+      node_kind: level === 2 ? 'discipline' : 'category',
+      level: level, parent_id: parent.id, title: label,
+      // The legacy text columns are still mirrored so filters, the editor form and
+      // the Excel export keep reading the same fields they always have.
+      phase: parent.phase || null,
+      discipline: level === 2 ? label : (parent.discipline || null),
+      category: level >= 3 ? label : null,
+      track_mode: modeOf(parent),
+      no_of_sheets:0, approved_sheets:0, sort_order:nextOrder()
+    };
     var res=await sb().from(TABLE).insert(data); if(res.error){ UI.toast(res.error.message,'error'); return; }
-    if (kind!=='phase') delete collapsed['P:'+ctx.phase];
-    if (kind==='category') delete collapsed['D:'+ctx.phase+'|'+ctx.discipline];
+    delete collapsed['G:'+parent.id];        // reveal the level we just added into
     await load();
-    UI.toast(NODE_LABELS[kind]+' added — double-click its name to rename', 'ok');
+    UI.toast(levelLabel(level)+' added — double-click its name to rename', 'ok');
   }
 
   function autoNumber(group, ctx){

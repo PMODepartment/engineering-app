@@ -30,11 +30,10 @@
           <button class="pd-btn dr-tb-labeled pd-btn-primary" id="dr-add" data-perm="create" title="Add a drawing under the selected level (Enter)">+ Add</button>
           <div class="dr-menuwrap">
             <button class="pd-btn dr-tb-labeled" id="dr-addlevel" data-perm="create" style="display:none;">+ Level <span data-ico="chevronDown" data-ico-size="13"></span></button>
-            <div class="dr-menu" id="dr-addlevel-menu" hidden>
-              <button data-add="phase">Drawing Type</button>
-              <button data-add="discipline">Discipline</button>
-              <button data-add="category">Category</button>
-            </div>
+            <!-- Built at click time by module.js: the four drawing types are fixed
+                 (migration 0017), so this offers "add a sublevel inside the selected
+                 level" plus the per-project level-name editor. -->
+            <div class="dr-menu" id="dr-addlevel-menu" hidden></div>
           </div>
           <span class="dr-tb-sep"></span>
           <button class="pd-btn" id="dr-import" data-perm="create" title="Import from Excel"><span data-ico="upload" data-ico-size="16"></span></button>
