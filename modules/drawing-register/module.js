@@ -137,13 +137,35 @@ window.DrawingRegister = (function () {
   // sequence that doesn't exist. The stored column is still `phase` — renaming
   // it would need a migration across every register for no functional gain —
   // but every user-facing label says "drawing type".
-  // This list only supplies the DISPLAY ORDER and the default dropdown options;
-  // any value actually present in a project is picked up dynamically, so a
-  // register using its own names (GPR101's "For Construction Drawings (FCD)")
-  // still orders by first appearance via phaseOrderKey().
-  var PHASES = ['Concept Design','Schematic Design','For Construction Drawing',
-                'Temporary Works Drawing','Individual Services Drawing',
-                'Combined Services Drawing','As-Built Drawing'];
+  // This list supplies the DISPLAY ORDER and the default dropdown options; a value
+  // migration 0017 could not classify still appears (ranked last) rather than being
+  // dropped, so nothing is ever hidden by not being in the vocabulary.
+  // ⚠️ CLOSED SET OF FOUR (2026-08-18, migration 0017). Was seven, which mixed
+  // design stages with document types. What changed and why it must not drift back:
+  //   • Schematic Design 1 and 2 (LOD 100 / LOD 200) MERGE COMPLETELY — one level.
+  //     The workbook's own registry carries both; the merge is deliberate.
+  //   • Temporary Works, Combined Services and As-Built are NO LONGER top levels.
+  //     They are level-2 children of For Construction Drawings, because they are
+  //     produced FOR construction rather than being stages of their own.
+  //   • "(Scheme 1)" / "(Scheme 2)" were never stages either — they are `scope`
+  //     (Main Contract / Change Order). Scheme 1 is RETAINED even when superseded,
+  //     because it is the baseline a change order's cost and time impact is
+  //     measured against.
+  // The stored column is still `phase` (renaming it would need a migration across
+  // every register for no functional gain), but every user-facing label reads
+  // "drawing type", and TOP_LEVELS is the display order.
+  var TOP_LEVELS = ['Concept Design','Schematic Design',
+                    'For Construction Drawings','Individual Services Drawings'];
+  // Progress semantics per top level, and they cannot share a percentage:
+  //   'sheets' → a leaf carries many sheets with PARTIAL credit (ISD: the real
+  //              workbook has "Rebar Cutting List" at 83 sheets / 50 approved).
+  //   'binary' → a leaf is one sheet, approved or not. The 0-or-100 unit is a NODE
+  //              the technical officer designates (typically the trade), and a
+  //              parent's percent is approved units / total units, EQUAL WEIGHT.
+  var TRACK_MODE = { 'Individual Services Drawings':'sheets' };   // default 'binary'
+  function trackModeOfName(name){ return TRACK_MODE[name] || 'binary'; }
+  // Kept as an alias so the many `PHASES`-era call sites keep reading naturally.
+  var PHASES = TOP_LEVELS;
   // Order = the actual lifecycle:
   //   Not Started → In Progress → Submitted → Approved w/ comments
   //                     ↺ Resubmit          → Approved  → Cancelled
@@ -167,6 +189,74 @@ window.DrawingRegister = (function () {
   // Canonical display value for whatever is stored on a row.
   function statusOf(s){ return (s && LEGACY_STATUS[s]) || s || ''; }
   function statusLabel(s){ return statusOf(s) || NOT_STARTED; }
+  // ---- Level names ---------------------------------------------------------
+  // Level 1 is the fixed top level. Levels 2..N are USER-DEFINED per project and
+  // named in `drawing_level_defs` (migration 0017) — SLN101 uses Building › Trade
+  // › Category, another project can use anything at any depth. `levelDefs` is
+  // loaded per project; a level with no row falls back to "Level N", so an
+  // unconfigured project still works.
+  var levelDefs = {};                 // level_no -> label
+  var MAX_LEVEL = 12;                 // matches the CHECK in drawing_level_defs
+  function levelLabel(n){
+    if (n <= 1) return 'Drawing Type';
+    return levelDefs[n] || ('Level ' + n);
+  }
+  var LEVEL_TABLE = 'drawing_level_defs';
+  async function loadLevelDefs(){
+    levelDefs = {};
+    if (!pid) return;
+    var res = await sb().from(LEVEL_TABLE).select('level_no,label').eq('project_id', pid);
+    // Deploy-order safe: the module must keep working before migration 0017 is run,
+    // so a missing table just means "no names configured" and every level falls back
+    // to "Level N" rather than the register failing to render.
+    if (res.error) return;
+    (res.data || []).forEach(function (d){ levelDefs[d.level_no] = d.label; });
+  }
+  // The per-project level-name editor — this is what makes the sublevels
+  // user-defined rather than hardcoded. It names levels 2..deepest-in-use, plus one
+  // spare so a level can be named before it exists.
+  function openLevelNames(){
+    if (!pid){ UI.toast('Select a project first','warn'); return; }
+    var deepest = 1;
+    structuralNodes().forEach(function (n){ if ((n.level||1) > deepest) deepest = n.level; });
+    var upto = Math.min(Math.max(deepest + 1, 4), MAX_LEVEL);
+    var body = '';
+    for (var n = 2; n <= upto; n++) {
+      body += field('Level ' + n,
+        '<input class="pd-input" id="f-lvl-' + n + '" maxlength="40" value="' +
+        Fmt.esc(levelDefs[n] || '') + '" placeholder="' + Fmt.esc(levelLabel(n)) + '">');
+    }
+    var m = UI.modal(
+      '<h2 style="margin-top:0;">Name the levels</h2>' +
+      '<p class="dr-mut" style="margin-top:0;">The four drawing types are fixed. Everything below them is ' +
+      'yours to structure — name the levels to match how this project is actually broken down ' +
+      '(SLN101 uses <strong>Building › Trade › Category</strong>). Blank falls back to “Level N”.</p>' +
+      body +
+      '<div style="text-align:right;margin-top:14px;"><button class="pd-btn" id="f-lvl-cancel" type="button">Cancel</button> ' +
+      '<button class="pd-btn pd-btn-primary" id="f-lvl-save" type="button">Save</button></div>');
+    m.el.querySelector('#f-lvl-cancel').onclick = m.close;
+    m.el.querySelector('#f-lvl-save').onclick = async function (){
+      var ups = [], dels = [];
+      for (var n = 2; n <= upto; n++) {
+        var el = m.el.querySelector('#f-lvl-' + n); if (!el) continue;
+        var v = el.value.trim();
+        if (v) ups.push({ project_id: pid, level_no: n, label: v, sort_order: n, created_by: uid });
+        else if (levelDefs[n]) dels.push(n);
+      }
+      if (ups.length) {
+        var r1 = await sb().from(LEVEL_TABLE).upsert(ups, { onConflict: 'project_id,level_no' });
+        if (r1.error){ UI.toast(r1.error.message,'error'); return; }
+      }
+      if (dels.length) {
+        var r2 = await sb().from(LEVEL_TABLE).delete().eq('project_id', pid).in('level_no', dels);
+        if (r2.error){ UI.toast(r2.error.message,'error'); return; }
+      }
+      m.close();
+      await loadLevelDefs();
+      render();
+      UI.toast('Level names saved','ok');
+    };
+  }
   var NODE_LABELS = { phase:'Drawing Type', discipline:'Discipline', category:'Category', drawing:'Drawing' };
 
   // selection ordering (display order of drawing ids) for shift-click + arrows
@@ -239,8 +329,13 @@ window.DrawingRegister = (function () {
 
   // A drawing's group = the phase → discipline → category bucket it renders in
   // (same keys buildModel() groups by). Reordering never crosses a group.
+  // A drawing's group is now literally its level node, so drag-reorder identity is
+  // the parent id. The old three-part text key could not tell apart two same-named
+  // levels under different parents (Structural under both Temporary Works and
+  // Combined Services, which migration 0017 creates), so a drag could silently
+  // re-deal sort_order across two unrelated groups.
   function groupKeyOf(r){
-    return (r.phase||'Ungrouped') + '|' + (r.discipline||'—') + '|' + ((r.category||'').trim());
+    return r.parent_id || ('T|' + (r.phase || 'Ungrouped'));
   }
 
   // buildModel() walks `rows` in ARRAY order, which is only the sort_order order
@@ -403,18 +498,41 @@ window.DrawingRegister = (function () {
       if (view !== 'registry') { view = 'registry'; saveUI(); render(); }
       setTimeout(function () { window.print(); }, 60);
     };
+    var fitBtn = document.getElementById('dr-fitcols');
+    if (fitBtn) fitBtn.onclick = autofitAll;
+    var rstBtn = document.getElementById('dr-resetcols');
+    if (rstBtn) rstBtn.onclick = resetColWidths;
     var clearBtn = document.getElementById('dr-clear');
     if (clearBtn) { clearBtn.style.display = canWrite ? '' : 'none'; clearBtn.onclick = clearAll; }
-    // "+ Level" menu: build the phase/discipline/category skeleton
+    // "+ Level" menu: add a sublevel inside the selected level, or name the levels
     var lvlBtn = document.getElementById('dr-addlevel'), lvlMenu = document.getElementById('dr-addlevel-menu');
     if (lvlBtn) {
       lvlBtn.style.display = canWrite ? '' : 'none';
       if (!canWrite && document.getElementById('dr-add')) document.getElementById('dr-add').style.display='none';
-      lvlBtn.onclick = function (e){ e.stopPropagation(); lvlMenu.hidden = !lvlMenu.hidden; };
+      // ⚠️ Rebuilt on every open, not once at wire-up: what it offers depends on
+      // which level is selected and on this project's own level names, both of
+      // which change while the page is open.
+      lvlBtn.onclick = function (e){
+        e.stopPropagation();
+        if (!lvlMenu.hidden){ lvlMenu.hidden = true; return; }
+        var ctx = selCtx || {};
+        var parent = ctx.nodeId ? rowById[ctx.nodeId] : null;
+        var lvl = parent ? (parent.level || 1) + 1 : 0;
+        lvlMenu.innerHTML =
+          (parent && lvl <= MAX_LEVEL
+            ? '<button data-act="add">Add ' + Fmt.esc(levelLabel(lvl)) +
+              ' inside “' + Fmt.esc(nodeName(parent)) + '”</button>'
+            : '<button disabled title="Click a level row first">Select a level to add inside</button>') +
+          '<button data-act="names">Name levels…</button>';
+        lvlMenu.querySelectorAll('[data-act]').forEach(function (b){
+          b.onclick = function (){
+            lvlMenu.hidden = true;
+            if (b.dataset.act === 'add') addLevel(); else openLevelNames();
+          };
+        });
+        lvlMenu.hidden = false;
+      };
       document.addEventListener('click', function(){ if (lvlMenu) lvlMenu.hidden = true; });
-      lvlMenu.querySelectorAll('[data-add]').forEach(function (b){
-        b.onclick = function(){ lvlMenu.hidden = true; addLevel(b.dataset.add); };
-      });
     }
     document.getElementById('dr-project').onchange = function (e) {
       pid = e.target.value; sessionStorage.setItem('pd_project', pid);
@@ -571,14 +689,21 @@ window.DrawingRegister = (function () {
     });
     rows = all;
     if (!fromCache && window.PDSync) PDSync.cachePut('dr:' + pid, all);   // refresh the offline cache
+    await loadLevelDefs();
     if (opts.reset) {
       // fresh view (project switch / import / clear): reset selection; restore
       // the saved per-project view + collapse state, else default to phases collapsed
-      selected = {}; lastClickedId = null; selCtx = { phase:'', discipline:'', category:'', level:0 };
+      selected = {}; lastClickedId = null;
+      selCtx = { phase:'', discipline:'', category:'', nodeId:null, level:null };
       collapsed = {}; fCollapsed = {};
       bkAging = '';        // a drill-through aging filter must not leak across projects
       bkShowAll = false;
-      if (!restoreUI()) rows.forEach(function (r){ collapsed['P:' + (r.phase || 'Ungrouped')] = true; });
+      // Collapse keys are node ids now, so the default collapses the level-1 ROWS
+      // rather than a text key that no longer exists.
+      if (!restoreUI()) {
+        indexSheets();
+        rows.forEach(function (r){ if (isNode(r) && !r.parent_id) collapsed['G:' + r.id] = true; });
+      }
     }
     render();
   }
@@ -643,22 +768,62 @@ window.DrawingRegister = (function () {
   // the same `no_of_sheets`/`approved_sheets` fields they always did.
   var kidsOf = {};          // parent id -> [sheet rows], in display order
   var rowById = {};
+  var nodeKidsOf = {};      // node id -> [child GROUP nodes]
+  var drawsOf    = {};      // node id -> [child DRAWINGS]
   function indexSheets(){
-    kidsOf = {}; rowById = {};
+    kidsOf = {}; rowById = {}; nodeKidsOf = {}; drawsOf = {};
     rows.forEach(function (r){ rowById[r.id] = r; });
     rows.forEach(function (r){
-      if (!r.parent_id || isNode(r)) return;
+      if (!r.parent_id) return;
       // Defensive: a child whose parent is missing (deleted out from under it, or
       // filtered out of a partial cache) must not vanish from the register — it is
       // re-adopted as a plain drawing by leaving it out of the index, since
       // drawingRows() only excludes rows whose parent actually exists.
-      if (!rowById[r.parent_id]) return;
+      var p = rowById[r.parent_id];
+      if (!p) return;
+      // ⚠️ `parent_id` now carries THREE kinds of edge (migration 0017), and which
+      // one it is depends on the PARENT, not on the child:
+      //   group  -> group    the level tree
+      //   group  -> drawing  a drawing sitting in its level
+      //   drawing-> drawing  a SHEET of that drawing
+      // Before 0017 only the last existed, so "has a parent_id" meant "is a sheet".
+      // Keeping that test would have made every drawing a phantom sheet of its own
+      // level node — hasSheets() would fire on group rows and every roll-up would
+      // double-count. A sheet is a child WHOSE PARENT IS ITSELF A DRAWING.
+      if (isNode(r))      { (nodeKidsOf[r.parent_id] = nodeKidsOf[r.parent_id] || []).push(r); return; }
+      if (isNode(p))      { (drawsOf[r.parent_id]    = drawsOf[r.parent_id]    || []).push(r); return; }
       (kidsOf[r.parent_id] = kidsOf[r.parent_id] || []).push(r);
     });
   }
   function sheetsOf(r){ return kidsOf[r.id] || []; }
   function hasSheets(r){ return !!(kidsOf[r.id] && kidsOf[r.id].length); }
-  function isSheet(r){ return !!(r.parent_id && rowById[r.parent_id]); }
+  function isSheet(r){
+    if (!r.parent_id) return false;
+    var p = rowById[r.parent_id];
+    return !!p && !isNode(p) && !isNode(r);
+  }
+  function nodeKids(n){ return nodeKidsOf[n.id] || []; }
+  function nodeDraws(n){ return drawsOf[n.id] || []; }
+  // The level-1 ancestor of any row — the top level whose rules it plays by.
+  function topLevelOf(r){
+    var seen = 0;
+    while (r && r.parent_id && seen++ < MAX_LEVEL + 4) {
+      var p = rowById[r.parent_id];
+      if (!p) break;
+      r = p;
+    }
+    return r || null;
+  }
+  // 'binary' | 'sheets'. The stored copy wins (every row carries one after 0017);
+  // otherwise it is derived from the top level's name, so an un-migrated row still
+  // behaves correctly instead of silently defaulting to partial credit.
+  function modeOf(r){
+    if (!r) return 'binary';
+    if (r.track_mode) return r.track_mode;
+    var t = topLevelOf(r);
+    return trackModeOfName((t && (t.phase || t.title)) || r.phase || '');
+  }
+  function isBinary(r){ return modeOf(r) === 'binary'; }
   function parentOf(r){ return r.parent_id ? (rowById[r.parent_id] || null) : null; }
   // Fields that belong to the WHOLE drawing, answered by the parent when a sheet
   // doesn't carry its own. The planned approval date is the headline case: the
@@ -706,6 +871,72 @@ window.DrawingRegister = (function () {
     return { tot: tot, ap: ap, pct: tot ? Math.round(ap / tot * 100) : 0,
              minPlanned: minPlanned, maxActual: allAppr ? maxActual : null, allApproved: allAppr };
   }
+  // ---- BINARY progress: equal-weight tracking units --------------------------
+  // ⚠️ rollup() above is SHEET-WEIGHTED, which is right for Individual Services
+  // Drawings and wrong for the other three. There a drawing is one sheet, approved
+  // or not, and progress is counted in UNITS the technical officer designates —
+  // typically the trade node ("Architectural Drawings 0 → 100"). A unit carries the
+  // same weight whatever its size, so a trade with 40 drawings does not drown one
+  // with 3.
+  //
+  // A unit is approved only when EVERY drawing beneath it is approved (and there is
+  // at least one): a level row is a promise about a body of work, so it is not
+  // partially kept.
+  function unitApproved(u){
+    if (!isNode(u)) return isApprovedStatus(statusOf(u.status));
+    var list = drawsUnder(u);
+    if (!list.length) return false;
+    return list.every(function (r){ return isApprovedStatus(statusOf(r.status)); });
+  }
+  function drawsUnder(node){
+    var out = (drawsOf[node.id] || []).slice();
+    (nodeKidsOf[node.id] || []).forEach(function (c){ out = out.concat(drawsUnder(c)); });
+    return out;
+  }
+  // The tracking units at or below a node. A flagged node IS the unit, so the walk
+  // stops there — otherwise a unit would also count its own descendants and the
+  // percentages would not sum to 100.
+  //
+  // ⚠️ FALLBACK, and it must not be sheet-based. With nothing flagged, every leaf
+  // DRAWING is its own unit. Falling back to sheet counts would give a For
+  // Construction drawing with 12 sheets and 7 approved a 58% partial credit, which
+  // is precisely what "0 or 100 only" forbids.
+  function trackingUnitsUnder(node){
+    if (node.is_tracking_unit) return [node];
+    var out = [];
+    (nodeKidsOf[node.id] || []).forEach(function (c){ out = out.concat(trackingUnitsUnder(c)); });
+    // A drawing sitting loose in an unflagged level still has to count for
+    // something, so it is its own unit — otherwise its work would be invisible in a
+    // branch that mixes flagged sub-levels with directly-held drawings.
+    (drawsOf[node.id] || []).forEach(function (d){ out.push(d); });
+    return out;
+  }
+  function usingUnitFallback(node){
+    return !hasFlaggedUnit(node);
+  }
+  function hasFlaggedUnit(node){
+    if (node.is_tracking_unit) return true;
+    return (nodeKidsOf[node.id] || []).some(hasFlaggedUnit);
+  }
+  // Roll-up for a level row, in whichever mode its top level uses. Returns the same
+  // shape either way so groupRowHTML and the progress tables don't have to care:
+  // `tot`/`ap` are sheets in 'sheets' mode and UNITS in 'binary' mode, and `unitMode`
+  // says which so the UI can label the columns honestly.
+  function rollupFor(node, list){
+    var dates = rollup(list);
+    if (!node || modeOf(node) !== 'binary') {
+      return { tot:dates.tot, ap:dates.ap, pct:dates.pct, unitMode:false,
+               minPlanned:dates.minPlanned, maxActual:dates.maxActual,
+               allApproved:dates.allApproved, fallback:false };
+    }
+    var units = trackingUnitsUnder(node);
+    var ap = units.filter(unitApproved).length;
+    var tot = units.length;
+    return { tot:tot, ap:ap, pct: tot ? Math.round(ap / tot * 100) : 0, unitMode:true,
+             minPlanned:dates.minPlanned, maxActual:dates.maxActual,
+             allApproved: tot > 0 && ap >= tot, fallback: usingUnitFallback(node) };
+  }
+
   // Shared with agingDays()'s guard: a legacy import sentinel like "2000-01-06" is
   // not a real date and must not win a min()/max().
   function validDate(d){
@@ -1141,8 +1372,6 @@ window.DrawingRegister = (function () {
     return out;
   }
 
-  function phaseRank(p){ var i = PHASES.indexOf(p); return i === -1 ? 99 : i; }
-
   // ⚠️ DATA-LOSS GUARD. The Add/Edit form's drawing-type <select> used to be
   // built from PHASES alone, so a drawing whose type wasn't in that hardcoded
   // list had NO matching option — the select fell back to the blank "—" and
@@ -1161,77 +1390,100 @@ window.DrawingRegister = (function () {
   }
   var SEP = '';
 
-  // First-appearance order (by sort_order) so imported design iterations read
-  // in workbook order instead of being force-sorted into a fixed vocabulary.
-  function phaseOrderKey(ph){
-    var min = Infinity;
-    rows.forEach(function(r){ if((r.phase||'Ungrouped')===ph){ var s=r.sort_order||0; if(s<min) min=s; } });
-    return min===Infinity ? 1e9 : min;
-  }
   function nodeCode(n){ return n && n.dwg_number ? n.dwg_number : ''; }
 
   // Build an ordered flat display model that merges explicit structural node
   // rows (node_kind phase/discipline/category) with groups derived from the
   // drawings' phase/discipline/category text. Also fills `visibleIds`.
+  // ⚠️ REWRITTEN 2026-08-18 (migration 0017). This used to be a hardcoded THREE-level
+  // walk: it indexed nodes into pNode/dNode/cNode keyed by
+  // `phase + SEP + discipline + SEP + category`, bucketed drawings into a
+  // byP -> disc -> cat nesting, and emitted levels 1/2/3 with drawings at 3/4.
+  // SLN101 needs four grouping levels (Building > Trade > Category) and another
+  // project will want a different number, so depth now comes from `parent_id` and
+  // this is a plain recursion over it.
+  //
+  // ⚠️ COLLAPSE KEYS ARE NODE IDS ('G:'+id), not concatenated text. That also fixes
+  // two latent bugs the text keys carried: a rename had to rewrite its own collapse
+  // key by hand, and two same-named levels under different parents (Structural under
+  // both Temporary Works and Combined Services, which 0017 now creates) collided
+  // into one key and collapsed together.
   function buildModel() {
     var draws = filtered();
-    var nodes = structuralNodes();
-    var pNode={}, dNode={}, cNode={};
-    nodes.forEach(function (n){
-      if (n.node_kind==='phase')       pNode[n.phase||n.title||'(unnamed)'] = n;
-      else if (n.node_kind==='discipline') dNode[(n.phase||'')+SEP+(n.discipline||'')] = n;
-      else if (n.node_kind==='category')   cNode[(n.phase||'')+SEP+(n.discipline||'')+SEP+(n.category||'')] = n;
-    });
-
-    // group drawings
-    var byP = {};
-    draws.forEach(function (r) {
-      var ph=r.phase||'Ungrouped', d=r.discipline||'—', c=(r.category||'').trim();
-      var P=(byP[ph]=byP[ph]||{disc:{},order:[]});
-      var D=P.disc[d]; if(!D){ D=P.disc[d]={cat:{},order:[],nocat:[]}; P.order.push(d); }
-      if(c){ if(!D.cat[c]){ D.cat[c]=[]; D.order.push(c); } D.cat[c].push(r); } else D.nocat.push(r);
-    });
+    // Which drawings survive the filter — a node is kept when anything under it did.
+    var keep = {};
+    draws.forEach(function (r){ keep[r.id] = true; });
 
     var filt = anyFilter();
-    var phaseSet={}; Object.keys(pNode).forEach(function(p){phaseSet[p]=1;}); Object.keys(byP).forEach(function(p){phaseSet[p]=1;});
-    var phases=Object.keys(phaseSet).sort(function(a,b){return phaseOrderKey(a)-phaseOrderKey(b) || phaseRank(a)-phaseRank(b) || a.localeCompare(b);});
+    var disp = []; visibleIds = [];
 
-    var disp=[]; visibleIds=[];
-    phases.forEach(function (ph) {
-      var P=byP[ph]||{disc:{},order:[]};
-      var pDraws=collectDraws(P);
-      if (filt && !pDraws.length) return;
-      var pkey='P:'+ph;
-      disp.push({type:'phase',level:1,key:pkey,label:ph,code:nodeCode(pNode[ph]),ctx:{phase:ph},nodeId:node_(pNode[ph]),list:pDraws});
-      if (isCollapsed(pkey)) return;
-
-      var discSet={}; Object.keys(dNode).forEach(function(k){var p=k.split(SEP); if(p[0]===ph)discSet[p[1]]=1;});
-      (P.order||[]).forEach(function(d){discSet[d]=1;});
-      Object.keys(discSet).sort().forEach(function (d) {
-        var D=P.disc[d]||{cat:{},order:[],nocat:[]};
-        var dDraws=collectDisc(D);
-        if (filt && !dDraws.length) return;
-        var dkey='D:'+ph+'|'+d;
-        var dlabel=DISCIPLINES[d]?DISCIPLINES[d]+' ('+d+')':disciplineName(d);
-        disp.push({type:'disc',level:2,key:dkey,label:dlabel,code:nodeCode(dNode[ph+SEP+d]),ctx:{phase:ph,discipline:d},nodeId:node_(dNode[ph+SEP+d]),list:dDraws});
-        if (isCollapsed(dkey)) return;
-
-        // no-category drawings sit directly under the discipline (level 3)
-        regSortList(D.nocat).forEach(function(r){ pushDrawing(r, 3); });
-
-        var catSet={}; Object.keys(cNode).forEach(function(k){var p=k.split(SEP); if(p[0]===ph&&p[1]===d)catSet[p[2]]=1;});
-        (D.order||[]).forEach(function(c){catSet[c]=1;});
-        Object.keys(catSet).forEach(function (c) {
-          var list=D.cat[c]||[];
-          if (filt && !list.length) return;
-          var ckey='C:'+ph+'|'+d+'|'+c;
-          disp.push({type:'cat',level:3,key:ckey,label:c,code:nodeCode(cNode[ph+SEP+d+SEP+c]),ctx:{phase:ph,discipline:d,category:c},nodeId:node_(cNode[ph+SEP+d+SEP+c]),list:list});
-          if (isCollapsed(ckey)) return;
-          regSortList(list).forEach(function(r){ pushDrawing(r, 4); });
-        });
-      });
+    // Roots: level-1 nodes, ordered by the closed top-level list, then anything a
+    // register invented (or 0017 could not classify) by first appearance.
+    var roots = structuralNodes().filter(function (n){ return !n.parent_id; });
+    roots.sort(function (a, b){
+      var ra = topRank(nodeName(a)), rb = topRank(nodeName(b));
+      return ra - rb || (a.sort_order || 0) - (b.sort_order || 0)
+             || nodeName(a).localeCompare(nodeName(b));
     });
+
+    // Drawings whose level node is missing (deleted out from under them, or a
+    // queued offline re-parent replayed against a node someone else removed) would
+    // otherwise vanish from the register entirely. Same defensive stance as
+    // indexSheets(): show them at the end under their own heading rather than
+    // silently dropping real work.
+    var orphans = draws.filter(function (r){
+      return !isSheet(r) && (!r.parent_id || !rowById[r.parent_id]);
+    });
+
+    roots.forEach(function (n){ walk(n, 1); });
+
+    if (orphans.length) {
+      var okey = 'G:__orphans__';
+      disp.push({ type:'group', level:1, key:okey, label:'Unfiled drawings',
+                  code:'', ctx:{}, nodeId:null, list:orphans, orphan:true });
+      if (!isCollapsed(okey)) regSortList(orphans).forEach(function (r){ pushDrawing(r, 2); });
+    }
     return disp;
+
+    // ---- recursion ---------------------------------------------------------
+    function walk(node, level){
+      var list = collect(node);
+      // Under an active filter a level with nothing left in it is hidden entirely,
+      // exactly as the three-level version did.
+      if (filt && !list.length) return;
+      var key = 'G:' + node.id;
+      disp.push({ type:'group', level:level, key:key, label:nodeName(node),
+                  code:nodeCode(node), ctx:ctxOf(node), nodeId:node.id, list:list,
+                  node:node, trackMode:modeOf(node), unit:!!node.is_tracking_unit });
+      if (isCollapsed(key)) return;
+      // Drawings sitting directly in this level come before its sub-levels, so a
+      // level that mixes both reads top-down rather than hiding its own drawings
+      // below every child level.
+      regSortList(nodeDraws(node).filter(pass)).forEach(function (r){ pushDrawing(r, level + 1); });
+      if (level < MAX_LEVEL) {
+        sortNodes(nodeKids(node)).forEach(function (c){ walk(c, level + 1); });
+      }
+    }
+
+    function pass(r){ return !filt || keep[r.id]; }
+    function sortNodes(ns){
+      return ns.slice().sort(function (a, b){
+        return (a.sort_order || 0) - (b.sort_order || 0)
+               || nodeName(a).localeCompare(nodeName(b));
+      });
+    }
+    // Every drawing at or below this node, for the level row's own roll-up.
+    function collect(node){
+      var out = nodeDraws(node).filter(pass);
+      nodeKids(node).forEach(function (c){ out = out.concat(collect(c)); });
+      return out;
+    }
+    // The legacy text triple, still handed to the row so filters, the editor form
+    // and drill-through keep working unchanged.
+    function ctxOf(node){
+      return { phase: node.phase || null, discipline: node.discipline || null,
+               category: node.category || null, nodeId: node.id, level: node.level || null };
+    }
 
     // A drawing with sheets under it renders as its own collapsible level: the
     // drawing row still shows its code/title (and stays inline-editable), but its
@@ -1243,8 +1495,8 @@ window.DrawingRegister = (function () {
       if (!kids.length){ disp.push({type:'drawing',level:level,row:r}); visibleIds.push(r.id); return; }
       var shown = kids.filter(function (k){ return matchesFilters(k, {skipDups:true}); });
       // Under an active filter, keep the parent visible when it OR any of its
-      // sheets match — otherwise filtering by "Revise & Resubmit" would hide the
-      // very sheets you are looking for, because the parent's derived status is
+      // sheets match — otherwise filtering by "Resubmit" would hide the very
+      // sheets you are looking for, because the parent's derived status is
       // "In Progress".
       var skey = 'S:'+r.id;
       disp.push({type:'drawing',level:level,row:r,sheets:kids,shownSheets:shown,skey:skey});
@@ -1255,10 +1507,20 @@ window.DrawingRegister = (function () {
         visibleIds.push(k.id);
       });
     }
-
-    function node_(n){ return n ? n.id : null; }
-    function collectDraws(P){ var a=[]; Object.keys(P.disc).forEach(function(d){ a=a.concat(collectDisc(P.disc[d])); }); return a; }
-    function collectDisc(D){ var a=D.nocat.slice(); D.order.forEach(function(c){ a=a.concat(D.cat[c]); }); return a; }
+  }
+  // Display name of a level row: its own title, else the legacy text column that
+  // used to carry it, else a placeholder.
+  function nodeName(n){
+    return n.title || n.category || n.discipline || n.phase || '(unnamed)';
+  }
+  function isTopItem(x){ return x.type === 'group' && x.level === 1; }
+  // The stylesheet's group tints predate generic levels and are keyed by the three
+  // old names. Levels 1-3 keep them so nothing needs restyling; deeper levels reuse
+  // the 'cat' tint, and the real depth travels separately as --dr-depth/data-level.
+  function grpCls(level){ return level === 1 ? 'phase' : level === 2 ? 'disc' : 'cat'; }
+  function topRank(name){
+    var i = TOP_LEVELS.indexOf(name);
+    return i === -1 ? 99 : i;
   }
 
   function renderRegister() {
@@ -1269,8 +1531,8 @@ window.DrawingRegister = (function () {
     var shown = disp.filter(function(x){return x.type==='drawing';}).length;
 
     var CB = canWrite;
-    var anyOpen = disp.some(function (x){ return x.type==='phase' && !isCollapsed(x.key); });
-    var phaseItems = disp.filter(function(x){ return x.type==='phase'; });
+    var anyOpen = disp.some(function (x){ return isTopItem(x) && !isCollapsed(x.key); });
+    var phaseItems = disp.filter(isTopItem);
     var jump = phaseItems.length > 1 ?
       '<select class="pd-select pd-btn-sm dr-jump" id="dr-jump" title="Jump to a drawing type">' +
         '<option value="">Jump to drawing type…</option>' +
@@ -1302,7 +1564,11 @@ window.DrawingRegister = (function () {
         '<button class="pd-btn pd-btn-sm" id="dr-selclear">Clear</button>' +
         '<button class="pd-btn pd-btn-sm pd-btn-danger" id="dr-seldel">Delete selected</button>' +
       '</div>' +
-      (canWrite ? '<div class="dr-hint">Click to select · Shift-click range · double-click a cell to edit · Enter=add · Del=delete</div>' : '') +
+      (canWrite ? '<div class="dr-hint">Click a cell · Shift-click or drag for a range · type or F2 to edit · '+
+        '<kbd>Tab</kbd>/<kbd>↵</kbd> move · <kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy-paste (Excel) · '+
+        '<kbd>Ctrl</kbd>+<kbd>D</kbd> fill down · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Del</kbd> clear · '+
+        '<kbd>Esc</kbd> back to rows</div>' +
+        '<span class="dr-cellinfo" id="dr-cellinfo"></span>' : '') +
     '</div>';
 
     if (!draws.length && !structuralNodes().length) {
@@ -1353,19 +1619,29 @@ window.DrawingRegister = (function () {
     // commitment (min planned) and — only once everything under it is approved —
     // the day the last one landed (max actual). Same rule at every level, so a
     // discipline, a category and a per-sheet drawing all read the same way.
-    var roll = rollup(item.list);
+    // ⚠️ Binary levels count UNITS, not sheets — see rollupFor(). A level in a
+    // binary top level whose numbers were sheet-weighted would silently reintroduce
+    // partial credit at the roll-up even though every leaf is 0-or-100.
+    var roll = rollupFor(item.node, item.list);
     var tot = roll.tot, ap = roll.ap, pct = roll.pct;
     var ids = item.list.map(function(r){return r.id;}).join(',');
     var grpCb = CB ? '<td class="dr-cb dr-freeze dr-freeze-cb"><input type="checkbox" data-selgrp="'+ids+'" title="Select group"></td>' : '';
     var isCol = isCollapsed(item.key);
     var caret = '<span class="dr-caret'+(isCol?' dr-caret-col':'')+'">'+ico('chevronDown',12)+'</span>';
-    return '<tr class="dr-grp dr-grp-'+item.type+' dr-lvl-'+item.level+(isCol?' dr-collapsed':'')+
-        (item.key===activeGrpKey?' dr-grpactive':'')+'"'+
-        ' data-grp="'+Fmt.esc(item.key)+'" data-kind="'+item.type+'" data-nodeid="'+(item.nodeId||'')+'"'+
+    return '<tr class="dr-grp dr-grp-'+grpCls(item.level)+' dr-lvl-'+Math.min(item.level,5)+(isCol?' dr-collapsed':'')+
+        (item.key===activeGrpKey?' dr-grpactive':'')+'" style="--dr-depth:'+item.level+'"'+
+        ' data-grp="'+Fmt.esc(item.key)+'" data-kind="'+grpCls(item.level)+'" data-level="'+item.level+'" data-nodeid="'+(item.nodeId||'')+'"'+
         ' data-phase="'+Fmt.esc(item.ctx.phase||'')+'" data-disc="'+Fmt.esc(item.ctx.discipline||'')+'" data-cat="'+Fmt.esc(item.ctx.category||'')+'">' + grpCb +
       '<td colspan="'+COLSPAN_LABEL+'" class="dr-indent dr-freeze dr-freeze-grp"><span class="dr-grplabel">'+caret+
         (item.code?'<span class="dr-gcode">'+Fmt.esc(item.code)+'</span> ':'')+
-        '<strong class="dr-glabel">'+Fmt.esc(item.label)+'</strong> <span class="dr-count">'+item.list.length+' dwg</span></span></td>' +
+        '<strong class="dr-glabel">'+Fmt.esc(item.label)+'</strong> <span class="dr-count">'+item.list.length+' dwg</span>'+
+        (item.unit?'<span class="dr-unittag" title="One 0-or-100 progress unit">unit</span>':'')+
+        // A binary top level with nothing designated is counting each drawing as its
+        // own unit. Say so on the row rather than letting the percentage look like a
+        // deliberate breakdown.
+        (roll.unitMode && item.level===1 && roll.fallback && roll.tot
+          ? '<span class="dr-unithint" title="No tracking unit set on this drawing type, so each drawing counts as one. Use the target button on a level to designate it.">counting each drawing</span>' : '')+
+        '</span></td>' +
       '<td colspan="2">'+progressBar(pct)+'</td>' +   // Rev + Status
       '<td class="dr-r">'+tot+'</td>' +
       '<td class="dr-r">'+ap+'</td>' +
@@ -1376,7 +1652,11 @@ window.DrawingRegister = (function () {
         : '<span class="dr-mut" title="Not all approved yet">—</span>')+'</td>' +
       '<td></td>' +   // Resp.
       '<td></td>' +   // Scope
-      '<td class="dr-nowrap dr-actcol">'+(canWrite?'<button class="dr-lvldel" title="Delete this level and everything under it">'+ico('trash',15)+'</button>':'')+'</td></tr>';
+      '<td class="dr-nowrap dr-actcol">'+(canWrite?
+          (roll.unitMode && item.level>1 ? '<button class="dr-lvlunit'+(item.unit?' dr-lvlunit-on':'')+'" title="'+
+             (item.unit ? 'This level is a 0-or-100 progress unit — click to stop counting it as one'
+                        : 'Count this level as one 0-or-100 progress unit')+'">'+ico('target',15)+'</button>' : '')+
+          '<button class="dr-lvldel" title="Delete this level and everything under it">'+ico('trash',15)+'</button>':'')+'</td></tr>';
   }
 
   function progressBar(pct) {
@@ -1421,8 +1701,12 @@ window.DrawingRegister = (function () {
       ? '<span class="dr-caret dr-scaret'+(isCollapsed(item.skey)?' dr-caret-col':'')+'" data-sgrp="'+item.skey+'" title="Show / hide this drawing’s sheets">'+ico('chevronDown',12)+'</span>'
       : '';
     var sheetTag = kids ? ' <span class="dr-sheettag" title="Tracked per sheet">'+kids.length+' sheets</span>' : '';
-    return '<tr class="dr-drow dr-lvl-'+(item.level||4)+(kids?' dr-sheetparent':'')+(sheet?' dr-sheetrow':'')+
-        (selected[r.id]?' dr-selrow':'')+(isDup?' dr-dup':'')+'" data-id="'+r.id+'"'+
+    // Pre-existing break-outs inside what is now a binary top level stay READABLE and
+    // merge-only — auto-merging would delete rows, and there is no per-sheet history
+    // to restore them from. They simply count as one unit, via derivedStatus.
+    var canBreakOut = !sheet && !isBinary(r);
+    return '<tr class="dr-drow dr-lvl-'+Math.min(item.level||4,5)+(kids?' dr-sheetparent':'')+(sheet?' dr-sheetrow':'')+
+        (selected[r.id]?' dr-selrow':'')+(isDup?' dr-dup':'')+'" data-id="'+r.id+'" style="--dr-depth:'+(item.level||4)+'"'+
         (kids?' data-sgrprow="'+item.skey+'"':'')+((reorderEnabled() && !kids)?' draggable="true"':'')+'>' + cb +
       '<td class="dr-indent dr-freeze dr-freeze-code'+ed+'" data-f="code" data-t="text">'+caret+'<span class="dr-code">'+Fmt.esc(code)+'</span>'+dupMark+'</td>' +
       '<td class="dr-c-title dr-freeze dr-freeze-title'+ed+'" data-f="title" data-t="text">'+Fmt.esc(r.title)+sheetTag+(r.description?'<div class="dr-sub">'+Fmt.esc(r.description)+'</div>':'')+'</td>' +
@@ -1443,7 +1727,7 @@ window.DrawingRegister = (function () {
       '<td class="dr-c-scope'+(kids?'':ed)+'" data-f="scope" data-t="text">'+
         '<span class="dr-scopetag'+((r.scope||SCOPES[0])==='Change Order'?' dr-co':'')+'">'+Fmt.esc(r.scope||SCOPES[0])+'</span></td>' +
       '<td class="dr-nowrap dr-actcol">'+(r.file_url?'<button class="dr-iconbtn" data-view="'+Fmt.esc(r.file_url)+'" title="View approved file">'+ico('eye',15)+'</button>':'')+
-        (canWrite && !sheet ? '<button class="dr-iconbtn" data-sheets="'+r.id+'" title="'+(kids?'Manage sheets':'Break out into one row per sheet')+'">'+ico('columns',15)+'</button>' : '')+
+        (canWrite && (canBreakOut || kids) ? '<button class="dr-iconbtn" data-sheets="'+r.id+'" title="'+(kids?'Manage sheets':'Break out into one row per sheet')+'">'+ico('columns',15)+'</button>' : '')+
         '<button class="dr-iconbtn" data-edit="'+r.id+'" title="Full editor">'+ico('pencil',15)+'</button>' +
         '<button class="dr-iconbtn dr-rowbtn-del" data-del="'+r.id+'" title="Delete">'+ico('trash',15)+'</button></td>' +
     '</tr>';
@@ -1479,7 +1763,7 @@ window.DrawingRegister = (function () {
 
     var xall = host.querySelector('#dr-xall');
     if (xall) xall.onclick = function(){
-      var pkeys = disp.filter(function(x){return x.type==='phase';}).map(function(x){return x.key;});
+      var pkeys = disp.filter(isTopItem).map(function(x){return x.key;});
       // Acts on whichever map is live, so "expand all" works during a filter too.
       var anyOpen = pkeys.some(function (k){ return !isCollapsed(k); });
       if (anyFilter()) { fCollapsed = {}; if (anyOpen) pkeys.forEach(function (k){ fCollapsed[k] = true; }); }
@@ -1514,6 +1798,8 @@ window.DrawingRegister = (function () {
         saveUI(); render();
       });
       if (glabel && canWrite) glabel.ondblclick = function(e){ e.stopPropagation(); beginRenameGroup(tr, glabel); };
+      var ub = tr.querySelector('.dr-lvlunit');
+      if (ub) ub.onclick = function(e){ e.stopPropagation(); toggleTrackingUnit(tr.dataset.nodeid); };
       var dl = tr.querySelector('.dr-lvldel');
       if (dl) dl.onclick = function(e){ e.stopPropagation(); deleteLevel(tr.dataset); };
     });
@@ -1632,6 +1918,33 @@ window.DrawingRegister = (function () {
     var grid = host.querySelector('.dr-grid');
     if (grid) grid.onkeydown = onGridKey;
 
+    // ---- cell cursor: click to place, shift-click to extend, drag to select ----
+    // Bound on mousedown, NOT click: a click fires after mouseup and would clobber
+    // the range a drag had just built.
+    if (grid) {
+      grid.onmousedown = function (e){
+        var td = e.target.closest && e.target.closest('td[data-f]');
+        if (!td) return;
+        // Let the existing controls (checkbox, buttons, status select) keep working.
+        if (e.target.closest('input,select,button,a')) return;
+        var tr = td.closest('tr.dr-drow'); if (!tr) return;
+        setCur(tr.dataset.id, td.dataset.f, e.shiftKey);
+        grid.focus && grid.focus();
+        _dragCell = true;
+      };
+      grid.onmousemove = function (e){
+        if (!_dragCell) return;
+        var td = e.target.closest && e.target.closest('td[data-f]');
+        if (!td) return;
+        var tr = td.closest('tr.dr-drow'); if (!tr) return;
+        if (_cur && _cur.id === tr.dataset.id && _cur.f === td.dataset.f) return;
+        _cur = { id: tr.dataset.id, f: td.dataset.f };
+        paintCells();
+      };
+    }
+    // Re-place the cursor after a re-render, so an edit doesn't lose your position.
+    if (_cur) paintCells();
+
     refreshSel(host);
   }
 
@@ -1651,11 +1964,11 @@ window.DrawingRegister = (function () {
   // --------------------------------------------------------- drag reorder ----
   // Reorder a drawing within its own group (Project Schedule's row drag).
   //
-  // Phase order is derived from each phase's MINIMUM sort_order (phaseOrderKey),
-  // so renumbering rows freely would silently reshuffle the phases. Instead we
-  // take the group's OWN existing sort_order values as a pool and re-deal them in
-  // the new order: the multiset of values per phase is unchanged, so the phase
-  // min — and therefore the phase order — cannot move. `rows` arrives ordered by
+  // Level order comes from each node's own sort_order, and a drawing's group is its
+  // parent node, so re-dealing values INSIDE one group is what keeps the tree
+  // stable. We take the group's OWN existing sort_order values as a pool and
+  // re-deal them in the new order: the multiset per group is unchanged, so no
+  // level's ordering relative to its siblings can move. `rows` arrives ordered by
   // sort_order (NULLs last), so the pool is already in display order and a NULL
   // simply re-deals to whichever row should sort last.
   async function reorderDrop(draggedId, targetId, before){
@@ -1712,13 +2025,19 @@ window.DrawingRegister = (function () {
     });
   }
 
+  // `nodeId` is the load-bearing field now (a level is a row, not a text triple);
+  // the phase/discipline/category triple is retained as a display convenience and
+  // for the legacy filters that still read it.
   function setContextFromRow(tr){
     if (tr.classList.contains('dr-drow')) {
       var r = rows.find(function(x){return x.id===tr.dataset.id;});
-      if (r) selCtx = { phase:r.phase||'', discipline:r.discipline||'', category:(r.category||'').trim(), level:4 };
+      if (r) selCtx = { phase:r.phase||'', discipline:r.discipline||'', category:(r.category||'').trim(),
+                        nodeId: r.parent_id && isNode(rowById[r.parent_id]) ? r.parent_id : null,
+                        level: null };
     } else {
       selCtx = { phase:tr.dataset.phase||'', discipline:tr.dataset.disc||'', category:tr.dataset.cat||'',
-                 level: tr.dataset.kind==='phase'?1 : tr.dataset.kind==='disc'?2 : 3 };
+                 nodeId: tr.dataset.nodeid || null,
+                 level: +(tr.dataset.level || 0) || null };
     }
   }
 
@@ -1742,8 +2061,58 @@ window.DrawingRegister = (function () {
     if (!canWrite) return;
     var tag=(e.target.tagName||'').toLowerCase();
     if (tag==='input'||tag==='select'||tag==='textarea'||e.target.isContentEditable) return;
+    var mod = e.ctrlKey || e.metaKey;
+
+    // ---- CELL mode: active as soon as a cell has been clicked or navigated to.
+    // Everything below falls through to the original ROW behaviour when there is no
+    // cell cursor, so the pre-existing row workflow is untouched.
+    if (_cur) {
+      if (e.key==='Escape'){ _cur=null; _anchor=null; paintCells(); selected={}; lastClickedId=null; refreshSel(document); return; }
+      if (mod && (e.key==='a'||e.key==='A')){
+        e.preventDefault();
+        var cs=cellCols();
+        if (visibleIds.length && cs.length){
+          _cur={id:visibleIds[visibleIds.length-1], f:cs[cs.length-1].f};
+          _anchor={id:visibleIds[0], f:cs[0].f};
+          paintCells();
+          selected={}; visibleIds.forEach(function(id){selected[id]=true;}); refreshSel(document);
+        }
+        return;
+      }
+      if (mod && (e.key==='d'||e.key==='D')){ e.preventDefault(); fillDown(); return; }
+      if (mod && (e.key==='z'||e.key==='Z')){ e.preventDefault(); undoLast(); return; }
+      // Ctrl+C / Ctrl+V are handled by the copy/paste listeners so the real system
+      // clipboard is used (and Excel interop works); nothing to do here.
+      if (mod && /^[cvx]$/i.test(e.key)) return;
+      var dirs = { ArrowUp:[-1,0], ArrowDown:[1,0], ArrowLeft:[0,-1], ArrowRight:[0,1] };
+      if (dirs[e.key]){ e.preventDefault(); moveCur(dirs[e.key][0], dirs[e.key][1], e.shiftKey, mod); return; }
+      if (e.key==='Tab'){ e.preventDefault(); moveCur(0, e.shiftKey?-1:1, false, false); return; }
+      if (e.key==='Home'){ e.preventDefault(); var c0=cellCols()[0]; if(c0) setCur(mod?visibleIds[0]:_cur.id, c0.f, e.shiftKey); return; }
+      if (e.key==='End'){ e.preventDefault(); var cl=cellCols(); if(cl.length) setCur(mod?visibleIds[visibleIds.length-1]:_cur.id, cl[cl.length-1].f, e.shiftKey); return; }
+      if (e.key==='Delete'||e.key==='Backspace'){ e.preventDefault(); clearRange(); return; }
+      if (e.key==='F2'){ e.preventDefault(); var td=cellTd(_cur.id,_cur.f); if(td) beginEdit(td); return; }
+      if (e.key==='Enter'){
+        e.preventDefault();
+        var td2=cellTd(_cur.id,_cur.f);
+        if (td2 && td2.classList.contains('dr-ed')) beginEdit(td2); else moveCur(1,0,false,false);
+        return;
+      }
+      // Type-to-replace, exactly like Excel: a printable key opens the editor and
+      // seeds it with that character instead of being swallowed.
+      if (!mod && !e.altKey && e.key.length===1){
+        var td3=cellTd(_cur.id,_cur.f);
+        if (td3 && td3.classList.contains('dr-ed')){
+          e.preventDefault(); beginEdit(td3);
+          var inp=td3.querySelector('input');
+          if (inp){ inp.value = (inp.type==='number'||inp.type==='date') ? inp.value : e.key; inp.select && inp.type==='text' && inp.setSelectionRange(1,1); }
+        }
+        return;
+      }
+      return;
+    }
+
     if (e.key==='Escape'){ selected={}; lastClickedId=null; refreshSel(document); return; }
-    if ((e.ctrlKey||e.metaKey) && (e.key==='a'||e.key==='A')){ e.preventDefault(); visibleIds.forEach(function(id){selected[id]=true;}); refreshSel(document); return; }
+    if (mod && (e.key==='a'||e.key==='A')){ e.preventDefault(); visibleIds.forEach(function(id){selected[id]=true;}); refreshSel(document); return; }
     if (e.key==='ArrowDown'||e.key==='ArrowUp'){
       e.preventDefault();
       var idx = lastClickedId ? visibleIds.indexOf(lastClickedId) : -1;
@@ -1791,6 +2160,318 @@ window.DrawingRegister = (function () {
     return true;
   }
 
+  // ==========================================================================
+  // EXCEL-LIKE CELL LAYER (2026-08-18)
+  // --------------------------------------------------------------------------
+  // The register already had ROW multi-select (click / shift-click / Ctrl+A /
+  // arrows), drag-resize columns and double-click auto-fit. What it lacked was a
+  // CELL model: a cursor you can drive with the keyboard, rectangular ranges, and
+  // clipboard interop with Excel itself.
+  //
+  // ⚠️ THE COORDINATE SPACE IS DRAWING ROWS ONLY. `visibleIds` (drawings and sheets
+  // in display order) is the row axis and the editable `td[data-f]` cells are the
+  // column axis. GROUP ROWS ARE DELIBERATELY OUTSIDE IT — they carry no data-f
+  // cells, so a range can never select one and a paste can never land on one. If you
+  // add a decorative row later, keep it attribute-free the same way; the moment it
+  // carries a data-f cell it becomes addressable and the whole model breaks.
+  //
+  // ⚠️ Ranges are rectangular over the VISIBLE row order, so a range can span two
+  // different levels. That is intentional (it is what makes "fill this column down
+  // the whole trade" work), and it is safe because every write goes through
+  // patchFor() per row rather than assuming the rows are siblings.
+  var _cur = null;        // {id, f} — the active cell
+  var _anchor = null;     // {id, f} — the other corner of a range
+  var _undo = [];         // batches of {id, f, t, prev} for Ctrl+Z
+  var UNDO_MAX = 50;
+  var _dragCell = false;
+  document.addEventListener('mouseup', function (){ _dragCell = false; });
+  // Real clipboard events, so Ctrl+C / Ctrl+V use the SYSTEM clipboard and the TSV
+  // round-trips with Excel in both directions.
+  document.addEventListener('copy', function (e){
+    if (!_cur || !document.querySelector('td.dr-cell-cur')) return;
+    var t = (e.target.tagName||'').toLowerCase();
+    if (t==='input'||t==='select'||t==='textarea') return;
+    e.clipboardData.setData('text/plain', rangeTSV());
+    e.preventDefault();
+  });
+  document.addEventListener('paste', function (e){
+    if (!_cur || !canWrite || !document.querySelector('td.dr-cell-cur')) return;
+    var t = (e.target.tagName||'').toLowerCase();
+    if (t==='input'||t==='select'||t==='textarea') return;
+    var txt = e.clipboardData.getData('text/plain');
+    if (!txt) return;
+    e.preventDefault();
+    pasteBlock(txt);
+  });
+
+  function cellCols(){
+    // Read the columns off the DOM so this can never drift from what is rendered.
+    var tr = document.querySelector('tr.dr-drow');
+    if (!tr) return [];
+    return Array.prototype.map.call(tr.querySelectorAll('td[data-f]'), function (td){
+      return { f: td.dataset.f, t: td.dataset.t || 'text' };
+    });
+  }
+  function cellTd(id, f){
+    return document.querySelector('tr.dr-drow[data-id="'+id+'"] td[data-f="'+f+'"]');
+  }
+  function isEditableCell(id, f){
+    var td = cellTd(id, f);
+    return !!td && td.classList.contains('dr-ed');
+  }
+  function rowOf(id){ return rowById[id] || rows.find(function (x){ return x.id === id; }) || null; }
+
+  // The rectangle between the cursor and the anchor, as {ids:[], fs:[]}.
+  function curRange(){
+    if (!_cur) return { ids: [], fs: [] };
+    var cols = cellCols().map(function (c){ return c.f; });
+    var a = _anchor || _cur;
+    var r1 = visibleIds.indexOf(a.id), r2 = visibleIds.indexOf(_cur.id);
+    var c1 = cols.indexOf(a.f),        c2 = cols.indexOf(_cur.f);
+    if (r1 < 0 || r2 < 0 || c1 < 0 || c2 < 0) return { ids: [_cur.id], fs: [_cur.f] };
+    return { ids: visibleIds.slice(Math.min(r1,r2), Math.max(r1,r2)+1),
+             fs:  cols.slice(Math.min(c1,c2), Math.max(c1,c2)+1) };
+  }
+  function paintCells(){
+    document.querySelectorAll('td.dr-cell-cur,td.dr-cell-rng').forEach(function (td){
+      td.classList.remove('dr-cell-cur','dr-cell-rng');
+    });
+    if (!_cur) { setCellInfo(0,0,0); return; }
+    var rg = curRange();
+    rg.ids.forEach(function (id){ rg.fs.forEach(function (f){
+      var td = cellTd(id, f); if (td) td.classList.add('dr-cell-rng');
+    }); });
+    var cd = cellTd(_cur.id, _cur.f);
+    if (cd){ cd.classList.remove('dr-cell-rng'); cd.classList.add('dr-cell-cur'); }
+    setCellInfo(rg.ids.length * rg.fs.length, rg.ids.length, rg.fs.length);
+  }
+  // An explicit readout, because a highlight alone leaves you guessing whether the
+  // block you dragged is really selected.
+  function setCellInfo(n, nr, nc){
+    var el = document.getElementById('dr-cellinfo');
+    if (!el) return;
+    el.textContent = n > 1 ? (n + ' cells (' + nr + ' × ' + nc + ')') : '';
+  }
+  function setCur(id, f, extend){
+    if (!id || !f) return;
+    _cur = { id: id, f: f };
+    if (!extend || !_anchor) _anchor = extend ? (_anchor || { id: id, f: f }) : { id: id, f: f };
+    paintCells();
+    var td = cellTd(id, f);
+    if (td) td.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    // Keep the row-level selection in step so the existing bulk actions still apply
+    // to what the user can see is selected.
+    var rg = curRange();
+    selected = {}; rg.ids.forEach(function (x){ selected[x] = true; });
+    lastClickedId = id;
+    refreshSel(document);
+  }
+  // Excel's Ctrl+Arrow: from a filled cell stop at the last filled cell before a
+  // gap; from an empty one (or when the next is empty) skip to the next filled cell.
+  function jumpEdge(id, f, dr, dc){
+    var cols = cellCols().map(function (c){ return c.f; });
+    var ri = visibleIds.indexOf(id), ci = cols.indexOf(f);
+    if (ri < 0 || ci < 0) return { id: id, f: f };
+    function filled(r, c){
+      var row = rowOf(visibleIds[r]);
+      return !!(row && String(cellValueOf(row, cols[c]) || '').trim());
+    }
+    var lim = dr ? visibleIds.length : cols.length;
+    var pos = dr ? ri : ci, step = dr || dc;
+    var startFilled = filled(ri, ci);
+    var nextPos = pos + step;
+    if (nextPos < 0 || nextPos >= lim) return { id: visibleIds[ri], f: cols[ci] };
+    var nextFilled = dr ? filled(nextPos, ci) : filled(ri, nextPos);
+    var want = startFilled && nextFilled;   // ride the block, else skip the gap
+    var p = pos;
+    while (true) {
+      var q = p + step;
+      if (q < 0 || q >= lim) break;
+      var fl = dr ? filled(q, ci) : filled(ri, q);
+      if (want && !fl) break;
+      p = q;
+      if (!want && fl) break;
+    }
+    return dr ? { id: visibleIds[p], f: cols[ci] } : { id: visibleIds[ri], f: cols[p] };
+  }
+  function moveCur(dr, dc, extend, jump){
+    if (!_cur) { if (visibleIds.length) { var cs = cellCols(); if (cs.length) setCur(visibleIds[0], cs[0].f, false); } return; }
+    var t;
+    if (jump) t = jumpEdge(_cur.id, _cur.f, dr, dc);
+    else {
+      var cols = cellCols().map(function (c){ return c.f; });
+      var ri = visibleIds.indexOf(_cur.id), ci = cols.indexOf(_cur.f);
+      ri = Math.max(0, Math.min(visibleIds.length - 1, ri + dr));
+      ci = Math.max(0, Math.min(cols.length - 1, ci + dc));
+      t = { id: visibleIds[ri], f: cols[ci] };
+    }
+    setCur(t.id, t.f, extend);
+  }
+
+  // ---- clipboard (real TSV, so it round-trips with Excel) --------------------
+  function rangeTSV(){
+    var rg = curRange();
+    return rg.ids.map(function (id){
+      var row = rowOf(id);
+      return rg.fs.map(function (f){
+        var v = row ? String(cellValueOf(row, f) || '') : '';
+        // A tab or newline inside a value would silently add a column or a row on
+        // the way back in, so they are flattened to spaces.
+        return v.replace(/[\t\r\n]+/g, ' ');
+      }).join('\t');
+    }).join('\n');
+  }
+  // Write a block of values starting at the cursor, clamped to the grid, skipping
+  // any cell that isn't editable (derived counters on a sheet parent, a sheet's own
+  // scope) and reporting how many were refused rather than failing silently.
+  async function pasteBlock(text){
+    if (!_cur || !canWrite) return;
+    var grid = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').map(function (l){ return l.split('\t'); });
+    var cols = cellCols().map(function (c){ return c.f; });
+    var types = {}; cellCols().forEach(function (c){ types[c.f] = c.t; });
+    var r0 = visibleIds.indexOf(_cur.id), c0 = cols.indexOf(_cur.f);
+    if (r0 < 0 || c0 < 0) return;
+    var batch = [], writes = [], skipped = 0;
+    for (var i = 0; i < grid.length; i++) {
+      var ri = r0 + i; if (ri >= visibleIds.length) break;
+      for (var j = 0; j < grid[i].length; j++) {
+        var ci = c0 + j; if (ci >= cols.length) break;
+        var id = visibleIds[ri], f = cols[ci];
+        if (!isEditableCell(id, f)) { skipped++; continue; }
+        var row = rowOf(id); if (!row) continue;
+        var val = String(grid[i][j] == null ? '' : grid[i][j]).trim();
+        if (String(cellValueOf(row, f)) === val) continue;      // no-op, keep undo clean
+        batch.push({ id: id, f: f, t: types[f], prev: cellValueOf(row, f) });
+        writes.push({ row: row, patch: patchFor(row, f, types[f], val) });
+      }
+    }
+    if (!writes.length){
+      UI.toast(skipped ? 'Nothing pasted — those cells are calculated and cannot be typed into' : 'Nothing to paste','warn');
+      return;
+    }
+    pushUndo(batch);
+    await applyWrites(writes);
+    UI.toast('Pasted ' + writes.length + ' cell' + (writes.length>1?'s':'') +
+             (skipped ? ' · ' + skipped + ' skipped (calculated)' : ''), 'ok');
+  }
+  async function applyWrites(writes){
+    for (var i = 0; i < writes.length; i++) {
+      await persistCell(writes[i].row, writes[i].patch);
+      if (isSheet(writes[i].row)) await syncParent(writes[i].row.parent_id);
+    }
+    render(); flushDeferredRemote();
+  }
+  function pushUndo(batch){
+    if (!batch || !batch.length) return;
+    _undo.push(batch);
+    if (_undo.length > UNDO_MAX) _undo.shift();
+  }
+  async function undoLast(){
+    var batch = _undo.pop();
+    if (!batch){ UI.toast('Nothing to undo','warn'); return; }
+    var writes = [];
+    batch.forEach(function (b){
+      var row = rowOf(b.id); if (!row) return;
+      writes.push({ row: row, patch: patchFor(row, b.f, b.t, String(b.prev == null ? '' : b.prev)) });
+    });
+    await applyWrites(writes);
+    UI.toast('Undid ' + writes.length + ' cell' + (writes.length>1?'s':''), 'ok');
+  }
+  // Ctrl+D — copy the top row of the range down over the rest, per column.
+  async function fillDown(){
+    var rg = curRange();
+    if (rg.ids.length < 2){ UI.toast('Select the cell to copy plus the rows to fill','warn'); return; }
+    var types = {}; cellCols().forEach(function (c){ types[c.f] = c.t; });
+    var src = rowOf(rg.ids[0]);
+    var batch = [], writes = [], skipped = 0;
+    rg.fs.forEach(function (f){
+      var val = String(cellValueOf(src, f) || '');
+      rg.ids.slice(1).forEach(function (id){
+        if (!isEditableCell(id, f)) { skipped++; return; }
+        var row = rowOf(id); if (!row) return;
+        if (String(cellValueOf(row, f)) === val) return;
+        batch.push({ id:id, f:f, t:types[f], prev: cellValueOf(row, f) });
+        writes.push({ row: row, patch: patchFor(row, f, types[f], val) });
+      });
+    });
+    if (!writes.length){ UI.toast(skipped ? 'Those cells are calculated and cannot be filled' : 'Nothing to fill','warn'); return; }
+    pushUndo(batch);
+    await applyWrites(writes);
+    UI.toast('Filled ' + writes.length + ' cell' + (writes.length>1?'s':''), 'ok');
+  }
+  // Del over a range clears it (a row-level Delete still deletes rows — that only
+  // applies when no cell cursor is active).
+  async function clearRange(){
+    var rg = curRange();
+    var types = {}; cellCols().forEach(function (c){ types[c.f] = c.t; });
+    var batch = [], writes = [];
+    rg.ids.forEach(function (id){ rg.fs.forEach(function (f){
+      if (!isEditableCell(id, f)) return;
+      var row = rowOf(id); if (!row) return;
+      if (!String(cellValueOf(row, f) || '')) return;
+      batch.push({ id:id, f:f, t:types[f], prev: cellValueOf(row, f) });
+      writes.push({ row: row, patch: patchFor(row, f, types[f], '') });
+    }); });
+    if (!writes.length) return;
+    pushUndo(batch);
+    await applyWrites(writes);
+  }
+  // Fit every column to its content in one go, and reset to the defaults.
+  function autofitAll(){
+    var host = document.getElementById('dr-view'); if (!host) return;
+    Object.keys(COL_DEFAULTS).forEach(function (key){
+      var widest = 0;
+      host.querySelectorAll('td.dr-c-'+key+', th.dr-c-'+key).forEach(function (el){
+        widest = Math.max(widest, el.scrollWidth);
+      });
+      if (widest) {
+        var w = Math.max(COL_MIN[key] || 40, Math.min(widest + 16, 600));
+        colWidths[key] = w; host.style.setProperty('--c-'+key, w+'px');
+      }
+    });
+    saveColWidths();
+    UI.toast('Columns fitted to content','ok');
+  }
+  function resetColWidths(){
+    var host = document.getElementById('dr-view'); if (!host) return;
+    Object.keys(COL_DEFAULTS).forEach(function (k){
+      colWidths[k] = COL_DEFAULTS[k]; host.style.setProperty('--c-'+k, COL_DEFAULTS[k]+'px');
+    });
+    saveColWidths();
+    UI.toast('Column widths reset','ok');
+  }
+
+  // ⚠️ THE single definition of "how a typed value becomes a patch". Typing, paste,
+  // fill-down and undo all go through here — a second copy is how a paste ends up
+  // writing a field differently from an edit of the same cell (the same class of bug
+  // approvedOf() exists to prevent for counts).
+  function patchFor(r, f, t, val){
+    var patch = {};
+    if (f==='code'){ patch.dwg_number=val; patch.drawing_no=val; patch.drawing_code=val; }
+    else if (f==='latest_sub'){
+      // update the latest revision's actual submission date (create one if none)
+      var subs = Array.isArray(r.submissions) ? r.submissions.slice() : [];
+      if (subs.length){ subs[subs.length-1] = Object.assign({}, subs[subs.length-1], { actual: val||null }); }
+      else subs = [{ rev:0, planned:null, actual: val||null }];
+      patch.submissions = subs; patch.issue_date = val||null;
+    }
+    else if (t==='num'){ patch[f]=num(val); }
+    else if (t==='date'){ patch[f]=val||null; }
+    else patch[f]=val;
+    return patch;
+  }
+  // The raw value of a cell, for copy / fill / undo. Deliberately NOT the rendered
+  // text: the Sh/Appr cells render a "%" suffix and the date cells a display format,
+  // neither of which round-trips back through patchFor().
+  function cellValueOf(r, f){
+    if (f==='code') return r.drawing_code || r.drawing_no || r.dwg_number || '';
+    if (f==='latest_sub') return latestSub(r,'actual') || '';
+    if (f==='no_of_sheets') return String(num(r.no_of_sheets) || 0);
+    if (f==='approved_sheets') return String(approvedOf(r));
+    var v = r[f];
+    return v == null ? '' : String(v);
+  }
+
   function beginEdit(td){
     if (!canWrite || td.classList.contains('dr-editing')) return;
     var tr=td.closest('tr.dr-drow'); if(!tr) return;
@@ -1810,18 +2491,7 @@ window.DrawingRegister = (function () {
       td.classList.remove('dr-editing');
       broadcastSel(r.id, f, false);
       if (!save) { render(); flushDeferredRemote(); return; }
-      var val=input.value.trim(), patch={};
-      if (f==='code'){ patch.dwg_number=val; patch.drawing_no=val; patch.drawing_code=val; }
-      else if (f==='latest_sub'){
-        // update the latest revision's actual submission date (create one if none)
-        var subs = Array.isArray(r.submissions) ? r.submissions.slice() : [];
-        if (subs.length){ subs[subs.length-1] = Object.assign({}, subs[subs.length-1], { actual: val||null }); }
-        else subs = [{ rev:0, planned:null, actual: val||null }];
-        patch.submissions = subs; patch.issue_date = val||null;
-      }
-      else if (t==='num'){ patch[f]=num(val); }
-      else if (t==='date'){ patch[f]=val||null; }
-      else patch[f]=val;
+      var patch = patchFor(r, f, t, input.value.trim());
       persistCell(r, patch).then(function(){
         return isSheet(r) ? syncParent(r.parent_id) : null;   // roll the change up to the drawing
       }).then(function(){ render(); flushDeferredRemote(); });
@@ -1837,8 +2507,10 @@ window.DrawingRegister = (function () {
 
   // ----------------------------------------------- rename a structural level --
   function beginRenameGroup(tr, glabel){
-    var kind=tr.dataset.kind;
-    var oldLabel = kind==='phase'?tr.dataset.phase : kind==='disc'?tr.dataset.disc : tr.dataset.cat;
+    var nodeId = tr.dataset.nodeid;
+    var node = nodeId ? rowById[nodeId] : null;
+    if (!node){ UI.toast('This level has no row to rename','warn'); return; }
+    var oldLabel = nodeName(node);
     var input=document.createElement('input'); input.className='dr-editin'; input.value=oldLabel||'';
     glabel.replaceWith(input); input.focus(); input.select();
     var done=false;
@@ -1846,61 +2518,172 @@ window.DrawingRegister = (function () {
       if (done) return; done=true;
       var v=input.value.trim();
       if (!save || !v || v===oldLabel){ render(); return; }
-      renameGroup(tr.dataset, kind, oldLabel, v).then(function(){ load(); });
+      renameGroup(nodeId, v).then(function(){ load(); });
     }
     input.onkeydown=function(e){ if(e.key==='Enter'){e.preventDefault();commit(true);} else if(e.key==='Escape'){e.preventDefault();commit(false);} };
     input.onblur=function(){ commit(true); };
   }
 
-  async function renameGroup(ds, kind, oldVal, newVal){
-    var patch = kind==='phase'?{phase:newVal} : kind==='disc'?{discipline:newVal} : {category:newVal};
-    var q = sb().from(TABLE).update(patch).eq('project_id', pid);
-    if (kind==='phase') q=q.eq('phase', oldVal);
-    else if (kind==='disc') q=q.eq('phase', ds.phase).eq('discipline', oldVal);
-    else q=q.eq('phase', ds.phase).eq('discipline', ds.disc).eq('category', oldVal);
-    var res=await q; if (res.error) UI.toast(res.error.message,'error');
-    // keep collapse state under the renamed key
-    if (kind==='phase'){ if(collapsed['P:'+oldVal]){ collapsed['P:'+newVal]=true; delete collapsed['P:'+oldVal]; } }
+  // ⚠️ Was a BULK TEXT UPDATE across every drawing whose phase/discipline/category
+  // matched — which is why two same-named levels under different parents could not
+  // be renamed independently, and why the collapse key had to be migrated by hand.
+  // A level is now one row, so a rename is one row's title.
+  async function renameGroup(nodeId, newVal){
+    var node = rowById[nodeId];
+    if (!node) return;
+    var patch = { title: newVal };
+    // Keep the legacy text mirror in step, so the Discipline filter, the progress
+    // tables, the Excel export and the cross-app Design Development sync (which
+    // keys off `discipline`) all keep seeing the name the user sees.
+    var lvl = node.level || 1;
+    if (lvl === 1) { UI.toast('The four drawing types are fixed and cannot be renamed','warn'); return; }
+    if (lvl === 2) patch.discipline = newVal; else patch.category = newVal;
+    var res = await sb().from(TABLE).update(patch).eq('id', nodeId);
+    if (res.error){ UI.toast(res.error.message,'error'); return; }
+    // Descendant drawings mirror the same text columns, so they follow the rename.
+    var col = lvl === 2 ? 'discipline' : 'category';
+    var kidIds = descendantIds(node).filter(function (id){ return id !== nodeId; });
+    if (kidIds.length) {
+      var patch2 = {}; patch2[col] = newVal;
+      for (var i = 0; i < kidIds.length; i += 200) {
+        var res2 = await sb().from(TABLE).update(patch2).in('id', kidIds.slice(i, i+200));
+        if (res2.error){ UI.toast(res2.error.message,'error'); return; }
+      }
+    }
+    // No collapse-key migration needed any more — the key is the node id.
+  }
+  // Every row at or below a node, nodes and drawings and sheets alike.
+  function descendantIds(node){
+    var out = [node.id];
+    (nodeKidsOf[node.id] || []).forEach(function (c){ out = out.concat(descendantIds(c)); });
+    (drawsOf[node.id]    || []).forEach(function (d){
+      out.push(d.id);
+      (kidsOf[d.id] || []).forEach(function (sh){ out.push(sh.id); });
+    });
+    return out;
   }
 
   // Delete a whole level (phase / discipline / category) and everything under it.
+  // ⚠️ Was a BULK TEXT DELETE, which stranded any row whose text no longer matched
+  // (a renamed sheet child survived its own deleted level). `parent_id` is
+  // `on delete cascade`, so deleting the one node now removes its sub-tree.
+  //
+  // ⚠️ THE CASCADE IS SILENT, so the uploaded revision files have to be collected
+  // FIRST. allFilesOf() only ever recursed into sheets, so without this sweep every
+  // file under a deleted level would be orphaned in the storage bucket with nothing
+  // left pointing at it.
   async function deleteLevel(ds){
-    var kind=ds.kind, label = kind==='phase'?ds.phase : kind==='disc'?ds.disc : ds.cat;
-    // count affected drawings for the confirm message
-    var n = drawingRows().filter(function(r){
-      if (kind==='phase') return (r.phase||'')===ds.phase;
-      if (kind==='disc')  return (r.phase||'')===ds.phase && (r.discipline||'')===ds.disc;
-      return (r.phase||'')===ds.phase && (r.discipline||'')===ds.disc && ((r.category||'').trim())===ds.cat;
-    }).length;
-    if (!confirm('Delete "'+label+'" and everything under it'+(n?' ('+n+' drawing'+(n>1?'s':'')+')':'')+'? This cannot be undone.')) return;
-    var q = sb().from(TABLE).delete().eq('project_id', pid);
-    if (kind==='phase') q=q.eq('phase', ds.phase);
-    else if (kind==='disc') q=q.eq('phase', ds.phase).eq('discipline', ds.disc);
-    else q=q.eq('phase', ds.phase).eq('discipline', ds.disc).eq('category', ds.cat);
-    var res=await q; if (res.error){ UI.toast(res.error.message,'error'); return; }
+    var node = ds.nodeid ? rowById[ds.nodeid] : null;
+    if (!node){ UI.toast('Select a level to delete','warn'); return; }
+    if ((node.level || 1) === 1){
+      UI.toast('The four drawing types are fixed — delete the levels inside it instead','warn');
+      return;
+    }
+    var ids = descendantIds(node);
+    var nDraw = ids.filter(function (id){ var r = rowById[id]; return r && !isNode(r); }).length;
+    if (!confirm('Delete "'+nodeName(node)+'" and everything under it'+
+                 (nDraw?' ('+nDraw+' drawing'+(nDraw>1?'s':'')+')':'')+'? This cannot be undone.')) return;
+    var files = [];
+    ids.forEach(function (id){
+      var r = rowById[id];
+      if (r && !isNode(r)) files = files.concat(allFilesOf(r));
+    });
+    var res = await sb().from(TABLE).delete().eq('id', node.id);
+    if (res.error){ UI.toast(res.error.message,'error'); return; }
+    if (files.length) await removeFiles(files);
     UI.toast('Deleted', 'ok'); load();
   }
 
   // ------------------------------------------------ add levels / drawings -----
   function nextOrder(){ return (rows.length ? Math.max.apply(null, rows.map(function(x){return x.sort_order||0;})) : 0) + 1; }
   function phaseNames(){ var s={}; rows.forEach(function(r){ if(r.phase)s[r.phase]=1; }); return Object.keys(s); }
-  function discNames(ph){ var s={}; rows.forEach(function(r){ if((r.phase||'')===ph && r.discipline)s[r.discipline]=1; }); return Object.keys(s); }
-  function catNames(ph,d){ var s={}; rows.forEach(function(r){ if((r.phase||'')===ph&&(r.discipline||'')===d&&r.category)s[r.category]=1; }); return Object.keys(s); }
+  // Names already used by a node's own children — the only scope a new level has to
+  // be unique within, now that identity is the parent id rather than a text triple.
+  function siblingNames(parentId){
+    return structuralNodes()
+      .filter(function (n){ return (n.parent_id || null) === (parentId || null); })
+      .map(nodeName);
+  }
   function uniqueName(base, taken){ var n=base, i=2; while(taken.indexOf(n)!==-1){ n=base+' '+(i++); } return n; }
 
-  async function addLevel(kind){
+  // Designate (or stand down) a level as one 0-or-100 progress unit.
+  //
+  // ⚠️ NESTING IS REFUSED, not silently resolved. If a node and its own ancestor
+  // were both units, the ancestor's percentage would count the inner one twice —
+  // once as itself and once inside its own subtree — and the numbers would stop
+  // summing to 100 with nothing on screen to explain why. Better to say no.
+  async function toggleTrackingUnit(nodeId){
+    var node = nodeId ? rowById[nodeId] : null;
+    if (!node || !isNode(node)) return;
+    if (modeOf(node) !== 'binary'){
+      UI.toast('Individual Services Drawings are tracked by approved sheets, not 0-or-100 units','warn');
+      return;
+    }
+    var on = !node.is_tracking_unit;
+    if (on) {
+      var clash = null;
+      // an ancestor already designated?
+      for (var a = node.parent_id ? rowById[node.parent_id] : null; a; a = a.parent_id ? rowById[a.parent_id] : null) {
+        if (a.is_tracking_unit){ clash = nodeName(a) + ' (above this one)'; break; }
+      }
+      // or a descendant?
+      if (!clash) {
+        (function scan(n){
+          (nodeKidsOf[n.id] || []).forEach(function (c){
+            if (clash) return;
+            if (c.is_tracking_unit) clash = nodeName(c) + ' (inside this one)';
+            else scan(c);
+          });
+        })(node);
+      }
+      if (clash){
+        UI.toast('“'+clash+'” is already a progress unit — a unit cannot sit inside another, '+
+                 'or its work would be counted twice. Stand that one down first.','warn');
+        return;
+      }
+    }
+    var res = await sb().from(TABLE).update({ is_tracking_unit: on }).eq('id', node.id);
+    if (res.error){ UI.toast(res.error.message,'error'); return; }
+    node.is_tracking_unit = on;
+    UI.toast(on ? '“'+nodeName(node)+'” now counts as one 0-or-100 unit'
+                : '“'+nodeName(node)+'” is no longer a progress unit', 'ok');
+    render();
+  }
+
+  // ⚠️ Was addLevel(kind) with kind in phase|discipline|category, i.e. depth was
+  // declared in code. Now depth is created by the USER: this adds a child ONE LEVEL
+  // BELOW whichever level row is selected, to any depth, and the level's meaning is
+  // whatever that project named it in drawing_level_defs.
+  // The four top levels are fixed and cannot be added to (migration 0017).
+  async function addLevel(){
     if (!pid){ UI.toast('Select a project first','warn'); return; }
-    var ctx=selCtx||{};
-    var data={ project_id:pid, created_by:uid, node_kind:kind, no_of_sheets:0, approved_sheets:0, sort_order:nextOrder() };
-    if (kind==='phase'){ data.phase=uniqueName('New Phase', phaseNames()); }
-    else if (kind==='discipline'){ if(!ctx.phase){ UI.toast('Select a phase first','warn'); return; } data.phase=ctx.phase; data.discipline=uniqueName('New Discipline', discNames(ctx.phase)); }
-    else if (kind==='category'){ if(!ctx.phase||!ctx.discipline){ UI.toast('Select a discipline first','warn'); return; } data.phase=ctx.phase; data.discipline=ctx.discipline; data.category=uniqueName('New Category', catNames(ctx.phase,ctx.discipline)); }
-    data.title = data.category||data.discipline||data.phase;
+    var ctx = selCtx || {};
+    var parent = ctx.nodeId ? rowById[ctx.nodeId] : null;
+    if (!parent || !isNode(parent)) {
+      UI.toast('Select a level first — a sublevel is added inside the level you pick','warn');
+      return;
+    }
+    var level = (parent.level || 1) + 1;
+    if (level > MAX_LEVEL){ UI.toast('Maximum nesting depth reached ('+MAX_LEVEL+' levels)','warn'); return; }
+    var label = uniqueName('New ' + levelLabel(level), siblingNames(parent.id));
+    var data = {
+      project_id:pid, created_by:uid,
+      // node_kind stays in the legacy vocabulary so isNode() and the existing
+      // stylesheet keep working; `level` is what actually carries depth now.
+      node_kind: level === 2 ? 'discipline' : 'category',
+      level: level, parent_id: parent.id, title: label,
+      // The legacy text columns are still mirrored so filters, the editor form and
+      // the Excel export keep reading the same fields they always have.
+      phase: parent.phase || null,
+      discipline: level === 2 ? label : (parent.discipline || null),
+      category: level >= 3 ? label : null,
+      track_mode: modeOf(parent),
+      no_of_sheets:0, approved_sheets:0, sort_order:nextOrder()
+    };
     var res=await sb().from(TABLE).insert(data); if(res.error){ UI.toast(res.error.message,'error'); return; }
-    if (kind!=='phase') delete collapsed['P:'+ctx.phase];
-    if (kind==='category') delete collapsed['D:'+ctx.phase+'|'+ctx.discipline];
+    delete collapsed['G:'+parent.id];        // reveal the level we just added into
     await load();
-    UI.toast(NODE_LABELS[kind]+' added — double-click its name to rename', 'ok');
+    UI.toast(levelLabel(level)+' added — double-click its name to rename', 'ok');
   }
 
   function autoNumber(group, ctx){
@@ -1952,6 +2735,16 @@ window.DrawingRegister = (function () {
 
   function openSheetsDialog(p){
     if (!p) return;
+    // ⚠️ REFUSED on a binary branch, not merely ignored. Concept / Schematic / For
+    // Construction are 0-or-100 per unit, so a partial sheet count there is a
+    // contradiction, not a display preference. If the inputs merely had no effect a
+    // technical officer would type 7-of-12 and watch nothing happen.
+    if (isBinary(p)) {
+      var t = topLevelOf(p);
+      UI.toast(nodeName(t || p) + ' is tracked 0-or-100 on the designated level, so its drawings '+
+               'are one sheet each. Per-sheet break-out applies to Individual Services Drawings.', 'warn');
+      return;
+    }
     var kids = sheetsOf(p);
     var have = kids.length;
     var m = UI.modal(
@@ -2454,12 +3247,17 @@ window.DrawingRegister = (function () {
       '</svg><div style="min-width:200px;flex:1;">'+legend+'</div></div>';
   }
 
+  // ⚠️ `approved` comes from approvedOf(), NOT the raw `approved_sheets` column.
+  // This read the column directly while the grid read approvedOf(), which is the
+  // two-definitions-of-one-number bug approvedOf() was written to end: approving a
+  // sheet through the full editor leaves the parent's stored counter stale, so the
+  // progress tables and the grid disagreed on the same register.
   function groupAgg(key) {
     var m = {};
     drawingRows().forEach(function (r) {
       var k = r[key] || '—';
       var g = m[k] || (m[k]={label:k, dwg:0, sheets:0, submitted:0, approved:0});
-      var t=num(r.no_of_sheets)||0, a=num(r.approved_sheets)||0;
+      var t=num(r.no_of_sheets)||0, a=approvedOf(r);
       g.dwg++; g.sheets+=t; g.approved+=a;
       if (latestSub(r,'actual')) g.submitted+=t;
     });
@@ -3119,19 +3917,75 @@ window.DrawingRegister = (function () {
             planned_approval:p.planned_approval, actual_approval:p.actual_approval,
             issue_date:(subs[0]&&subs[0].actual)||null,
             due_date:(subs[0]&&subs[0].planned)||null,
-            remarks:p.remarks
+            remarks:p.remarks,
+            scope: p.scope || SCOPES[0],
+            level: p.level || null,
+            // path keys, stripped before the write — see the two-pass insert below
+            _pkey: p._pkey || null, _parent: p._parent || null
           };
         });
-        // chunked insert; yield to the event loop between chunks so the
-        // progress text repaints and the tab never looks frozen
-        for (var i=0; i<recs.length; i+=200) {
-          var chunk = recs.slice(i, i+200);
-          var ins = await sb().from(TABLE).insert(chunk); if (ins.error) throw ins.error;
-          go.textContent = 'Importing '+Math.min(i+200,recs.length)+' / '+recs.length+'…';
+
+        // ⚠️ TWO-PASS INSERT, and it has to be two passes: the tree is parent_id-linked
+        // now, and a row's parent id does not exist until its parent has been written.
+        // Pass 1 inserts the LEVEL rows shallowest-first, collecting id-by-path-key;
+        // pass 2 inserts the drawings with their parent_id resolved. A one-pass insert
+        // would import a flat register with every drawing unparented.
+        var nodeRecs = recs.filter(function (r){ return (r.node_kind||'drawing') !== 'drawing'; })
+                           .sort(function (a,b){ return (a.level||1) - (b.level||1); });
+        var drawRecs = recs.filter(function (r){ return (r.node_kind||'drawing') === 'drawing'; });
+        var idByPath = {};
+        function strip(r){
+          var o = {}; Object.keys(r).forEach(function (k){ if (k[0] !== '_') o[k] = r[k]; });
+          return o;
+        }
+        // Levels are inserted one depth at a time so every parent is already in
+        // idByPath by the time its children are written.
+        var depths = {};
+        nodeRecs.forEach(function (r){ (depths[r.level||1] = depths[r.level||1] || []).push(r); });
+        var lvls = Object.keys(depths).map(Number).sort(function(a,b){return a-b;});
+        for (var li = 0; li < lvls.length; li++) {
+          var batch = depths[lvls[li]].map(function (r){
+            var o = strip(r);
+            o.parent_id = r._parent ? (idByPath[r._parent] || null) : null;
+            return o;
+          });
+          for (var bi = 0; bi < batch.length; bi += 200) {
+            var nb = batch.slice(bi, bi+200);
+            var nres = await sb().from(TABLE).insert(nb).select('id,level,phase,discipline,category,title');
+            if (nres.error) throw nres.error;
+            // Map each inserted level back to its path key by position — the insert
+            // preserves order, and matching on text would be ambiguous the moment two
+            // levels share a name under different parents (which 0017 makes routine).
+            (nres.data || []).forEach(function (row, k){
+              var srcRec = depths[lvls[li]][bi + k];
+              if (srcRec && srcRec._pkey) idByPath[srcRec._pkey] = row.id;
+            });
+          }
+          go.textContent = 'Importing levels '+(li+1)+' / '+lvls.length+'…';
           await new Promise(function (r){ setTimeout(r, 0); });
         }
-        var dc = recs.filter(function(x){return (x.node_kind||'drawing')==='drawing';}).length;
-        UI.toast('Imported '+dc+' drawings', 'ok'); m.close(); load({ reset:true });
+        // chunked insert; yield to the event loop between chunks so the
+        // progress text repaints and the tab never looks frozen
+        for (var i=0; i<drawRecs.length; i+=200) {
+          var chunk = drawRecs.slice(i, i+200).map(function (r){
+            var o = strip(r);
+            o.parent_id = r._parent ? (idByPath[r._parent] || null) : null;
+            return o;
+          });
+          var ins = await sb().from(TABLE).insert(chunk); if (ins.error) throw ins.error;
+          go.textContent = 'Importing '+Math.min(i+200,drawRecs.length)+' / '+drawRecs.length+'…';
+          await new Promise(function (r){ setTimeout(r, 0); });
+        }
+        var dc = drawRecs.length;
+        UI.toast('Imported '+dc+' drawings into '+nodeRecs.length+' levels', 'ok');
+        // Anything the fold could not classify becomes a top level of its own, which
+        // is a data question — say so rather than letting it pass unnoticed.
+        var un = parsed && parsed._unclassifiedTops;
+        if (un && un.length) {
+          UI.toast('Not one of the four drawing types, imported under its own name: '+un.join(', ')+
+                   ' — reclassify or rename these blocks in the workbook.', 'warn');
+        }
+        m.close(); load({ reset:true });
       } catch (e) { UI.toast(e.message, 'error'); go.disabled=false; go.textContent='Import'; }
     };
   }
@@ -3305,7 +4159,7 @@ window.DrawingRegister = (function () {
     function intOf(v){ var n=parseInt(String(v).replace(/[^\d.-]/g,''),10); return isFinite(n)?n:0; }
 
     var recs = [];
-    var cur = { phase:'', discipline:'', category:'', building:'', responsible:'' };
+    var cur = { phase:'', discipline:'', category:'', building:'', responsible:'', scope:'', fold:'' };
     // Anchored so only genuine phase-block titles match — NOT category/sheet
     // titles that merely contain "schematic"/"construction" (e.g. "Schematic
     // Diagrams", "Construction Notes", "Neighbor's As-Built and Crack Mapping").
@@ -3320,6 +4174,11 @@ window.DrawingRegister = (function () {
     // per-file and cannot regress anyone else.
     var PHASE_RE = /^\s*(concept design|schematic design\s*\d|design development|design analysis|detailed design|contract document|for\s+construction|construction drawing|as[- ]?built drawing|as[- ]?built\s*$|pre[- ]?engineering|tender)\b/i;
     var DISC_RE  = /^(architectural|structural|civil|electrical|auxil|plumbing|mechanical|fire|site develop|landscape)/i;
+    // A BUILDING/ZONE reference code as the workbook's own "Coding Reference" sheet
+    // defines it: TW1..TW5 (towers, sometimes a range like TW1-5), PB1 (parking
+    // building), SD (site development), plus the TW-n0000 temporary-works blocks.
+    var BUILDING_CODE_RE = /^(tw\s*-?\s*\d{4,5}|tw\d?(\s*-\s*\d)?|pb\d?(\s*-\s*\d)?|sd)$/i;
+    var unclassifiedTops = {};
 
     // ⚠️ ATTEMPTED AND REVERTED (second time now, by a different route): recognising the OPS
     // template's other top-level blocks — "TEMPORARY WORKS DWG (TWG)" / "INDIVIDUAL SERVICES DWG
@@ -3357,8 +4216,17 @@ window.DrawingRegister = (function () {
       var lvl = norm(cell(row, ci.level));
       if (lvl) {
         if (lvl === 'phase') {
-          cur.phase = cleanPhase(indentText); cur.discipline=''; cur.category='';
-          recs.push(nodeRec('phase', noCode, indentText)); continue;
+          setTopLevel(indentText);
+          recs.push(nodeRec('phase', noCode, cur.phase));
+          if (cur.fold) recs.push(nodeRec('discipline', '', cur.fold));
+          continue;
+        }
+        // A named BUILDING / ZONE level (Tower, Parking Building, Site Development).
+        // In the SLN101 layout this and the trade share a column and are told apart by
+        // their code, but an explicit "Row Level" column always wins.
+        if (lvl === 'building' || lvl === 'zone') {
+          cur.building = indentText; cur.discipline=''; cur.category='';
+          recs.push(nodeRec('building', noCode, indentText)); continue;
         }
         if (lvl === 'discipline') {
           cur.discipline = disciplineHeader(indentText) || mapDiscipline(indentText); cur.category='';
@@ -3380,8 +4248,12 @@ window.DrawingRegister = (function () {
       // PHASE header (top of the outline): keep the *exact* block name so design
       // iterations (Schematic Design 1/2/3/4, FCD, Scheme 1/2…) stay distinct.
       if (!lvl && indentText && PHASE_RE.test(indentText) && !desc && !dwgno) {
-        cur.phase = cleanPhase(indentText); cur.discipline=''; cur.category='';
-        recs.push(nodeRec('phase', noCode, indentText)); continue;
+        setTopLevel(indentText);
+        recs.push(nodeRec('phase', noCode, cur.phase));
+        // Temporary Works / Combined Services / As-Built are no longer top levels —
+        // they arrive as a level-2 node under For Construction Drawings.
+        if (cur.fold) recs.push(nodeRec('discipline', '', cur.fold));
+        continue;
       }
       // DISCIPLINE header: the title *is* a discipline name (exact-ish match)
       var discHead = !lvl ? disciplineHeader(indentText) : null;
@@ -3390,9 +4262,20 @@ window.DrawingRegister = (function () {
         var rp = String(cell(row, ci.resp)).trim(); if (rp) cur.responsible = rp;
         recs.push(nodeRec('discipline', noCode, indentText)); continue;
       }
-      // BUILDING / TOWER header (kept on `cur`, not a render level)
-      if (!lvl && indentText && /^(tower|podium|basement|building|amenity)\b/i.test(indentText) && !desc && !dwgno) {
-        cur.building = indentText; continue;
+      // BUILDING / ZONE header — now a REAL level-2 node.
+      // ⚠️ It used to be parsed onto `cur.building` and emit NO level at all, so the
+      // whole Tower / Parking Building / Site Development tier of the SLN101 workbook
+      // was silently discarded on import.
+      // In that layout the building and the trade sit in the SAME column and are told
+      // apart by the code beside them: a building ref (TW1-5, PB-1, SD, TW-10000) vs a
+      // trade code (AR-000, ST-000, ME-00000…). disciplineFromCode() already knows the
+      // trade prefixes, so anything it does NOT recognise as a trade, that reads like a
+      // building, is a building.
+      if (!lvl && indentText && !desc && !dwgno &&
+          (/^(tower|podium|basement|building|parking|site\s*develop|amenity|temfacil|safety|equipment)\b/i.test(indentText)
+           || (BUILDING_CODE_RE.test(noCode) && !disciplineFromCode(noCode)))) {
+        cur.building = indentText; cur.discipline=''; cur.category='';
+        recs.push(nodeRec('building', noCode, indentText)); continue;
       }
       // CATEGORY header: a sub-group label with no dates and no description
       if (!lvl && indentText && !hasDates && !desc) {
@@ -3448,19 +4331,69 @@ window.DrawingRegister = (function () {
         status: normalizeStatus(String(cell(row, ci.status)).trim()),
         planned_approval: dateOf(cell(row, ci.papp)),
         actual_approval: dateOf(cell(row, ci.aapp)),
-        remarks: [String(cell(row, ci.rem)).trim(), fileRef ? ('File: '+fileRef) : ''].filter(Boolean).join(' · ')
+        remarks: [String(cell(row, ci.rem)).trim(), fileRef ? ('File: '+fileRef) : ''].filter(Boolean).join(' · '),
+        // Main Contract vs Change Order comes from the block header ("(Scheme 2)"),
+        // not from anything on the drawing's own row.
+        scope: cur.scope || SCOPES[0],
+        // The level this drawing belongs to, as a path key openImport() resolves to a
+        // real parent_id once the nodes have ids. Deepest populated tier wins.
+        _parent: pathKey([cur.phase, cur.building, cur.discipline, cur.category]) || null
       });
+    }
+    // Surface anything the fold could not classify instead of letting it quietly
+    // become a fifth top level nobody notices.
+    if (Object.keys(unclassifiedTops).length) {
+      recs._unclassifiedTops = Object.keys(unclassifiedTops);
     }
     return recs;
 
+    // Non-empty tiers only, joined by a separator that cannot occur in a label.
+    function pathKey(parts){
+      return parts.filter(function (v){ return v != null && String(v) !== ''; }).join('\u0001');
+    }
+    // The tier chain a node of this kind sits at, deepest last.
+    function pathChain(kind){
+      if (kind === 'phase')    return pathKey([cur.phase]) ? [cur.phase] : [];
+      if (kind === 'building') return [cur.phase, cur.building].filter(Boolean);
+      if (kind === 'discipline') return [cur.phase, cur.building, cur.discipline].filter(Boolean);
+      return [cur.phase, cur.building, cur.discipline, cur.category].filter(Boolean);
+    }
+
     // A structural node (phase/discipline/category) carrying its code + rollup.
+    // Fold a top-level header onto `cur`. Keeps the four-value vocabulary and the
+    // Main Contract / Change Order split in ONE place, shared with the heuristic and
+    // the explicit "Row Level" paths so they cannot disagree.
+    function setTopLevel(text){
+      var f = foldTopLevel(text);
+      cur.phase = f.top || f.raw;          // unclassifiable keeps its own name
+      cur.scope = f.scope;
+      cur.fold  = f.fold;
+      cur.building = f.fold || '';         // a folded block IS the level-2 node
+      cur.discipline = ''; cur.category = '';
+      if (!f.top && f.raw) unclassifiedTops[f.raw] = 1;
+    }
+    // ⚠️ `level` and `_pkey` are what let openImport() rebuild the real parent_id
+    // tree after insert. `_pkey` is the node's own path key; `_parent` is its
+    // parent's. They are stripped before the row is written (the `_`-prefix rule).
     function nodeRec(kind, code, label){
-      return { node_kind:kind,
+      var name  = label||'';
+      // ⚠️ ONE definition of a level's path, shared with the drawing records below —
+      // they must agree exactly or a drawing resolves to no parent. Empty tiers are
+      // SKIPPED (a register with no building level is 3 deep, not 4 with a blank), so
+      // both sides build the chain the same way: pathKey().
+      var chain = pathChain(kind);
+      var lvlNo = chain.length;
+      var pkey  = pathKey(chain);
+      var prnt  = lvlNo > 1 ? pathKey(chain.slice(0, -1)) : null;
+      return { node_kind: kind==='building' ? 'discipline' : kind,   // legacy vocabulary on the wire
+        level: lvlNo,
         phase: cur.phase,
-        discipline: kind==='phase' ? '' : cur.discipline,
+        discipline: kind==='phase' ? '' : (kind==='building' ? name : cur.discipline),
         category: kind==='category' ? cur.category : '',
+        scope: cur.scope || SCOPES[0],
         dwg_number: code||'', drawing_no: code||'', drawing_code: code||'',
-        title: label||'',
+        title: name,
+        _pkey: pkey, _parent: prnt,
         no_of_sheets: 0, approved_sheets: 0, submissions: [], status: '' };
     }
 
@@ -3542,23 +4475,32 @@ window.DrawingRegister = (function () {
   // iterations stay distinct — do NOT normalise 3/4 down to 1.
   // Title-case a block name, but keep the template's acronyms upper — otherwise a raw import reads
   // "Temporary Works Dwg (Twg)" / "Individual Services Dwg (Isd)".
-  var PHASE_ACRONYMS = ['FCD','TWG','TWD','ISD','DED','BIM','CBW','SD','AB'];
-  function cleanPhase(s) {
-    var out = String(s||'').replace(/\s+/g,' ').trim()
-      .toLowerCase().replace(/\b([a-z])/g, function(m,c){ return c.toUpperCase(); });
-    PHASE_ACRONYMS.forEach(function (a){ out = out.replace(new RegExp('\\b'+a+'\\b','ig'), a); });
-    return out.replace(/\bDwg\b/g,'Dwg');
-  }
-
-  function mapPhase(s) {
+  // ⚠️ THE IMPORTER'S FOLD, and it must agree with migration 0017's exactly — the
+  // register would otherwise be shaped one way by a backfill and another way by the
+  // next import of the same workbook.
+  //
+  // Returns { top, scope, fold }:
+  //   top   — one of the four fixed top levels
+  //   scope — 'Change Order' when the sheet said "(Scheme 2)", else 'Main Contract'
+  //   fold  — a level-2 name when the block is one of the three that fold under For
+  //           Construction (Temporary Works / Combined Services / As-Built), else ''
+  // A block we cannot classify keeps its own name and is reported, never guessed at.
+  function foldTopLevel(s){
     var t = norm(s);
-    if (/concept/.test(t)) return 'Concept Design';
-    if (/schematic.*2|scheme *2|sd2/.test(t)) return 'Schematic Design 2';
-    if (/schematic|scheme *1|sd1/.test(t)) return 'Schematic Design 1';
-    if (/construction|fcd|for const/.test(t)) return 'For Construction';
-    if (/as.?built/.test(t)) return 'As-Built';
-    if (/contract/.test(t)) return 'For Construction';
-    return s.replace(/\b\w/g,function(m){return m.toUpperCase();});
+    // "(Scheme 2)" is a change order, not a design stage. Read it BEFORE the fold,
+    // because the fold discards the suffix.
+    var scope = /scheme\s*2/.test(t) ? 'Change Order' : 'Main Contract';
+    var top = '', fold = '';
+    if (/concept|\becd\b/.test(t)) top = 'Concept Design';
+    else if (/individual\s*service|\bisd\b/.test(t)) top = 'Individual Services Drawings';
+    else if (/temporary\s*works|\btw[dg]\b/.test(t)) { top = 'For Construction Drawings'; fold = 'Temporary Works'; }
+    else if (/combined\s*service|\bcsd\b/.test(t))   { top = 'For Construction Drawings'; fold = 'Combined Services'; }
+    else if (/as[- ]?built|\babd\b/.test(t))          { top = 'For Construction Drawings'; fold = 'As-Built'; }
+    // SD1 and SD2 merge completely — the LOD distinction is deliberately dropped.
+    else if (/schematic|scheme|\bsd[12]?\b/.test(t)) top = 'Schematic Design';
+    else if (/construction|contract|\bfcd\b/.test(t)) top = 'For Construction Drawings';
+    return { top: top, scope: scope, fold: fold,
+             raw: String(s||'').replace(/\s+/g,' ').trim() };
   }
 
   // ========================================================== PRINT TOP SHEET =

@@ -141,11 +141,26 @@ tr.dr-grp .dr-glabel { cursor:text; }      /* except the label: dblclick renames
    at 1440px and lost roughly half the code at the 1080px min-width. Measured,
    not guessed: see _ui_test.html. 12px steps keep a legible ladder and leave
    the deepest row 66px of code space even at the narrowest table width. */
+/* ⚠️ GENERIC DEPTH (2026-08-18, migration 0017). This was five hardcoded rules,
+   which capped the tree at five levels; SLN101 needs six (top level › Building ›
+   Trade › Category › drawing › sheet) and another project can configure more. The
+   depth now travels as an inline `--dr-depth` custom property set by the renderer,
+   so one rule covers any depth. The 12px step and the 8px base are UNCHANGED, so
+   levels 1-5 render pixel-identically to before.
+   The measured constraint still applies: levels 4+ sit inside the 130px frozen Code
+   column, and at 12px per step level 6 leaves ~54px for the code at the 1080px min
+   width. Past that the ladder is CLAMPED rather than allowed to eat the column —
+   deeper levels stay legible at the cost of not being visually distinct, which is
+   the right trade when the alternative is a clipped drawing code. */
+.dr-indent { padding-left: calc(8px + min(var(--dr-depth, 1), 6) * 12px - 12px); }
+/* Explicit fallbacks for rows that don't carry --dr-depth (sheets, plain drawings). */
 .dr-lvl-1 .dr-indent { padding-left:8px; }
 .dr-lvl-2 .dr-indent { padding-left:20px; }
 .dr-lvl-3 .dr-indent { padding-left:32px; }
 .dr-lvl-4 .dr-indent { padding-left:44px; }
 .dr-lvl-5 .dr-indent { padding-left:56px; }   /* individual sheets under a drawing */
+/* A row that DOES carry a depth wins over the level fallback above. */
+.dr-grp[style*="--dr-depth"] .dr-indent { padding-left: calc(8px + min(var(--dr-depth, 1), 6) * 12px - 12px); }
 
 /* A coloured rail on the first cell marks the level at a glance.
    ⚠️ THREE of the five rails were effectively invisible before this, each in a
@@ -712,3 +727,37 @@ td.dr-editing { padding:2px 4px; }
   .dr-rowbtn { min-width: 34px; min-height: 34px; }
   .dr-prog { min-width: 70px; }
 }
+
+/* ---- 0-or-100 progress units (migration 0017) ----------------------------
+   Concept / Schematic / For Construction are counted in UNITS the technical
+   officer designates — typically the trade — rather than in sheets. The marker
+   is a quiet outline until it is on, so an undesignated register doesn't read
+   as broken. */
+.dr-lvlunit { background:none; border:0; padding:2px; cursor:pointer; color:var(--pd-mut); opacity:.55; }
+.dr-lvlunit:hover { opacity:1; color:var(--pd-red); }
+.dr-lvlunit-on { opacity:1; color:var(--pd-red); }
+.dr-unittag { display:inline-block; margin-left:7px; padding:0 6px; border-radius:9px;
+  background:var(--pd-red-light); color:var(--pd-red-dark, var(--pd-red)); border:1px solid var(--pd-red-mid);
+  font-size:var(--dr-fs-micro); font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.dr-unithint { display:inline-block; margin-left:7px; color:var(--pd-mut);
+  font-size:var(--dr-fs-micro); font-style:italic; cursor:help; }
+
+/* ---- Excel-like cell layer (2026-08-18) ----------------------------------
+   The active cell gets a real 2px cursor ring; the rest of the range is a
+   translucent OVERLAY rather than a background.
+   ⚠️ box-shadow, not background: a cell already carries a background from the
+   zebra/frozen/selected-row rules, and a competing `background` only ever shows
+   one winner — the range would silently vanish under a row hover. An inset
+   box-shadow paints on top of whatever is already there. */
+td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(238,49,36,.14); }
+td.dr-cell-cur { outline:2px solid var(--pd-red); outline-offset:-2px; position:relative; z-index:2; }
+html.pd-dark td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.20); }
+/* The grid owns the keyboard, so it must be focusable — but the app-wide
+   :focus-visible ring would then draw a red box around the WHOLE table while a
+   cell is selected, which reads as a rendering fault. The cell cursor is a far
+   more precise indicator, so the container ring is suppressed only while one
+   exists; with no cell selected a keyboard user still gets the container ring. */
+.dr-grid:focus-visible:has(td.dr-cell-cur) { outline:none !important; }
+.dr-cellinfo { margin-left:10px; color:var(--pd-mut); font-size:var(--dr-fs-micro); white-space:nowrap; }
+.dr-hint kbd { display:inline-block; padding:0 4px; border:1px solid var(--pd-line); border-bottom-width:2px;
+  border-radius:3px; background:var(--pd-bg); font-family:inherit; font-size:.92em; line-height:1.5; }

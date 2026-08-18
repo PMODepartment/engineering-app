@@ -241,12 +241,24 @@
         'id,drawing_no,drawing_code,title,revision,status,node_kind,parent_id,submissions,updated_at,discipline',
         pid);
 
-      // The table stores the phase/discipline/category TREE in the same table as
-      // the drawings (node_kind), and a sheet is a drawing row with parent_id.
-      // Counting raw rows would inflate every KPI, so: a "drawing" is a
-      // node_kind='drawing' (or null, for legacy rows) row with no parent.
-      var draw   = rows.filter(function (r) { return (r.node_kind || 'drawing') === 'drawing' && !r.parent_id; });
-      var sheets = rows.filter(function (r) { return (r.node_kind || 'drawing') === 'drawing' && !!r.parent_id; });
+      // The table stores the level TREE in the same table as the drawings
+      // (node_kind), and a sheet is a drawing row whose parent is another drawing.
+      // Counting raw rows would inflate every KPI.
+      //
+      // ⚠️ "no parent_id" IS NOT "not a sheet" any more (migration 0017). parent_id
+      // now also links a drawing to its LEVEL node, so the old test classified every
+      // drawing as a sheet and this tile silently reported zero drawings. Which kind
+      // of edge it is depends on the PARENT: a sheet's parent is itself a drawing.
+      var byId = {};
+      rows.forEach(function (r) { byId[r.id] = r; });
+      function isNodeRow(r) { return !!r && !!r.node_kind && r.node_kind !== 'drawing'; }
+      function isSheetRow(r) {
+        if (!r.parent_id) return false;
+        var p = byId[r.parent_id];
+        return !!p && !isNodeRow(p);
+      }
+      var draw   = rows.filter(function (r) { return !isNodeRow(r) && !isSheetRow(r); });
+      var sheets = rows.filter(function (r) { return !isNodeRow(r) &&  isSheetRow(r); });
 
       // Bucketed via drBucket so real-world statuses ('For Review',
       // 'Revise & Resubmit', 'Superseded') land in a tile instead of vanishing.
