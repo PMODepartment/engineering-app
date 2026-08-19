@@ -338,7 +338,12 @@ html.pd-dark {
 /* Auto-fit instead of a fixed 6-up grid: cards claim real width on a wide screen
    (the number gets room to breathe) and wrap gracefully on a narrow one, instead
    of being squeezed into exactly six equal slots regardless of viewport. */
-.dr-kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:18px; }
+/* ⚠️ An explicit column count, not auto-fit. auto-fit fills the row and stretches the
+   remainder onto the next line, so a 6-card row rendered as 4 + 2 half-width cards —
+   reported as the KPI cards not being uniform in size. kpiSection() passes the count as
+   --dr-kpi-n; the fallback keeps any un-migrated caller working. */
+.dr-kpis { display:grid; gap:18px;
+  grid-template-columns:repeat(var(--dr-kpi-n, 4), minmax(0, 1fr)); }
 .dr-kpi-section .dr-kpis { margin-bottom:0; }
 .dr-kpi { background:var(--pd-card); border:1px solid var(--pd-line); border-radius:var(--pd-radius); padding:20px 22px;
   position:relative; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,.05); transition:box-shadow .15s, transform .15s; }
@@ -471,11 +476,11 @@ html.pd-dark {
 
 @media (max-width:1000px) {
   .dr-dash-grid { grid-template-columns:1fr; }
-  .dr-kpis { grid-template-columns:repeat(3,1fr); }
+  .dr-kpis { grid-template-columns:repeat(3, minmax(0,1fr)) !important; }
   .dr-grid4 { grid-template-columns:1fr 1fr; }
 }
 @media (max-width:700px) {
-  .dr-kpis { grid-template-columns:repeat(2,1fr); }
+  .dr-kpis { grid-template-columns:repeat(2, minmax(0,1fr)) !important; }
   .dr-grid3, .dr-grid2 { grid-template-columns:1fr; }
 }
 
@@ -893,3 +898,10 @@ body.dr-splitting .dr-table td.dr-editing { overflow:visible; }
   body.dr-splitting .dr-table tbody td { height:auto; }
   body.dr-splitting .dr-table .dr-sub { display:block; }
 }
+
+/* ---- Backlog: the card heading doubles as its toolbar ----------------------
+   The Due filter belongs to this view alone (the shared filter bar applies to every
+   view), so it sits in the card's own heading rather than adding a second filter row
+   above the table and pushing the worklist further down. */
+.dr-bk-tools { margin-left:auto; display:flex; align-items:center; gap:8px; flex-shrink:0; }
+.dr-bk-due { font-weight:400; }

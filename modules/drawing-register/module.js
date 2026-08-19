@@ -715,7 +715,7 @@ window.DrawingRegister = (function () {
       selected = {}; lastClickedId = null;
       selCtx = { phase:'', discipline:'', category:'', nodeId:null, level:null };
       collapsed = {}; fCollapsed = {};
-      bkAging = '';        // a drill-through aging filter must not leak across projects
+      bkAging = ''; bkDue = '';        // a drill-through aging filter must not leak across projects
       bkShowAll = false;
       // Collapse keys are node ids now, so the default collapses the level-1 ROWS
       // rather than a text key that no longer exists.
@@ -1161,6 +1161,10 @@ window.DrawingRegister = (function () {
   // shared filter bar: aging is derived from the planned approval date, is meaningful
   // only for open items, and the Registry has no aging column to filter on.
   var bkAging = '';
+  // Backlog-only, session-only. Not persisted for the same reason the aging filter is not:
+  // it is a question you ask while working a list, not a preference — and a filter silently
+  // restored on a later visit reads as "the backlog is empty".
+  var bkDue = '';
   function backlogRows(){
     return drawingRows().filter(function (r){
       if (!matchesFilters(r, { skipDups:true })) return false;
@@ -1225,6 +1229,17 @@ window.DrawingRegister = (function () {
       host.innerHTML = emptyMsg(anyFilter() ? 'No open items match these filters.' : 'No open items — every drawing is approved.');
       return;
     }
+    // ⚠️ DUE vs NOT DUE is the backlog's own question and does not belong in the shared
+    // filter bar, which applies to every view. "Due" means the planned approval date has
+    // already passed — the same test the Overdue KPI uses, reused so the filter and the
+    // count cannot disagree. A drawing with no planned date cannot be judged either way,
+    // so it is excluded from "Due only" and included in "Not due yet".
+    if (bkDue) {
+      list = list.filter(function (r){
+        var d = agingDays(r);
+        return bkDue === 'due' ? (d != null && d > 0) : !(d != null && d > 0);
+      });
+    }
     list = list.slice().sort(function (a,b){
       var va=bkSortVal(a,bkSort.col), vb=bkSortVal(b,bkSort.col);
       var cmp = va<vb ? -1 : (va>vb ? 1 : 0);
@@ -1244,7 +1259,7 @@ window.DrawingRegister = (function () {
       kpi(list.length, 'Open items', '', bkAging ? { view:'backlog', patch:{}, tip:'Clear the aging filter and show every open item' } : null) +
       kpi(late, 'Overdue', late>0?'warn':'') +
       kpi(tight, 'Due ≤3 days', tight>0?'warn':'') +
-      kpi(revise, 'Resubmit', '', { view:'backlog', patch:{ status:'Resubmit' }, tip:'Filter the Backlog to Resubmit' }));
+      kpi(revise, 'Resubmit', '', { view:'backlog', patch:{ status:'Resubmit' }, tip:'Filter the Backlog to Resubmit' }), 4);
 
     var shown = (bkShowAll || list.length<=BK_PAGE) ? list : list.slice(0, BK_PAGE);
     // Bulk actions operate on `selected` filtered by `visibleIds` (shared with
@@ -1307,13 +1322,40 @@ window.DrawingRegister = (function () {
       '<button class="dr-sortchip dr-agchip" id="dr-agclear" title="Clear the aging filter">' +
         Fmt.esc(bkAging) + ' ' + ico('x',12) + '</button>' : '';
 
+    var dueSel = '<select class="pd-select pd-btn-sm dr-bk-due" id="dr-bk-due" ' +
+      'title="Filter by whether the planned approval date has passed">' +
+      [['','All (due + not due)'],['due','Due only'],['notdue','Not due yet']].map(function (o){
+        return '<option value="'+o[0]+'"'+(bkDue===o[0]?' selected':'')+'>'+o[1]+'</option>';
+      }).join('') + '</select>';
+
+    // ⚠️ TABLE FIRST, CHARTS BELOW — the same order the procurement app's backlog settled
+    // on. This is the screen you work FROM: the list is the job, and the charts describe
+    // it. Putting the charts first pushed the actual worklist below the fold.
+    //
+    // The charts are scoped to the SAME `list` the table shows, so a filter narrows both
+    // and the picture always describes the rows on screen.
     host.innerHTML = kpis +
       '<div class="pd-card"><h3 class="dr-h3">Open items' +
       '<span class="dr-mut" style="font-weight:400;font-size:12.5px;margin-left:8px;">'+
-      (anyFilter() || bkAging ? 'Showing '+list.length+' filtered' : list.length+' total')+'</span>' +
-      agChip + '</h3>' + selbar +
+      (anyFilter() || bkAging || bkDue ? 'Showing '+list.length+' filtered' : list.length+' total')+'</span>' +
+      agChip + '<span class="dr-bk-tools">' + dueSel + '</span></h3>' + selbar +
       '<div class="dr-bk-scroll"><table class="pd-table dr-table dr-bk-table"><thead><tr>'+head+'</tr></thead>' +
-      '<tbody>'+body+'</tbody></table></div>' + moreBar + '</div>';
+      '<tbody>'+body+'</tbody></table></div>' + moreBar + '</div>' +
+      '<div class="dr-dash-grid">' +
+        '<div class="pd-card"><h3 class="dr-h3">Open items by status</h3>' + donutSVG(statusCounts(list)) + '</div>' +
+        '<div class="pd-card"><h3 class="dr-h3">Open items by aging</h3>' + agingBarSVG(agingBuckets(list)) + '</div>' +
+      '</div>' +
+      '<div class="pd-card"><h3 class="dr-h3">Open items by period — planned approval</h3>' +
+        '<div class="dr-pc-wrap" id="dr-bk-period"></div></div>';
+
+    // One Chart.js instance is shared across the module (renderPeriodChart destroys the
+    // previous one), which is safe because Overview and Backlog are never on screen
+    // together — they are alternative views of the same host element.
+    var bkPeriodHost = document.getElementById('dr-bk-period');
+    if (bkPeriodHost) renderPeriodChart(bkPeriodHost, periodBuckets(periodMode, list), 'num');
+
+    var dueEl = document.getElementById('dr-bk-due');
+    if (dueEl) dueEl.onchange = function (){ bkDue = dueEl.value; bkShowAll = false; renderBacklog(); };
 
     var showAllBtn = document.getElementById('dr-bk-showall');
     if (showAllBtn) showAllBtn.onclick = function (){ bkShowAll = true; renderBacklog(); };
@@ -3229,12 +3271,20 @@ window.DrawingRegister = (function () {
 
     // Only "Drawings" is a row set — the rest count sheets or units, so drilling them
     // would land on a list whose row count doesn't match the number clicked.
+    // ⚠️ SIX CARDS ON BOTH HALVES, deliberately. The two halves measure different things
+    // (units vs sheets), and they used to show five cards and six — so an auto-fit grid
+    // wrapped them differently, the last row stretched to fill, and the cards came out
+    // visibly different widths. Switching halves also reflowed the whole row. Equal counts
+    // plus an explicit column count (see kpiSection) means one uniform row either way.
     var kpis = dashSwitch() + kpiSection(isIsd ? 'Individual Services Drawings' : 'Design Progress — Concept / Schematic / For Construction',
       kpi(draws.length, 'Drawings', '', { view:'registry', patch:{}, tip:'Show these in the Registry' }) +
-      (isIsd ? kpi(totSheets, 'Total sheets') + kpi(subSheets, 'Submitted') + kpi(apSheets, 'Approved sheets')
-             : kpi(apUnits, 'Approved') + kpi(subSheets ? subSheets : 0, 'Submitted')) +
+      (isIsd
+        ? kpi(totSheets, 'Total sheets') + kpi(subSheets, 'Submitted') + kpi(apSheets, 'Approved sheets')
+        // The design half's denominator is the drawing count, so it is shown rather than
+        // left implicit — a bare "Approved 12" invites the question "of what?".
+        : kpi(draws.length, 'Tracked') + kpi(subSheets ? subSheets : 0, 'Submitted') + kpi(apUnits, 'Approved')) +
       kpi(pct+'%', isIsd ? 'Approved % (sheets)' : 'Approved % (drawings)', 'ok') +
-      kpi(balance, isIsd ? 'Balance (sheets)' : 'Balance (drawings)', balance>0?'warn':''));
+      kpi(balance, isIsd ? 'Balance (sheets)' : 'Balance (drawings)', balance>0?'warn':''), 6);
 
     // by phase
     // Both tables are scoped to the half on screen, so their totals reconcile with the
@@ -3624,9 +3674,15 @@ window.DrawingRegister = (function () {
   // Groups a KPI row under a small uppercase eyebrow label (WPM "Cost Overview" /
   // "Work Package Status" pattern) so a page with more than one KPI row reads as
   // separate sections instead of one long undifferentiated strip.
-  function kpiSection(label, cardsHtml) {
+  // ⚠️ `n` is the card count, and it matters. `grid-template-columns:repeat(auto-fit,
+  // minmax(170px,1fr))` fills the row and then STRETCHES whatever is left over onto the
+  // next line — so 6 cards on a wide screen came out as 4 normal ones plus 2 half-width
+  // ones, which is exactly the "KPI cards are not uniform in size" report. Telling the
+  // grid how many columns there are makes every card the same width by construction; the
+  // media queries below still fold it to 3 and 2 on narrower screens.
+  function kpiSection(label, cardsHtml, n) {
     return '<div class="dr-kpi-section"><div class="dr-kpi-seclabel">'+Fmt.esc(label)+'</div>' +
-           '<div class="dr-kpis">'+cardsHtml+'</div></div>';
+           '<div class="dr-kpis"'+(n?' style="--dr-kpi-n:'+n+'"':'')+'>'+cardsHtml+'</div></div>';
   }
 
   // ------------------------------------------------------------ file view ----
