@@ -9,7 +9,7 @@
   <title>Material Submittal Log · Engineering App</title>
   <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260813d" />
   <link rel="stylesheet" href="../../assets/css/topsheet.css?v=20260813d" />
-  <link rel="stylesheet" href="module.css?v=20260813d" />
+  <link rel="stylesheet" href="module.css?v=20260818a" />
 </head>
 <body>
   <div class="pd-app">
@@ -77,12 +77,14 @@
   <script src="../../assets/js/db.js?v=20260813d"></script>
   <script src="../../assets/js/ui.js?v=20260813d"></script>
   <script src="../../assets/js/icons.js?v=20260813d"></script>
+  <!-- The shared Excel-like grid layer. Must load BEFORE module.js. -->
+  <script src="../../assets/js/gridx.js?v=20260818a"></script>
   <script src="../../assets/js/perm.js?v=20260813d"></script>
   <script src="../../assets/js/offline.js?v=20260813d"></script>
   <script src="../../assets/js/collab.js?v=20260813d"></script>
   <script src="../../assets/js/autosave.js?v=20260813d"></script>
   <script src="../../assets/js/topsheet.js?v=20260813d"></script>
-  <script src="module.js?v=20260813d"></script>
+  <script src="module.js?v=20260818a"></script>
   <script>
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);
