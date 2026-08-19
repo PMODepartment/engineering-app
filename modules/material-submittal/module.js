@@ -845,14 +845,18 @@ window.MaterialSubmittal = (function () {
     else { logSort.col = null; logSort.dir = 1; }   // third click → natural order
     renderLog();
   }
-  function logTh(col, cls) {
+  // `wkey` is the resize/measure key: it adds the `ms-c-<key>` class the column
+  // measurer scans and a drag grip. ⚠️ The grip stops its own clicks, or every resize
+  // would also re-sort the column it was dragging.
+  function logTh(col, cls, wkey) {
     var active = logSort.col === col;
     var tip = active
       ? (logSort.dir === 1 ? 'Sorted ascending — click for descending' : 'Sorted descending — click to restore natural order')
       : 'Click to sort by this column';
-    return '<th class="' + (cls || '') + ' ms-sortable' + (active ? ' ms-sorted' : '') +
+    var grip = wkey ? '<span class="gx-grip" data-colw="' + wkey + '" title="Drag to resize · double-click to fit content"></span>' : '';
+    return '<th class="' + (cls || '') + (wkey ? ' ms-c-' + wkey : '') + ' ms-sortable' + (active ? ' ms-sorted' : '') +
       '" data-lcol="' + col + '" title="' + esc(tip) + '">' + esc(LOG_SORTABLE[col]) +
-      (active ? ' <span class="ms-sortind">' + (logSort.dir === 1 ? '▲' : '▼') + '</span>' : '') + '</th>';
+      (active ? ' <span class="ms-sortind">' + (logSort.dir === 1 ? '▲' : '▼') + '</span>' : '') + grip + '</th>';
   }
 
   function renderLog() {
@@ -879,11 +883,13 @@ window.MaterialSubmittal = (function () {
     // the empty state both span it, and a hardcoded number silently breaks the
     // moment a column is added.
     var HEAD = ['<th class="ms-cb"><input type="checkbox" id="ms-xall" title="Select all shown" /></th>',
-      logTh('code', 'ms-fz1'), logTh('item', 'ms-fz2'),
-      logTh('discipline'), logTh('location'), logTh('brand'), logTh('vendor'), logTh('presentation'),
+      logTh('code', 'ms-fz1', 'code'), logTh('item', 'ms-fz2', 'material'),
+      logTh('discipline', '', 'disc'), logTh('location', '', 'location'), logTh('brand', '', 'brand'),
+      logTh('vendor', '', 'supplier'), logTh('presentation', '', 'pres'),
       '<th class="ms-doccol">Doc</th>',
-      logTh('req'), logTh('psub'), logTh('asub'), logTh('pappr'), logTh('aappr'),
-      logTh('approver'), logTh('rev'), logTh('status'), logTh('mas'),
+      logTh('req', '', 'req'), logTh('psub', '', 'psub'), logTh('asub', '', 'asub'),
+      logTh('pappr', '', 'papp'), logTh('aappr', '', 'aapp'),
+      logTh('approver', '', 'appr'), logTh('rev', '', 'rev'), logTh('status'), logTh('mas'),
       // Top sheet is a READ action (it only prints what the row already holds),
       // so unlike the edit/delete column it is not gated on canWrite.
       '<th class="ms-tscol" title="MAS top sheet">Form</th>'];
@@ -898,7 +904,15 @@ window.MaterialSubmittal = (function () {
         'Sorted by ' + esc(LOG_SORTABLE[logSort.col]) + ' ' + (logSort.dir === 1 ? '▲' : '▼') +
         ' ' + ico('x', 12) + '</button></div>' : '';
 
-    var h = sortChip + '<div class="pd-card ms-tablecard"><table class="ms-table"><thead><tr>' +
+    var gridBar = canWrite ? '<div class="ms-listbar ms-gridbar">' +
+      '<span class="gx-hint ms-mut">Click a cell · Shift-click or drag for a range · type or <kbd>F2</kbd> to edit · ' +
+      '<kbd>Tab</kbd>/<kbd>↵</kbd> move · <kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy-paste (Excel) · ' +
+      '<kbd>Ctrl</kbd>+<kbd>D</kbd> fill down · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Del</kbd> clear</span>' +
+      '<span class="gx-info" id="ms-cellinfo"></span><span style="flex:1"></span>' +
+      '<button class="pd-btn ms-iconbtn" id="ms-fitcols" title="Fit every column to its content">' + ico('columns', 15) + '</button>' +
+      '<button class="pd-btn ms-iconbtn" id="ms-resetcols" title="Reset column widths">' + ico('refresh', 15) + '</button>' +
+      '</div>' : '';
+    var h = sortChip + gridBar + '<div class="pd-card ms-tablecard"><table class="ms-table"><thead><tr>' +
       HEAD.join('') + '</tr></thead><tbody>';
 
     if (!list.length) {
@@ -913,26 +927,33 @@ window.MaterialSubmittal = (function () {
       if (isColl) return;
       logSortList(g).forEach(function (r) {
         var st = statusOf(r), meta = statusMeta(st), od = isOverdue(r);
+        // ⚠️ Every editable cell carries `data-f` (the column) + `data-t` (the editor
+        // type) + `ms-ed`, which is what GridX addresses. A cell WITHOUT them is
+        // outside the coordinate space and can never be typed into or pasted over —
+        // that is how the derived/display-only columns (the code, the file button, the
+        // status pill, the MAS top-sheet button) stay uneditable by construction
+        // rather than by a guard someone can forget.
+        var E = canWrite ? ' ms-ed' : '';
         h += '<tr' + (sel[r.id] ? ' class="ms-selrow"' : '') + ' data-id="' + esc(r.id) + '">' +
           '<td class="ms-cb"><input type="checkbox" data-cb="' + esc(r.id) + '"' + (sel[r.id] ? ' checked' : '') + ' /></td>' +
-          '<td class="ms-fz1"><span class="ms-code">' + esc(codeOf(r) || '—') + '</span></td>' +
-          '<td class="ms-fz2"><div class="ms-item">' + esc(r.material || '(untitled)') + '</div>' +
+          '<td class="ms-fz1 ms-c-code"><span class="ms-code">' + esc(codeOf(r) || '—') + '</span></td>' +
+          '<td class="ms-fz2 ms-c-material' + E + '" data-f="material" data-t="text"><div class="ms-item">' + esc(r.material || '(untitled)') + '</div>' +
             (r.specification ? '<div class="ms-sub" title="' + esc(r.specification) + '">' + esc(r.specification) + '</div>' : '') + '</td>' +
-          '<td class="ms-nowrap">' + esc(discOf(r) || '—') + '</td>' +
-          '<td>' + esc(r.location || '') + '</td>' +
-          '<td>' + esc(r.brand || '') + '</td>' +
-          '<td>' + esc(r.supplier || '') + '</td>' +
-          '<td>' + esc(r.type_presentation || '') + '</td>' +
+          '<td class="ms-nowrap ms-c-disc">' + esc(discOf(r) || '—') + '</td>' +
+          '<td class="ms-c-location' + E + '" data-f="location" data-t="text">' + esc(r.location || '') + '</td>' +
+          '<td class="ms-c-brand' + E + '" data-f="brand" data-t="text">' + esc(r.brand || '') + '</td>' +
+          '<td class="ms-c-supplier' + E + '" data-f="supplier" data-t="text">' + esc(r.supplier || '') + '</td>' +
+          '<td class="ms-c-pres' + E + '" data-f="type_presentation" data-t="text">' + esc(r.type_presentation || '') + '</td>' +
           '<td class="ms-doccol">' + (r.file_url
             ? '<button class="ms-filebtn" data-file="' + esc(r.file_url) + '" title="Open ' + esc(fileLabel(r.file_url)) + '"><span data-ico="eye" data-ico-size="14"></span></button>'
             : '<span class="ms-mut ms-mini">—</span>') + '</td>' +
-          '<td class="ms-nowrap ms-mut">' + fmtDate(r.date_required) + '</td>' +
-          '<td class="ms-nowrap ms-mut">' + fmtDate(r.plan_submission_date) + '</td>' +
-          '<td class="ms-nowrap">' + fmtDate(r.date_submitted) + '</td>' +
-          '<td class="ms-nowrap ' + (od ? 'ms-od' : 'ms-mut') + '"' + (od ? ' title="Overdue — planned approval has passed"' : '') + '>' + fmtDate(r.plan_approval_date) + (od ? ' !' : '') + '</td>' +
-          '<td class="ms-nowrap">' + fmtDate(r.date_approved) + '</td>' +
-          '<td class="ms-nowrap ms-mini">' + esc([r.approver_consultant, r.approver_client].filter(Boolean).join(' / ')) + '</td>' +
-          '<td class="ms-r">' + esc(r.revision_no || '') + '</td>' +
+          '<td class="ms-nowrap ms-mut ms-c-req' + E + '" data-f="date_required" data-t="date">' + fmtDate(r.date_required) + '</td>' +
+          '<td class="ms-nowrap ms-mut ms-c-psub' + E + '" data-f="plan_submission_date" data-t="date">' + fmtDate(r.plan_submission_date) + '</td>' +
+          '<td class="ms-nowrap ms-c-asub' + E + '" data-f="date_submitted" data-t="date">' + fmtDate(r.date_submitted) + '</td>' +
+          '<td class="ms-nowrap ms-c-papp' + E + ' ' + (od ? 'ms-od' : 'ms-mut') + '" data-f="plan_approval_date" data-t="date"' + (od ? ' title="Overdue — planned approval has passed"' : '') + '>' + fmtDate(r.plan_approval_date) + (od ? ' !' : '') + '</td>' +
+          '<td class="ms-nowrap ms-c-aapp' + E + '" data-f="date_approved" data-t="date">' + fmtDate(r.date_approved) + '</td>' +
+          '<td class="ms-nowrap ms-mini ms-c-appr">' + esc([r.approver_consultant, r.approver_client].filter(Boolean).join(' / ')) + '</td>' +
+          '<td class="ms-r ms-c-rev' + E + '" data-f="revision_no" data-t="text">' + esc(r.revision_no || '') + '</td>' +
           '<td>' + (st ? '<span class="ms-pill ' + (meta ? meta.cls : 's-forsub') + '">' + esc(st) + '</span>' : '<span class="ms-mut ms-mini">—</span>') + '</td>' +
           '<td class="ms-nowrap ms-mini">' + esc(r.mas_id || '') + '</td>' +
           '<td class="ms-tscol"><button class="pd-btn ms-iconbtn" data-mas="' + esc(r.id) + '" title="Generate the MAS top sheet (F-GEN013)">' + ico('fileText', 15) + '</button></td>' +
@@ -956,9 +977,144 @@ window.MaterialSubmittal = (function () {
     wireLog();
   }
 
+  // ==========================================================================
+  // EXCEL-LIKE CELL LAYER — the SHARED engine (assets/js/gridx.js)
+  // --------------------------------------------------------------------------
+  // Same engine the Drawing Register uses, configured for this table, so the two
+  // registers behave identically: cell cursor, rectangular ranges, Ctrl+C/V as TSV
+  // against Excel, Ctrl+D fill down, Ctrl+Z undo, Del to clear, type-to-edit,
+  // Ctrl+Arrow jump, drag-resize + double-click-fit columns.
+  //
+  // ⚠️ SECTION HEADER ROWS (`tr.ms-grp`) carry no `data-f` cells, so they sit outside
+  // the coordinate space by construction — a range cannot select one and a paste
+  // cannot land on one. Keep it that way for any future decorative row.
+  var MS_COL_DEFAULTS = { code:190, material:280, disc:120, location:110, brand:110,
+                          supplier:130, pres:110, req:92, psub:92, asub:92, papp:92,
+                          aapp:92, appr:130, rev:52 };
+  var MS_COL_MIN      = { code:110,  material:140, disc:70,  location:70,  brand:70,
+                          supplier:80,  pres:70,  req:70, psub:70, asub:70, papp:70,
+                          aapp:70, appr:80,  rev:40 };
+  // Per user AND per project, matching the Drawing Register's key shape — a shared
+  // browser must not carry one person's widths into another's session.
+  function msColWKey(){ return 'ms:colw:' + (UID || 'anon') + ':' + (pid || '-'); }
+
+  // ⚠️ THE single definition of "how a typed value becomes a patch" for this table.
+  // Typing, paste, fill-down and undo all route through it, so a paste can never
+  // write a field differently from an edit of the same cell.
+  function msPatchFor(r, f, t, val){
+    var patch = {};
+    if (t === 'date') patch[f] = val || null;
+    else if (t === 'num') { var n = parseFloat(val); patch[f] = isNaN(n) ? null : n; }
+    else patch[f] = val;
+    return patch;
+  }
+  // The RAW value, never the rendered text — the date cells render a display format
+  // and the overdue cell appends a "!", neither of which round-trips back in.
+  function msValueOf(r, f){ var v = r[f]; return v == null ? '' : String(v); }
+
+  async function msPersist(r, patch){
+    var res = await sb().from(TABLE).update(patch).eq('id', r.id).select().single();
+    if (res.error) { UI.toast(res.error.message, 'error'); return; }
+    Object.assign(r, res.data || patch);
+  }
+
+  // One inline editor, matching the Drawing Register's: the cell becomes an input,
+  // Enter/blur commits, Escape reverts.
+  function msBeginEdit(td, seed){
+    if (!canWrite || !td || td.classList.contains('ms-editing')) return;
+    var tr = td.closest('tr[data-id]'); if (!tr) return;
+    var r = rows.find(function (x){ return x.id === tr.dataset.id; }); if (!r) return;
+    var f = td.dataset.f, t = td.dataset.t || 'text';
+    var cur = r[f] == null ? '' : String(r[f]);
+    td.classList.add('ms-editing');
+    var input = document.createElement('input');
+    input.className = 'ms-editin';
+    input.type = (t === 'num' ? 'number' : t === 'date' ? 'date' : 'text');
+    input.value = seed != null && t === 'text' ? seed : cur;
+    td.innerHTML = ''; td.appendChild(input);
+    input.focus();
+    if (seed != null && t === 'text') input.setSelectionRange(1, 1);
+    else if (t !== 'date') input.select();
+    var done = false;
+    function commit(save){
+      if (done) return; done = true;
+      td.classList.remove('ms-editing');
+      if (!save) { renderLog(); return; }
+      var val = input.value.trim();
+      if (val === cur) { renderLog(); return; }
+      msPersist(r, msPatchFor(r, f, t, val)).then(function (){ renderLog(); });
+    }
+    input.onkeydown = function (e){
+      if (e.key === 'Enter'){ e.preventDefault(); e.stopPropagation(); commit(true); }
+      else if (e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); commit(false); }
+    };
+    input.onblur = function (){ commit(true); };
+  }
+
+  var msGx = null, msGxCols = null;
+  function msGxInit(){
+    if (msGx || !window.GridX) return msGx;
+    msGx = GridX.create({
+      grid: function (){ return document.querySelector('#ms-view table.ms-table, #ms-view table'); },
+      rowSel: 'tr[data-id]',
+      editableClass: 'ms-ed',
+      infoEl: '#ms-cellinfo',
+      canWrite: function (){ return canWrite; },
+      // The row axis is the rows as RENDERED (filtered, sorted, grouped) — reading it
+      // off the DOM keeps it in step with the section grouping for free.
+      rowIds: function (){
+        var g = document.querySelector('#ms-view table');
+        if (!g) return [];
+        return Array.prototype.map.call(g.querySelectorAll('tr[data-id]'), function (tr){ return tr.dataset.id; });
+      },
+      rowOf: function (id){ return rows.find(function (x){ return x.id === id; }) || null; },
+      valueOf: msValueOf,
+      patchFor: msPatchFor,
+      persist: msPersist,
+      afterWrite: function (){ renderLog(); },
+      beginEdit: msBeginEdit,
+      onSelectRows: function (ids){
+        sel = {}; ids.forEach(function (id){ sel[id] = true; });
+        // Repaint the row highlight without a full re-render, which would drop the
+        // cell cursor mid-drag.
+        var g = document.querySelector('#ms-view table');
+        if (g) g.querySelectorAll('tr[data-id]').forEach(function (tr){
+          tr.classList.toggle('ms-selrow', !!sel[tr.dataset.id]);
+          var cb = tr.querySelector('[data-cb]'); if (cb) cb.checked = !!sel[tr.dataset.id];
+        });
+      },
+      onEscape: function (){ sel = {}; renderLog(); },
+      toast: function (m, k){ UI.toast(m, k); }
+    });
+    return msGx;
+  }
+  function msGxColsInit(){
+    if (msGxCols || !window.GridX) return msGxCols;
+    msGxCols = GridX.columns({
+      host: function (){ return document.getElementById('ms-view'); },
+      defaults: MS_COL_DEFAULTS, mins: MS_COL_MIN, varPrefix: '--msc-', gripAttr: 'colw',
+      cellClass: function (k){ return 'ms-c-' + k; },
+      storageKey: msColWKey
+    });
+    return msGxCols;
+  }
+  function msAutofitAll(){ var c = msGxColsInit(); if (c){ c.fitAll(); UI.toast('Columns fitted to content','ok'); } }
+  function msResetCols(){ var c = msGxColsInit(); if (c){ c.reset(); UI.toast('Column widths reset','ok'); } }
+
   function wireLog() {
     var host = document.getElementById('ms-view');
     if (window.Icons && Icons.hydrate) Icons.hydrate(host);   // the Doc column uses data-ico
+    // The shared cell layer: re-attached on every render (the table is rebuilt each
+    // time) and it re-paints the cursor so an edit doesn't lose your position.
+    var g = msGxInit(); if (g) g.attach();
+    var gc = msGxColsInit(); if (gc) { gc.load(); gc.wire(); }
+    var tbl = host.querySelector('table');
+    if (tbl) {
+      tbl.setAttribute('tabindex', '0');
+      tbl.onkeydown = function (e){ var gg = msGxInit(); if (gg) gg.onKey(e); };
+    }
+    var fit = document.getElementById('ms-fitcols'); if (fit) fit.onclick = msAutofitAll;
+    var rst = document.getElementById('ms-resetcols'); if (rst) rst.onclick = msResetCols;
     host.querySelectorAll('[data-file]').forEach(function (b) {
       b.onclick = function (e) { e.stopPropagation(); viewFile(b.dataset.file); };
     });

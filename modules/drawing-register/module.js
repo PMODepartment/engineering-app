@@ -17,7 +17,7 @@ window.DrawingRegister = (function () {
   var BUCKET = 'drawing-register';
   var profile = null, uid = null, pid = null, projName = '';
   var rows = [];
-  var view = 'overview';                       // overview | backlog | registry
+  var view = 'overview';                       // overview | backlog | registry | gantt
   var filters = { phase: '', discipline: '', scope: '', status: '', search: '', dupsOnly: false };
   var SCOPES = ['Main Contract', 'Change Order'];
 
@@ -452,6 +452,7 @@ window.DrawingRegister = (function () {
   function saveUI(){
     try {
       localStorage.setItem(uiKey('view'), view);
+      localStorage.setItem(uiKey('dashscope'), dashScope);
       localStorage.setItem(uiKey('collapsed'), JSON.stringify(collapsed));
       localStorage.setItem(uiKey('regsort'), JSON.stringify(regSort));
     } catch (e) {}
@@ -460,9 +461,11 @@ window.DrawingRegister = (function () {
     var ok=false;
     try {
       var v = localStorage.getItem(uiKey('view'));
-      if (v==='overview'||v==='backlog'||v==='registry') view=v;
+      if (v==='overview'||v==='backlog'||v==='registry'||v==='gantt') view=v;
       else if (v==='register') view='registry';   // legacy value migration
       else if (v==='progress') view='overview';    // legacy value migration
+      var ds = localStorage.getItem(uiKey('dashscope'));
+      if (ds==='design'||ds==='isd') dashScope=ds;
       var c = localStorage.getItem(uiKey('collapsed'));
       if (c){ var o=JSON.parse(c); if (o && typeof o==='object'){ collapsed=o; ok=true; } }
       // Restore the column sort, but VALIDATE the column against REG_SORTABLE —
@@ -858,18 +861,28 @@ window.DrawingRegister = (function () {
   }
 
   function rollup(list){
-    var tot = 0, ap = 0, minPlanned = null, maxActual = null, allAppr = list.length > 0;
+    var tot = 0, ap = 0, minPlanned = null, maxPlanned = null, maxActual = null, allAppr = list.length > 0;
+    var minStart = null;
     list.forEach(function (r){
       var t = num(r.no_of_sheets) || 0, a = approvedOf(r);
       tot += t; ap += a;
       var pl = inh(r, 'planned_approval');
-      if (validDate(pl) && (!minPlanned || pl < minPlanned)) minPlanned = pl;
+      if (validDate(pl)) {
+        if (!minPlanned || pl < minPlanned) minPlanned = pl;
+        // ⚠️ The LATEST planned approval, which is what a Gantt bar has to finish on.
+        // Using the earliest for both ends draws a zero-duration bar — the same bug the
+        // planning app's Design Development roll-up hit and documents.
+        if (!maxPlanned || pl > maxPlanned) maxPlanned = pl;
+      }
+      var sp = latestSub(r, 'planned');
+      if (validDate(sp) && (!minStart || sp < minStart)) minStart = sp;
       var ac = r.actual_approval;
       if (validDate(ac) && (!maxActual || ac > maxActual)) maxActual = ac;
       if (!(t > 0 && a >= t)) allAppr = false;
     });
     return { tot: tot, ap: ap, pct: tot ? Math.round(ap / tot * 100) : 0,
-             minPlanned: minPlanned, maxActual: allAppr ? maxActual : null, allApproved: allAppr };
+             minPlanned: minPlanned, maxPlanned: maxPlanned, minStart: minStart,
+             maxActual: allAppr ? maxActual : null, allApproved: allAppr };
   }
   // ---- BINARY progress: equal-weight tracking units --------------------------
   // ⚠️ rollup() above is SHEET-WEIGHTED, which is right for Individual Services
@@ -926,15 +939,16 @@ window.DrawingRegister = (function () {
     var dates = rollup(list);
     if (!node || modeOf(node) !== 'binary') {
       return { tot:dates.tot, ap:dates.ap, pct:dates.pct, unitMode:false,
-               minPlanned:dates.minPlanned, maxActual:dates.maxActual,
-               allApproved:dates.allApproved, fallback:false };
+               minPlanned:dates.minPlanned, maxPlanned:dates.maxPlanned, minStart:dates.minStart,
+               maxActual:dates.maxActual, allApproved:dates.allApproved, fallback:false };
     }
     var units = trackingUnitsUnder(node);
     var ap = units.filter(unitApproved).length;
     var tot = units.length;
     return { tot:tot, ap:ap, pct: tot ? Math.round(ap / tot * 100) : 0, unitMode:true,
-             minPlanned:dates.minPlanned, maxActual:dates.maxActual,
-             allApproved: tot > 0 && ap >= tot, fallback: usingUnitFallback(node) };
+             minPlanned:dates.minPlanned, maxPlanned:dates.maxPlanned, minStart:dates.minStart,
+             maxActual:dates.maxActual, allApproved: tot > 0 && ap >= tot,
+             fallback: usingUnitFallback(node) };
   }
 
   // Shared with agingDays()'s guard: a legacy import sentinel like "2000-01-06" is
@@ -1117,6 +1131,7 @@ window.DrawingRegister = (function () {
     var _scroll = captureScroll();
     if (view === 'overview') { renderProgress(); }
     else if (view === 'backlog') { renderBacklog(); }
+    else if (view === 'gantt') { renderGantt(); }
     else { renderRegister(); }
     restoreScroll(_scroll);
     paintRemote();
@@ -1613,6 +1628,167 @@ window.DrawingRegister = (function () {
     wireColResize(host);
   }
 
+  // ==========================================================================
+  // GANTT VIEW
+  // --------------------------------------------------------------------------
+  // Hand-rolled absolutely-positioned divs, deliberately matching the planning
+  // app's project-schedule Gantt (`.ps-bar` / `.ps-bar-fill`) rather than pulling in
+  // a charting library: the two views now show the same programme from two sides, so
+  // they should read the same, and this register already ships no chart dependency
+  // for its tree.
+  //
+  // ⚠️ The bar is the APPROVAL WINDOW, not a work duration — the register only knows
+  // planned and actual approval dates, so inventing a duration would be a fiction.
+  //   start  = earliest planned SUBMISSION (falls back to the planned approval)
+  //   finish = latest planned APPROVAL, replaced by the actual once everything landed
+  //   fill   = the same percentage the tree shows, so the two cannot disagree
+  var GANTT_DAY_MIN = 2, GANTT_DAY_MAX = 26;
+  var ganttZoom = 6;              // px per day
+  var GANTT_LABEL_W = 300;
+
+  function gDate(v){
+    if (!v) return null;
+    var m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return null;
+    // Local midnight, never new Date('YYYY-MM-DD') — that is UTC midnight, which is
+    // the previous evening in UTC+8 and shifts every bar a day west.
+    return new Date(+m[1], +m[2] - 1, +m[3]);
+  }
+  function gDays(a, b){ return Math.round((b - a) / 86400000); }
+  function gAddDays(d, n){ var x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; }
+
+  // The bar for one row: a level uses its subtree roll-up, a drawing its own dates.
+  function ganttSpan(item){
+    var r, start, finish, pct, actual;
+    if (item.type === 'group') {
+      r = rollupFor(item.node, item.list);
+      start  = r.minStart || r.minPlanned;
+      finish = r.maxActual || r.maxPlanned || r.minPlanned;
+      pct = r.pct; actual = r.maxActual;
+    } else {
+      var d = item.row;
+      var pl = inh(d, 'planned_approval');
+      start  = latestSub(d, 'planned') || pl;
+      finish = d.actual_approval || pl || start;
+      pct = Math.round(pctApproved(d) * 100);
+      actual = d.actual_approval;
+    }
+    if (!validDate(start) && !validDate(finish)) return null;
+    if (!validDate(start)) start = finish;
+    if (!validDate(finish)) finish = start;
+    var s = gDate(start), f = gDate(finish);
+    if (!s || !f) return null;
+    if (f < s) { var t = s; s = f; f = t; }        // a mis-keyed pair must not draw backwards
+    return { s: s, f: f, pct: Math.max(0, Math.min(100, pct || 0)), actual: actual };
+  }
+
+  function renderGantt(){
+    var host = document.getElementById('dr-view');
+    var disp = buildModel();
+    var spans = [], min = null, max = null;
+    disp.forEach(function (item){
+      var sp = ganttSpan(item);
+      spans.push(sp);
+      if (!sp) return;
+      if (!min || sp.s < min) min = sp.s;
+      if (!max || sp.f > max) max = sp.f;
+    });
+    // Nothing dated at all is a real state worth naming, not an empty chart.
+    if (!min || !max) {
+      host.innerHTML = ganttToolbar() +
+        '<div class="pd-card dr-gantt-empty">' + ico('calendar', 22) +
+        '<div><strong>No dates to plot yet.</strong><div class="dr-mut">A drawing appears on the Gantt once it has a planned submission or planned approval date. ' +
+        'Add them in the Registry, or import a workbook that carries them.</div></div></div>';
+      wireGanttToolbar(host);
+      return;
+    }
+    // A little air either side so the first and last bars aren't flush to the edge.
+    min = gAddDays(min, -7); max = gAddDays(max, 7);
+    var total = Math.max(1, gDays(min, max) + 1);
+    var dayw = ganttZoom;
+    var W = total * dayw;
+
+    // ---- month ruler
+    var ruler = '', cur = new Date(min.getFullYear(), min.getMonth(), 1);
+    while (cur <= max) {
+      var next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      var from = cur < min ? min : cur, to = next > max ? max : next;
+      var x = gDays(min, from) * dayw, w = Math.max(0, gDays(from, to) * dayw);
+      if (w > 0) {
+        ruler += '<div class="dr-g-mo" style="left:' + x + 'px;width:' + w + 'px">' +
+          (w > 46 ? Fmt.esc(cur.toLocaleString('en', { month: 'short' }) + ' ' + String(cur.getFullYear()).slice(2)) : '') +
+          '</div>';
+      }
+      cur = next;
+    }
+    // Today marker — only when today is actually in range, else it would pin to an edge
+    // and read as a real date.
+    var today = new Date(); today.setHours(0,0,0,0);
+    var todayLine = (today >= min && today <= max)
+      ? '<div class="dr-g-today" style="left:' + (gDays(min, today) * dayw) + 'px" title="Today"></div>' : '';
+
+    var rowsHtml = '';
+    disp.forEach(function (item, i){
+      var sp = spans[i];
+      var isGrp = item.type === 'group';
+      var label = isGrp ? item.label : (item.row.drawing_code || item.row.drawing_no || item.row.title || '');
+      var sub   = isGrp ? (item.list.length + ' dwg') : Fmt.esc(item.row.title || '');
+      var indent = 8 + Math.min(item.level, 6) * 12 - 12;
+      var bar = '';
+      if (sp) {
+        var x = gDays(min, sp.s) * dayw;
+        var w = Math.max((gDays(sp.s, sp.f) + 1) * dayw, 3);
+        var cls = 'dr-g-bar' + (isGrp ? ' dr-g-sum' : '') + (sp.pct >= 100 ? ' dr-g-done' : '');
+        bar = '<div class="' + cls + '" style="left:' + x + 'px;width:' + w + 'px" title="' +
+          Fmt.esc(label + ' · ' + Fmt.date(sp.s.toISOString().slice(0,10)) + ' → ' +
+                  Fmt.date(sp.f.toISOString().slice(0,10)) + ' · ' + sp.pct + '%' +
+                  (sp.actual ? ' · approved ' + Fmt.date(sp.actual) : '')) + '">' +
+          '<div class="dr-g-fill" style="width:' + sp.pct + '%"></div>' +
+          (w > 34 ? '<span class="dr-g-pct">' + sp.pct + '%</span>' : '') + '</div>';
+      }
+      rowsHtml +=
+        '<div class="dr-g-row' + (isGrp ? ' dr-g-grow' : '') + '"' +
+          (isGrp ? '' : ' data-gid="' + item.row.id + '"') + '>' +
+          '<div class="dr-g-lbl" style="padding-left:' + indent + 'px">' +
+            '<span class="dr-g-name">' + Fmt.esc(label) + '</span>' +
+            '<span class="dr-g-sub">' + sub + '</span></div>' +
+          '<div class="dr-g-lane" style="width:' + W + 'px">' + bar + '</div>' +
+        '</div>';
+    });
+
+    host.innerHTML = ganttToolbar() +
+      '<div class="pd-card dr-gantt">' +
+        '<div class="dr-g-scroll">' +
+          '<div class="dr-g-head" style="width:' + (GANTT_LABEL_W + W) + 'px">' +
+            '<div class="dr-g-headlbl">Drawing</div>' +
+            '<div class="dr-g-ruler" style="width:' + W + 'px">' + ruler + todayLine + '</div>' +
+          '</div>' +
+          '<div class="dr-g-body" style="width:' + (GANTT_LABEL_W + W) + 'px">' + rowsHtml + '</div>' +
+        '</div>' +
+      '</div>';
+    host.style.setProperty('--dr-g-lblw', GANTT_LABEL_W + 'px');
+    wireGanttToolbar(host);
+    // Clicking a drawing's bar or label opens it, same as the Registry rows.
+    host.querySelectorAll('.dr-g-row[data-gid]').forEach(function (el){
+      el.onclick = function (){ editRowField(el.dataset.gid, 'title'); };
+    });
+  }
+
+  function ganttToolbar(){
+    return '<div class="dr-listbar dr-g-bar-top">' +
+      '<span class="dr-mut">Bars span the approval window — earliest planned submission to planned approval, ' +
+      'replaced by the actual approval once everything under the row has landed. The fill is the same ' +
+      'percentage the Registry shows.</span>' +
+      '<span style="flex:1"></span>' +
+      '<label class="dr-mut" for="dr-g-zoom">Zoom</label>' +
+      '<input type="range" id="dr-g-zoom" min="' + GANTT_DAY_MIN + '" max="' + GANTT_DAY_MAX + '" value="' + ganttZoom + '">' +
+      '</div>';
+  }
+  function wireGanttToolbar(host){
+    var z = host.querySelector('#dr-g-zoom');
+    if (z) z.oninput = function (){ ganttZoom = +z.value || 6; renderGantt(); };
+  }
+
   var COLSPAN_LABEL = 2;   // Code + Title under a group label (frozen block)
   function groupRowHTML(item, CB) {
     // POC = approved sheets ÷ total sheets, and the group's dates are the earliest
@@ -1919,31 +2095,10 @@ window.DrawingRegister = (function () {
     if (grid) grid.onkeydown = onGridKey;
 
     // ---- cell cursor: click to place, shift-click to extend, drag to select ----
-    // Bound on mousedown, NOT click: a click fires after mouseup and would clobber
-    // the range a drag had just built.
-    if (grid) {
-      grid.onmousedown = function (e){
-        var td = e.target.closest && e.target.closest('td[data-f]');
-        if (!td) return;
-        // Let the existing controls (checkbox, buttons, status select) keep working.
-        if (e.target.closest('input,select,button,a')) return;
-        var tr = td.closest('tr.dr-drow'); if (!tr) return;
-        setCur(tr.dataset.id, td.dataset.f, e.shiftKey);
-        grid.focus && grid.focus();
-        _dragCell = true;
-      };
-      grid.onmousemove = function (e){
-        if (!_dragCell) return;
-        var td = e.target.closest && e.target.closest('td[data-f]');
-        if (!td) return;
-        var tr = td.closest('tr.dr-drow'); if (!tr) return;
-        if (_cur && _cur.id === tr.dataset.id && _cur.f === td.dataset.f) return;
-        _cur = { id: tr.dataset.id, f: td.dataset.f };
-        paintCells();
-      };
-    }
-    // Re-place the cursor after a re-render, so an edit doesn't lose your position.
-    if (_cur) paintCells();
+    // GridX owns click-to-place, shift-click-to-extend and drag-to-select, and
+    // re-paints the cursor after this re-render so an edit doesn't lose your position.
+    var g = gxInit(); if (g) g.attach();
+    var gc = gxColsInit(); if (gc) { gc.load(); gc.wire(); }
 
     refreshSel(host);
   }
@@ -2063,53 +2218,10 @@ window.DrawingRegister = (function () {
     if (tag==='input'||tag==='select'||tag==='textarea'||e.target.isContentEditable) return;
     var mod = e.ctrlKey || e.metaKey;
 
-    // ---- CELL mode: active as soon as a cell has been clicked or navigated to.
-    // Everything below falls through to the original ROW behaviour when there is no
-    // cell cursor, so the pre-existing row workflow is untouched.
-    if (_cur) {
-      if (e.key==='Escape'){ _cur=null; _anchor=null; paintCells(); selected={}; lastClickedId=null; refreshSel(document); return; }
-      if (mod && (e.key==='a'||e.key==='A')){
-        e.preventDefault();
-        var cs=cellCols();
-        if (visibleIds.length && cs.length){
-          _cur={id:visibleIds[visibleIds.length-1], f:cs[cs.length-1].f};
-          _anchor={id:visibleIds[0], f:cs[0].f};
-          paintCells();
-          selected={}; visibleIds.forEach(function(id){selected[id]=true;}); refreshSel(document);
-        }
-        return;
-      }
-      if (mod && (e.key==='d'||e.key==='D')){ e.preventDefault(); fillDown(); return; }
-      if (mod && (e.key==='z'||e.key==='Z')){ e.preventDefault(); undoLast(); return; }
-      // Ctrl+C / Ctrl+V are handled by the copy/paste listeners so the real system
-      // clipboard is used (and Excel interop works); nothing to do here.
-      if (mod && /^[cvx]$/i.test(e.key)) return;
-      var dirs = { ArrowUp:[-1,0], ArrowDown:[1,0], ArrowLeft:[0,-1], ArrowRight:[0,1] };
-      if (dirs[e.key]){ e.preventDefault(); moveCur(dirs[e.key][0], dirs[e.key][1], e.shiftKey, mod); return; }
-      if (e.key==='Tab'){ e.preventDefault(); moveCur(0, e.shiftKey?-1:1, false, false); return; }
-      if (e.key==='Home'){ e.preventDefault(); var c0=cellCols()[0]; if(c0) setCur(mod?visibleIds[0]:_cur.id, c0.f, e.shiftKey); return; }
-      if (e.key==='End'){ e.preventDefault(); var cl=cellCols(); if(cl.length) setCur(mod?visibleIds[visibleIds.length-1]:_cur.id, cl[cl.length-1].f, e.shiftKey); return; }
-      if (e.key==='Delete'||e.key==='Backspace'){ e.preventDefault(); clearRange(); return; }
-      if (e.key==='F2'){ e.preventDefault(); var td=cellTd(_cur.id,_cur.f); if(td) beginEdit(td); return; }
-      if (e.key==='Enter'){
-        e.preventDefault();
-        var td2=cellTd(_cur.id,_cur.f);
-        if (td2 && td2.classList.contains('dr-ed')) beginEdit(td2); else moveCur(1,0,false,false);
-        return;
-      }
-      // Type-to-replace, exactly like Excel: a printable key opens the editor and
-      // seeds it with that character instead of being swallowed.
-      if (!mod && !e.altKey && e.key.length===1){
-        var td3=cellTd(_cur.id,_cur.f);
-        if (td3 && td3.classList.contains('dr-ed')){
-          e.preventDefault(); beginEdit(td3);
-          var inp=td3.querySelector('input');
-          if (inp){ inp.value = (inp.type==='number'||inp.type==='date') ? inp.value : e.key; inp.select && inp.type==='text' && inp.setSelectionRange(1,1); }
-        }
-        return;
-      }
-      return;
-    }
+    // ---- CELL mode first. GridX consumes the event when a cell cursor is active;
+    // everything below is the ROW model, untouched, for when there isn't one.
+    var gk = gxInit();
+    if (gk && gk.onKey(e)) return;
 
     if (e.key==='Escape'){ selected={}; lastClickedId=null; refreshSel(document); return; }
     if (mod && (e.key==='a'||e.key==='A')){ e.preventDefault(); visibleIds.forEach(function(id){selected[id]=true;}); refreshSel(document); return; }
@@ -2160,285 +2272,80 @@ window.DrawingRegister = (function () {
     return true;
   }
 
+
   // ==========================================================================
-  // EXCEL-LIKE CELL LAYER (2026-08-18)
+  // EXCEL-LIKE CELL LAYER — now the SHARED engine (assets/js/gridx.js)
   // --------------------------------------------------------------------------
-  // The register already had ROW multi-select (click / shift-click / Ctrl+A /
-  // arrows), drag-resize columns and double-click auto-fit. What it lacked was a
-  // CELL model: a cursor you can drive with the keyboard, rectangular ranges, and
-  // clipboard interop with Excel itself.
+  // This was ~270 lines of cursor/range/clipboard/undo logic living here. The
+  // material-submittal register needed exactly the same behaviour, and two copies of
+  // it would have drifted — the maintenance trap this app has already paid for
+  // elsewhere. It moved to GridX wholesale; what stays here is only the part that is
+  // genuinely register-specific: which rows are addressable, how a value is read, how
+  // a value becomes a patch, and how a patch is persisted.
   //
-  // ⚠️ THE COORDINATE SPACE IS DRAWING ROWS ONLY. `visibleIds` (drawings and sheets
-  // in display order) is the row axis and the editable `td[data-f]` cells are the
-  // column axis. GROUP ROWS ARE DELIBERATELY OUTSIDE IT — they carry no data-f
-  // cells, so a range can never select one and a paste can never land on one. If you
-  // add a decorative row later, keep it attribute-free the same way; the moment it
-  // carries a data-f cell it becomes addressable and the whole model breaks.
-  //
-  // ⚠️ Ranges are rectangular over the VISIBLE row order, so a range can span two
-  // different levels. That is intentional (it is what makes "fill this column down
-  // the whole trade" work), and it is safe because every write goes through
-  // patchFor() per row rather than assuming the rows are siblings.
-  var _cur = null;        // {id, f} — the active cell
-  var _anchor = null;     // {id, f} — the other corner of a range
-  var _undo = [];         // batches of {id, f, t, prev} for Ctrl+Z
-  var UNDO_MAX = 50;
-  var _dragCell = false;
-  document.addEventListener('mouseup', function (){ _dragCell = false; });
-  // Real clipboard events, so Ctrl+C / Ctrl+V use the SYSTEM clipboard and the TSV
-  // round-trips with Excel in both directions.
-  document.addEventListener('copy', function (e){
-    if (!_cur || !document.querySelector('td.dr-cell-cur')) return;
-    var t = (e.target.tagName||'').toLowerCase();
-    if (t==='input'||t==='select'||t==='textarea') return;
-    e.clipboardData.setData('text/plain', rangeTSV());
-    e.preventDefault();
-  });
-  document.addEventListener('paste', function (e){
-    if (!_cur || !canWrite || !document.querySelector('td.dr-cell-cur')) return;
-    var t = (e.target.tagName||'').toLowerCase();
-    if (t==='input'||t==='select'||t==='textarea') return;
-    var txt = e.clipboardData.getData('text/plain');
-    if (!txt) return;
-    e.preventDefault();
-    pasteBlock(txt);
-  });
-
-  function cellCols(){
-    // Read the columns off the DOM so this can never drift from what is rendered.
-    var tr = document.querySelector('tr.dr-drow');
-    if (!tr) return [];
-    return Array.prototype.map.call(tr.querySelectorAll('td[data-f]'), function (td){
-      return { f: td.dataset.f, t: td.dataset.t || 'text' };
+  // ⚠️ GridX's coordinate space is `visibleIds` × the editable `td[data-f]` cells.
+  // GROUP ROWS ARE OUTSIDE IT by construction — they carry no data-f cells, so a
+  // range can never select one and a paste can never land on one. Keep any future
+  // decorative row attribute-free for the same reason.
+  var gx = null;
+  function gxInit(){
+    if (gx || !window.GridX) return gx;
+    gx = GridX.create({
+      grid: function (){ return document.querySelector('.dr-grid'); },
+      rowSel: 'tr.dr-drow',
+      editableClass: 'dr-ed',
+      infoEl: '#dr-cellinfo',
+      canWrite: function (){ return canWrite; },
+      rowIds: function (){ return visibleIds; },
+      rowOf: function (id){ return rowById[id] || rows.find(function (x){ return x.id === id; }) || null; },
+      valueOf: cellValueOf,
+      patchFor: patchFor,
+      persist: async function (row, patch){
+        await persistCell(row, patch);
+        if (isSheet(row)) await syncParent(row.parent_id);
+      },
+      afterWrite: function (){ render(); flushDeferredRemote(); },
+      beginEdit: function (td, seed){
+        beginEdit(td);
+        if (seed == null) return;
+        var inp = td.querySelector('input');
+        if (inp && inp.type === 'text'){ inp.value = seed; inp.setSelectionRange(1, 1); }
+      },
+      // Keep the row-level selection (and therefore the bulk-action bar) in step with
+      // what the cell range visibly covers.
+      onSelectRows: function (ids, focusId){
+        selected = {}; ids.forEach(function (id){ selected[id] = true; });
+        lastClickedId = focusId || null;
+        refreshSel(document);
+      },
+      onEscape: function (){ selected = {}; lastClickedId = null; refreshSel(document); },
+      toast: function (m, k){ UI.toast(m, k); }
     });
-  }
-  function cellTd(id, f){
-    return document.querySelector('tr.dr-drow[data-id="'+id+'"] td[data-f="'+f+'"]');
-  }
-  function isEditableCell(id, f){
-    var td = cellTd(id, f);
-    return !!td && td.classList.contains('dr-ed');
-  }
-  function rowOf(id){ return rowById[id] || rows.find(function (x){ return x.id === id; }) || null; }
-
-  // The rectangle between the cursor and the anchor, as {ids:[], fs:[]}.
-  function curRange(){
-    if (!_cur) return { ids: [], fs: [] };
-    var cols = cellCols().map(function (c){ return c.f; });
-    var a = _anchor || _cur;
-    var r1 = visibleIds.indexOf(a.id), r2 = visibleIds.indexOf(_cur.id);
-    var c1 = cols.indexOf(a.f),        c2 = cols.indexOf(_cur.f);
-    if (r1 < 0 || r2 < 0 || c1 < 0 || c2 < 0) return { ids: [_cur.id], fs: [_cur.f] };
-    return { ids: visibleIds.slice(Math.min(r1,r2), Math.max(r1,r2)+1),
-             fs:  cols.slice(Math.min(c1,c2), Math.max(c1,c2)+1) };
-  }
-  function paintCells(){
-    document.querySelectorAll('td.dr-cell-cur,td.dr-cell-rng').forEach(function (td){
-      td.classList.remove('dr-cell-cur','dr-cell-rng');
-    });
-    if (!_cur) { setCellInfo(0,0,0); return; }
-    var rg = curRange();
-    rg.ids.forEach(function (id){ rg.fs.forEach(function (f){
-      var td = cellTd(id, f); if (td) td.classList.add('dr-cell-rng');
-    }); });
-    var cd = cellTd(_cur.id, _cur.f);
-    if (cd){ cd.classList.remove('dr-cell-rng'); cd.classList.add('dr-cell-cur'); }
-    setCellInfo(rg.ids.length * rg.fs.length, rg.ids.length, rg.fs.length);
-  }
-  // An explicit readout, because a highlight alone leaves you guessing whether the
-  // block you dragged is really selected.
-  function setCellInfo(n, nr, nc){
-    var el = document.getElementById('dr-cellinfo');
-    if (!el) return;
-    el.textContent = n > 1 ? (n + ' cells (' + nr + ' × ' + nc + ')') : '';
-  }
-  function setCur(id, f, extend){
-    if (!id || !f) return;
-    _cur = { id: id, f: f };
-    if (!extend || !_anchor) _anchor = extend ? (_anchor || { id: id, f: f }) : { id: id, f: f };
-    paintCells();
-    var td = cellTd(id, f);
-    if (td) td.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    // Keep the row-level selection in step so the existing bulk actions still apply
-    // to what the user can see is selected.
-    var rg = curRange();
-    selected = {}; rg.ids.forEach(function (x){ selected[x] = true; });
-    lastClickedId = id;
-    refreshSel(document);
-  }
-  // Excel's Ctrl+Arrow: from a filled cell stop at the last filled cell before a
-  // gap; from an empty one (or when the next is empty) skip to the next filled cell.
-  function jumpEdge(id, f, dr, dc){
-    var cols = cellCols().map(function (c){ return c.f; });
-    var ri = visibleIds.indexOf(id), ci = cols.indexOf(f);
-    if (ri < 0 || ci < 0) return { id: id, f: f };
-    function filled(r, c){
-      var row = rowOf(visibleIds[r]);
-      return !!(row && String(cellValueOf(row, cols[c]) || '').trim());
-    }
-    var lim = dr ? visibleIds.length : cols.length;
-    var pos = dr ? ri : ci, step = dr || dc;
-    var startFilled = filled(ri, ci);
-    var nextPos = pos + step;
-    if (nextPos < 0 || nextPos >= lim) return { id: visibleIds[ri], f: cols[ci] };
-    var nextFilled = dr ? filled(nextPos, ci) : filled(ri, nextPos);
-    var want = startFilled && nextFilled;   // ride the block, else skip the gap
-    var p = pos;
-    while (true) {
-      var q = p + step;
-      if (q < 0 || q >= lim) break;
-      var fl = dr ? filled(q, ci) : filled(ri, q);
-      if (want && !fl) break;
-      p = q;
-      if (!want && fl) break;
-    }
-    return dr ? { id: visibleIds[p], f: cols[ci] } : { id: visibleIds[ri], f: cols[p] };
-  }
-  function moveCur(dr, dc, extend, jump){
-    if (!_cur) { if (visibleIds.length) { var cs = cellCols(); if (cs.length) setCur(visibleIds[0], cs[0].f, false); } return; }
-    var t;
-    if (jump) t = jumpEdge(_cur.id, _cur.f, dr, dc);
-    else {
-      var cols = cellCols().map(function (c){ return c.f; });
-      var ri = visibleIds.indexOf(_cur.id), ci = cols.indexOf(_cur.f);
-      ri = Math.max(0, Math.min(visibleIds.length - 1, ri + dr));
-      ci = Math.max(0, Math.min(cols.length - 1, ci + dc));
-      t = { id: visibleIds[ri], f: cols[ci] };
-    }
-    setCur(t.id, t.f, extend);
+    return gx;
   }
 
-  // ---- clipboard (real TSV, so it round-trips with Excel) --------------------
-  function rangeTSV(){
-    var rg = curRange();
-    return rg.ids.map(function (id){
-      var row = rowOf(id);
-      return rg.fs.map(function (f){
-        var v = row ? String(cellValueOf(row, f) || '') : '';
-        // A tab or newline inside a value would silently add a column or a row on
-        // the way back in, so they are flattened to spaces.
-        return v.replace(/[\t\r\n]+/g, ' ');
-      }).join('\t');
-    }).join('\n');
-  }
-  // Write a block of values starting at the cursor, clamped to the grid, skipping
-  // any cell that isn't editable (derived counters on a sheet parent, a sheet's own
-  // scope) and reporting how many were refused rather than failing silently.
-  async function pasteBlock(text){
-    if (!_cur || !canWrite) return;
-    var grid = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').map(function (l){ return l.split('\t'); });
-    var cols = cellCols().map(function (c){ return c.f; });
-    var types = {}; cellCols().forEach(function (c){ types[c.f] = c.t; });
-    var r0 = visibleIds.indexOf(_cur.id), c0 = cols.indexOf(_cur.f);
-    if (r0 < 0 || c0 < 0) return;
-    var batch = [], writes = [], skipped = 0;
-    for (var i = 0; i < grid.length; i++) {
-      var ri = r0 + i; if (ri >= visibleIds.length) break;
-      for (var j = 0; j < grid[i].length; j++) {
-        var ci = c0 + j; if (ci >= cols.length) break;
-        var id = visibleIds[ri], f = cols[ci];
-        if (!isEditableCell(id, f)) { skipped++; continue; }
-        var row = rowOf(id); if (!row) continue;
-        var val = String(grid[i][j] == null ? '' : grid[i][j]).trim();
-        if (String(cellValueOf(row, f)) === val) continue;      // no-op, keep undo clean
-        batch.push({ id: id, f: f, t: types[f], prev: cellValueOf(row, f) });
-        writes.push({ row: row, patch: patchFor(row, f, types[f], val) });
-      }
-    }
-    if (!writes.length){
-      UI.toast(skipped ? 'Nothing pasted — those cells are calculated and cannot be typed into' : 'Nothing to paste','warn');
-      return;
-    }
-    pushUndo(batch);
-    await applyWrites(writes);
-    UI.toast('Pasted ' + writes.length + ' cell' + (writes.length>1?'s':'') +
-             (skipped ? ' · ' + skipped + ' skipped (calculated)' : ''), 'ok');
-  }
-  async function applyWrites(writes){
-    for (var i = 0; i < writes.length; i++) {
-      await persistCell(writes[i].row, writes[i].patch);
-      if (isSheet(writes[i].row)) await syncParent(writes[i].row.parent_id);
-    }
-    render(); flushDeferredRemote();
-  }
-  function pushUndo(batch){
-    if (!batch || !batch.length) return;
-    _undo.push(batch);
-    if (_undo.length > UNDO_MAX) _undo.shift();
-  }
-  async function undoLast(){
-    var batch = _undo.pop();
-    if (!batch){ UI.toast('Nothing to undo','warn'); return; }
-    var writes = [];
-    batch.forEach(function (b){
-      var row = rowOf(b.id); if (!row) return;
-      writes.push({ row: row, patch: patchFor(row, b.f, b.t, String(b.prev == null ? '' : b.prev)) });
+  // Column widths, also GridX now. The measured double-click fit, the drag grips and
+  // the per-user persistence are identical in both registers, so they are one
+  // implementation configured twice rather than two.
+  var gxCols = null;
+  function gxColsInit(){
+    if (gxCols || !window.GridX) return gxCols;
+    gxCols = GridX.columns({
+      host: function (){ return document.getElementById('dr-view'); },
+      defaults: COL_DEFAULTS, mins: COL_MIN, varPrefix: '--c-', gripAttr: 'colw',
+      cellClass: function (k){ return 'dr-c-' + k; },
+      storageKey: function (){ return colWKey(); },
+      onResize: function (){ render(); }
     });
-    await applyWrites(writes);
-    UI.toast('Undid ' + writes.length + ' cell' + (writes.length>1?'s':''), 'ok');
+    return gxCols;
   }
-  // Ctrl+D — copy the top row of the range down over the rest, per column.
-  async function fillDown(){
-    var rg = curRange();
-    if (rg.ids.length < 2){ UI.toast('Select the cell to copy plus the rows to fill','warn'); return; }
-    var types = {}; cellCols().forEach(function (c){ types[c.f] = c.t; });
-    var src = rowOf(rg.ids[0]);
-    var batch = [], writes = [], skipped = 0;
-    rg.fs.forEach(function (f){
-      var val = String(cellValueOf(src, f) || '');
-      rg.ids.slice(1).forEach(function (id){
-        if (!isEditableCell(id, f)) { skipped++; return; }
-        var row = rowOf(id); if (!row) return;
-        if (String(cellValueOf(row, f)) === val) return;
-        batch.push({ id:id, f:f, t:types[f], prev: cellValueOf(row, f) });
-        writes.push({ row: row, patch: patchFor(row, f, types[f], val) });
-      });
-    });
-    if (!writes.length){ UI.toast(skipped ? 'Those cells are calculated and cannot be filled' : 'Nothing to fill','warn'); return; }
-    pushUndo(batch);
-    await applyWrites(writes);
-    UI.toast('Filled ' + writes.length + ' cell' + (writes.length>1?'s':''), 'ok');
-  }
-  // Del over a range clears it (a row-level Delete still deletes rows — that only
-  // applies when no cell cursor is active).
-  async function clearRange(){
-    var rg = curRange();
-    var types = {}; cellCols().forEach(function (c){ types[c.f] = c.t; });
-    var batch = [], writes = [];
-    rg.ids.forEach(function (id){ rg.fs.forEach(function (f){
-      if (!isEditableCell(id, f)) return;
-      var row = rowOf(id); if (!row) return;
-      if (!String(cellValueOf(row, f) || '')) return;
-      batch.push({ id:id, f:f, t:types[f], prev: cellValueOf(row, f) });
-      writes.push({ row: row, patch: patchFor(row, f, types[f], '') });
-    }); });
-    if (!writes.length) return;
-    pushUndo(batch);
-    await applyWrites(writes);
-  }
-  // Fit every column to its content in one go, and reset to the defaults.
   function autofitAll(){
-    var host = document.getElementById('dr-view'); if (!host) return;
-    Object.keys(COL_DEFAULTS).forEach(function (key){
-      var widest = 0;
-      host.querySelectorAll('td.dr-c-'+key+', th.dr-c-'+key).forEach(function (el){
-        widest = Math.max(widest, el.scrollWidth);
-      });
-      if (widest) {
-        var w = Math.max(COL_MIN[key] || 40, Math.min(widest + 16, 600));
-        colWidths[key] = w; host.style.setProperty('--c-'+key, w+'px');
-      }
-    });
-    saveColWidths();
-    UI.toast('Columns fitted to content','ok');
+    var c = gxColsInit(); if (!c) return;
+    c.fitAll(); UI.toast('Columns fitted to content', 'ok');
   }
   function resetColWidths(){
-    var host = document.getElementById('dr-view'); if (!host) return;
-    Object.keys(COL_DEFAULTS).forEach(function (k){
-      colWidths[k] = COL_DEFAULTS[k]; host.style.setProperty('--c-'+k, COL_DEFAULTS[k]+'px');
-    });
-    saveColWidths();
-    UI.toast('Column widths reset','ok');
+    var c = gxColsInit(); if (!c) return;
+    c.reset(); UI.toast('Column widths reset', 'ok');
   }
 
   // ⚠️ THE single definition of "how a typed value becomes a patch". Typing, paste,
@@ -2959,46 +2866,100 @@ window.DrawingRegister = (function () {
   }
 
   // ----------------------------------------------------- progress dashboard --
+  // ⚠️ TWO DASHBOARDS, because one number cannot describe both halves of this
+  // register. Concept / Schematic / For Construction are counted in 0-or-100 UNITS;
+  // Individual Services Drawings are counted in SHEETS with partial credit. Summing
+  // 6 design units and 83 ISD sheets into one "Total sheets" headline produced a
+  // figure that described neither — it was the register's most prominent KPI and it
+  // was meaningless. `dashScope` picks which half is on screen.
+  var dashScope = 'design';                    // design | isd
+  function isIsdRow(r){ return modeOf(r) === 'sheets'; }
+  function dashRows(){
+    var all = drawingRows();
+    return dashScope === 'isd' ? all.filter(isIsdRow) : all.filter(function (r){ return !isIsdRow(r); });
+  }
+  function dashSwitch(){
+    var nD = drawingRows().filter(function (r){ return !isIsdRow(r); }).length;
+    var nI = drawingRows().filter(isIsdRow).length;
+    return '<div class="dr-dashtabs">' +
+      '<button class="dr-dashtab' + (dashScope==='design'?' active':'') + '" data-dash="design">' +
+        'Design Progress <span class="dr-dashn">' + nD + '</span></button>' +
+      '<button class="dr-dashtab' + (dashScope==='isd'?' active':'') + '" data-dash="isd">' +
+        'Individual Services <span class="dr-dashn">' + nI + '</span></button>' +
+      '<span class="dr-dashnote dr-mut">' + (dashScope==='isd'
+        ? 'Counted in sheets — a drawing here carries many, with partial credit.'
+        : 'Counted in 0-or-100 units — a drawing here is approved or it is not.') + '</span></div>';
+  }
+  function wireDashTabs(host){
+    host.querySelectorAll('[data-dash]').forEach(function (b){
+      b.onclick = function (){ dashScope = b.dataset.dash; saveUI(); render(); };
+    });
+  }
+
   function renderProgress() {
     var host = document.getElementById('dr-view');
-    var draws = drawingRows();
-    if (!draws.length) { host.innerHTML = emptyHTML(); wireEmpty(); return; }
+    if (!drawingRows().length) { host.innerHTML = emptyHTML(); wireEmpty(); return; }
+    var draws = dashRows();
+    var isIsd = dashScope === 'isd';
 
+    // ⚠️ `approvedOf()`, not the raw approved_sheets column — the same
+    // two-definitions-of-one-number bug fixed in groupAgg(). Approving a sheet through
+    // the full editor leaves the parent's stored counter stale.
     var totSheets=0, subSheets=0, apSheets=0;
     draws.forEach(function (r){
-      var t=num(r.no_of_sheets)||0, a=num(r.approved_sheets)||0;
+      var t=num(r.no_of_sheets)||0, a=approvedOf(r);
       totSheets+=t; apSheets+=a;
       if (latestSub(r,'actual')) subSheets+=t;
     });
-    var balance = totSheets - apSheets;
+    // The design half is measured in units, so its headline counts DRAWINGS approved,
+    // not sheets — otherwise it silently reintroduces partial credit.
+    var apUnits = draws.filter(function (r){ return isApprovedStatus(statusOf(r.status)); }).length;
+    var balance = isIsd ? (totSheets - apSheets) : (draws.length - apUnits);
+    var pct = isIsd ? (totSheets ? Math.round(apSheets/totSheets*100) : 0)
+                    : (draws.length ? Math.round(apUnits/draws.length*100) : 0);
 
-    // Only "Drawings" is a row set — the rest count SHEETS, so drilling them
+    if (!draws.length) {
+      host.innerHTML = dashSwitch() +
+        '<div class="pd-card dr-gantt-empty">' + ico('info', 22) +
+        '<div><strong>Nothing in this half of the register yet.</strong><div class="dr-mut">' +
+        (isIsd ? 'Individual Services Drawings appear here once that drawing type has drawings.'
+               : 'Concept, Schematic and For Construction drawings appear here.') +
+        '</div></div></div>';
+      wireDashTabs(host);
+      return;
+    }
+
+    // Only "Drawings" is a row set — the rest count sheets or units, so drilling them
     // would land on a list whose row count doesn't match the number clicked.
-    var kpis = kpiSection('Register Overview',
-      kpi(draws.length, 'Drawings', '', { view:'registry', patch:{}, tip:'Show all drawings in the Registry' }) +
-      kpi(totSheets, 'Total sheets') +
-      kpi(subSheets, 'Submitted') +
-      kpi(apSheets, 'Approved') +
-      kpi((totSheets?Math.round(apSheets/totSheets*100):0)+'%', 'Approved %', 'ok') +
-      kpi(balance, 'Balance', balance>0?'warn':''));
+    var kpis = dashSwitch() + kpiSection(isIsd ? 'Individual Services Drawings' : 'Design Progress — Concept / Schematic / For Construction',
+      kpi(draws.length, 'Drawings', '', { view:'registry', patch:{}, tip:'Show these in the Registry' }) +
+      (isIsd ? kpi(totSheets, 'Total sheets') + kpi(subSheets, 'Submitted') + kpi(apSheets, 'Approved sheets')
+             : kpi(apUnits, 'Approved') + kpi(subSheets ? subSheets : 0, 'Submitted')) +
+      kpi(pct+'%', isIsd ? 'Approved % (sheets)' : 'Approved % (drawings)', 'ok') +
+      kpi(balance, isIsd ? 'Balance (sheets)' : 'Balance (drawings)', balance>0?'warn':''));
 
     // by phase
-    var byPhase = groupAgg('phase');
-    var byDisc  = groupAgg('discipline');
+    // Both tables are scoped to the half on screen, so their totals reconcile with the
+    // KPI row above them. "By Drawing Type" is only meaningful on the design half —
+    // the ISD half is a single type by definition, so it shows its levels instead.
+    var byDisc = groupAgg('discipline', draws);
     var host2 = '<div class="dr-dash-grid">' +
-      progTable('Progress by Drawing Type', byPhase, PHASES, 'phase') +
+      (isIsd
+        ? progTable('Progress by Level', groupAgg('category', draws),
+                    Object.keys(groupAgg('category', draws)).sort(), 'category')
+        : progTable('Progress by Drawing Type', groupAgg('phase', draws), TOP_LEVELS, 'phase')) +
       progTable('Progress by Trade', byDisc, Object.keys(DISCIPLINES).map(disciplineName), 'discipline') +
     '</div>';
 
     var drawPeriod = function () {
       renderPeriodChart(document.getElementById('dr-period-chart'),
-        periodScaled(periodBuckets(periodMode), periodValueMode, draws.length), periodValueMode);
+        periodScaled(periodBuckets(periodMode, draws), periodValueMode, draws.length), periodValueMode);
     };
 
     host.innerHTML = kpis +
       '<div class="dr-dash-grid">' +
-        '<div class="pd-card"><h3 class="dr-h3">Drawings by Status</h3>' + donutSVG(statusCounts()) + '</div>' +
-        '<div class="pd-card"><h3 class="dr-h3">Open Items by Aging</h3>' + agingBarSVG(agingBuckets()) + '</div>' +
+        '<div class="pd-card"><h3 class="dr-h3">Drawings by Status</h3>' + donutSVG(statusCounts(draws)) + '</div>' +
+        '<div class="pd-card"><h3 class="dr-h3">Open Items by Aging</h3>' + agingBarSVG(agingBuckets(draws)) + '</div>' +
       '</div>' +
       '<div class="pd-card"><h3 class="dr-h3">Drawings by Period — Planned vs Actual Approval' +
         '<span class="dr-seg" id="dr-permode">' +
@@ -3015,6 +2976,7 @@ window.DrawingRegister = (function () {
       host2;
 
     drawPeriod();
+    wireDashTabs(host);
     wireDrills(host);   // KPI card, donut legend, aging bar + legend, prog tables
     var pm = document.getElementById('dr-permode');
     if (pm) pm.querySelectorAll('.dr-seg-btn').forEach(function (b){
@@ -3052,9 +3014,9 @@ window.DrawingRegister = (function () {
     if (a >= 0)    return '0-30d (current)';
     return 'Future';
   }
-  function agingBuckets() {
+  function agingBuckets(list) {
     var b = {}; AGING_ORDER.forEach(function (k){ b[k]=0; });
-    drawingRows().forEach(function (r){
+    (list || drawingRows()).forEach(function (r){
       if (!(!isApprovedStatus(r.status) || r.status==='Resubmit')) return;
       b[agingBucketOf(r)]++;
     });
@@ -3115,9 +3077,9 @@ window.DrawingRegister = (function () {
     if (mode === 'quarter') { var p = key.split('-Q'); return 'Q'+p[1]+" '"+p[0].slice(2); }
     var p = key.split('-'); return MNAME3[+p[1]-1] + " '" + p[0].slice(2);
   }
-  function periodBuckets(mode) {
+  function periodBuckets(mode, list) {
     var pMap = {}, aMap = {};
-    drawingRows().forEach(function (r) {
+    (list || drawingRows()).forEach(function (r) {
       if (r.planned_approval) { var k = periodKeyOf(r.planned_approval, mode); if (k) pMap[k] = (pMap[k]||0)+1; }
       if (r.actual_approval)  { var k2 = periodKeyOf(r.actual_approval, mode); if (k2) aMap[k2] = (aMap[k2]||0)+1; }
     });
@@ -3202,12 +3164,12 @@ window.DrawingRegister = (function () {
   // back to the empty string that statusCls() recognises.
   function statusKey(label) { return statusCls(label === NOT_STARTED ? '' : label).slice(3); }
   function statusVar(label) { return 'var(--dr-' + statusKey(label) + '-arc)'; }
-  function statusCounts() {
+  function statusCounts(list) {
     // ⚠️ Blank used to be counted as 'Submitted' by the `|| 'Submitted'` fallback,
     // so the donut reported 823 not-yet-started drawings as awaiting review — the
     // single biggest slice was a fiction. Blank is now its own labelled slice.
     var m = {}; m[NOT_STARTED] = 0; STATUSES.forEach(function (s){ m[s]=0; });
-    drawingRows().forEach(function (r){
+    (list || drawingRows()).forEach(function (r){
       var s = statusOf(r.status) || NOT_STARTED;
       m[s] = (m[s]||0) + 1;
     });
@@ -3252,9 +3214,9 @@ window.DrawingRegister = (function () {
   // two-definitions-of-one-number bug approvedOf() was written to end: approving a
   // sheet through the full editor leaves the parent's stored counter stale, so the
   // progress tables and the grid disagreed on the same register.
-  function groupAgg(key) {
+  function groupAgg(key, list) {
     var m = {};
-    drawingRows().forEach(function (r) {
+    (list || drawingRows()).forEach(function (r) {
       var k = r[key] || '—';
       var g = m[k] || (m[k]={label:k, dwg:0, sheets:0, submitted:0, approved:0});
       var t=num(r.no_of_sheets)||0, a=approvedOf(r);

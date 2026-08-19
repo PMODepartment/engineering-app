@@ -986,3 +986,30 @@ body { overflow-x: clip; }
 .pd-clear { display: inline-flex; align-items: center; gap: 5px; border: none; background: transparent;
   color: var(--pd-muted); cursor: pointer; font-size: 12.5px; padding: 6px 8px; border-radius: 6px; }
 .pd-clear:hover { color: var(--pd-red); background: var(--pd-bg); }
+
+/* ============================================================================
+   GridX — shared Excel-like grid layer (assets/js/gridx.js)
+   ----------------------------------------------------------------------------
+   Used by drawing-register and material-submittal so the two read identically.
+   ⚠️ The range is an inset box-shadow, NOT a background: a cell already carries a
+   background from the zebra / frozen / selected-row rules, and a competing
+   `background` only ever shows one winner — the range would silently vanish under
+   a row hover. A box-shadow paints on top of whatever is already there.
+   ============================================================================ */
+td.gx-rng { box-shadow: inset 0 0 0 9999px rgba(238,49,36,.14); }
+td.gx-cur { outline: 2px solid var(--pd-red); outline-offset: -2px; position: relative; z-index: 2; }
+html.pd-dark td.gx-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.20); }
+/* The grid owns the keyboard, so it must be focusable — but the app-wide
+   :focus-visible ring would then draw a red box around the WHOLE table while a cell
+   is selected, which reads as a rendering fault. The cell cursor is a far more
+   precise indicator, so the container ring is suppressed only while one exists; with
+   no cell selected a keyboard user still gets the container ring. */
+[tabindex]:focus-visible:has(td.gx-cur) { outline: none !important; }
+body.gx-resizing { cursor: col-resize; user-select: none; }
+.gx-info { margin-left: 10px; color: var(--pd-mut); font-size: 11px; white-space: nowrap; }
+.gx-hint kbd { display:inline-block; padding:0 4px; border:1px solid var(--pd-line);
+  border-bottom-width:2px; border-radius:3px; background:var(--pd-bg);
+  font-family:inherit; font-size:.92em; line-height:1.5; }
+/* The drag grip on a resizable header. */
+.gx-grip { position:absolute; top:0; right:0; width:7px; height:100%; cursor:col-resize; z-index:3; }
+.gx-grip:hover { background:var(--pd-red-mid); }

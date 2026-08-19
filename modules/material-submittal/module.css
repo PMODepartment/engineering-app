@@ -147,8 +147,13 @@
 .ms-cb input { width:15px; height:15px; cursor:pointer; accent-color:var(--pd-red); }
 .ms-selrow td { background:rgba(238,49,36,.06) !important; }
 /* Frozen first columns so the code + item stay readable while scrolling right. */
-.ms-table th.ms-fz1, .ms-table td.ms-fz1 { position:sticky; left:0;  z-index:1; background:var(--pd-card); min-width:190px; }
-.ms-table th.ms-fz2, .ms-table td.ms-fz2 { position:sticky; left:190px; z-index:1; background:var(--pd-card); min-width:230px; }
+/* ⚠️ The second frozen column's offset MUST follow the first column's actual width.
+   These were hardcoded 0 / 190px, which was correct only while the widths were fixed.
+   Now that the code column is drag-resizable, a hardcoded 190px means dragging it
+   wider makes the two frozen columns OVERLAP — the same contiguous-sticky-offset trap
+   the procurement app documents. The offset is the width variable itself. */
+.ms-table th.ms-fz1, .ms-table td.ms-fz1 { position:sticky; left:0; z-index:1; background:var(--pd-card); }
+.ms-table th.ms-fz2, .ms-table td.ms-fz2 { position:sticky; left:var(--msc-code,190px); z-index:1; background:var(--pd-card); }
 .ms-table thead th.ms-fz1, .ms-table thead th.ms-fz2 { z-index:3; }
 .ms-table tbody tr:hover td.ms-fz1, .ms-table tbody tr:hover td.ms-fz2 { background:var(--pd-bg); }
 .ms-table tr.ms-selrow td.ms-fz1, .ms-table tr.ms-selrow td.ms-fz2 { background:#fbe9e7 !important; }
@@ -392,3 +397,39 @@ html.pd-dark .ms-pill.s-info      { background:rgba(30,78,140,.26);  color:#8fbd
    A read action, so it is present for every role — unlike .ms-actcol, which is
    only emitted when the user may write. Sized like .ms-doccol. */
 .ms-tscol { width: 47px; text-align: center; }
+
+/* ---- Excel-like cell layer (shared GridX) --------------------------------
+   The range/cursor styling itself lives in dashboard.css alongside the engine, so
+   this register and the Drawing Register look identical. What is local: the column
+   widths the resize grips drive, the inline editor, and the toolbar row.
+   ⚠️ Widths must be applied through a colgroup-free `table-layout:fixed` + explicit
+   th/td widths, because a percentage-sized table ignores the custom properties. */
+/* ⚠️ `min-width:1500px` above stays — the table still scrolls horizontally — but with
+   table-layout:fixed the COLUMN widths now come from the variables, so a resize is
+   respected instead of being renegotiated by the auto layout. */
+.ms-table { table-layout: fixed; }
+.ms-table th.ms-c-code,     .ms-table td.ms-c-code     { width: var(--msc-code, 120px); }
+.ms-table th.ms-c-material, .ms-table td.ms-c-material { width: var(--msc-material, 280px); }
+.ms-table th.ms-c-disc,     .ms-table td.ms-c-disc     { width: var(--msc-disc, 120px); }
+.ms-table th.ms-c-location, .ms-table td.ms-c-location { width: var(--msc-location, 110px); }
+.ms-table th.ms-c-brand,    .ms-table td.ms-c-brand    { width: var(--msc-brand, 110px); }
+.ms-table th.ms-c-supplier, .ms-table td.ms-c-supplier { width: var(--msc-supplier, 130px); }
+.ms-table th.ms-c-pres,     .ms-table td.ms-c-pres     { width: var(--msc-pres, 110px); }
+.ms-table th.ms-c-req,      .ms-table td.ms-c-req      { width: var(--msc-req, 92px); }
+.ms-table th.ms-c-psub,     .ms-table td.ms-c-psub     { width: var(--msc-psub, 92px); }
+.ms-table th.ms-c-asub,     .ms-table td.ms-c-asub     { width: var(--msc-asub, 92px); }
+.ms-table th.ms-c-papp,     .ms-table td.ms-c-papp     { width: var(--msc-papp, 92px); }
+.ms-table th.ms-c-aapp,     .ms-table td.ms-c-aapp     { width: var(--msc-aapp, 92px); }
+.ms-table th.ms-c-appr,     .ms-table td.ms-c-appr     { width: var(--msc-appr, 130px); }
+.ms-table th.ms-c-rev,      .ms-table td.ms-c-rev      { width: var(--msc-rev, 52px); }
+.ms-table th { position: relative; }          /* the grip is absolutely positioned */
+/* An editable cell reads as editable on hover, matching the Drawing Register. */
+.ms-table td.ms-ed { cursor: cell; }
+.ms-table td.ms-ed:hover { box-shadow: inset 0 0 0 1px var(--pd-red-mid); }
+.ms-table td.ms-editing { padding: 0 !important; }
+.ms-editin { width: 100%; box-sizing: border-box; border: 2px solid var(--pd-red);
+  border-radius: 0; padding: 4px 6px; font: inherit; background: var(--pd-card);
+  color: var(--pd-ink); }
+.ms-gridbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 8px; }
+.ms-gridbar .gx-hint { flex: 1 1 320px; min-width: 0; font-size: 11px; }
