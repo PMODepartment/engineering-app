@@ -772,11 +772,18 @@ html.pd-dark td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.2
 .dr-g-scroll { overflow:auto; max-height:calc(100vh - 260px); }
 .dr-g-head { display:flex; position:sticky; top:0; z-index:3; background:var(--pd-card);
   border-bottom:1px solid var(--pd-line); }
-.dr-g-headlbl { flex:0 0 var(--dr-g-lblw,300px); width:var(--dr-g-lblw,300px);
+.dr-g-headlbl { flex:0 0 var(--dr-g-lblw,460px); width:var(--dr-g-lblw,460px);
   position:sticky; left:0; z-index:4; background:var(--pd-card);
-  border-right:1px solid var(--pd-line); padding:6px 10px;
+  border-right:1px solid var(--pd-line); padding:0;
+  display:flex; align-items:stretch;
   font-size:var(--dr-fs-micro); font-weight:700; text-transform:uppercase; letter-spacing:.08em;
   color:var(--pd-mut); }
+/* The draggable divider between the grid pane and the timeline. */
+/* The pane is already position:sticky, which establishes the containing block
+   the splitter positions against. */
+.dr-g-splitter { position:absolute; top:0; right:-3px; width:7px; height:100%;
+  cursor:col-resize; z-index:5; }
+.dr-g-splitter:hover { background:var(--pd-red-mid); }
 .dr-g-ruler { position:relative; height:26px; flex:none; }
 .dr-g-mo { position:absolute; top:0; bottom:0; border-left:1px solid var(--pd-line);
   padding:6px 0 0 5px; font-size:var(--dr-fs-micro); color:var(--pd-mut); white-space:nowrap;
@@ -788,18 +795,28 @@ html.pd-dark td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.2
 .dr-g-row[data-gid] { cursor:pointer; }
 .dr-g-grow { background:var(--pd-bg); font-weight:600; }
 .dr-g-grow:hover { background:var(--pd-red-light); }
-.dr-g-lbl { flex:0 0 var(--dr-g-lblw,300px); width:var(--dr-g-lblw,300px);
+.dr-g-lbl { flex:0 0 var(--dr-g-lblw,460px); width:var(--dr-g-lblw,460px);
   position:sticky; left:0; z-index:2; background:inherit;
-  border-right:1px solid var(--pd-line); padding:4px 10px 4px 0;
-  display:flex; align-items:center; gap:8px; min-width:0; }
+  border-right:1px solid var(--pd-line); padding:0;
+  display:flex; align-items:stretch; min-width:0; }
+/* ---- the grid pane's cells. Widths come from --dr-gc-<key>, which renderGantt()
+   scales to whatever the splitter has left the pane, so the pane can never overflow
+   its own width and push the timeline off. */
+.dr-gcell { padding:4px 8px; display:flex; align-items:center; min-width:0;
+  font-size:var(--dr-fs-sm); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  border-right:1px solid var(--pd-line); }
+.dr-gcell:last-child { border-right:0; }
+.dr-g-headlbl .dr-gcell { font-size:var(--dr-fs-micro); }
+.dr-gc-code  { flex:0 0 var(--dr-gc-code,118px);  width:var(--dr-gc-code,118px); }
+.dr-gc-title { flex:1 1 var(--dr-gc-title,200px); width:var(--dr-gc-title,200px); }
+.dr-gc-n     { flex:0 0 var(--dr-gc-sh,42px);     width:var(--dr-gc-sh,42px);
+               color:var(--pd-mut); font-variant-numeric:tabular-nums; }
+.dr-gc-n.dr-r { justify-content:flex-end; }
 /* ⚠️ position:sticky + background:inherit only works because the ROW paints the
    colour; a transparent label cell would let the bars scroll visibly under it. */
 .dr-g-grow .dr-g-lbl { background:var(--pd-bg); }
 .dr-g-row:hover .dr-g-lbl { background:var(--pd-red-light); }
-.dr-g-name { font-size:var(--dr-fs-sm); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  flex:0 1 auto; min-width:0; }
-.dr-g-sub { font-size:var(--dr-fs-micro); color:var(--pd-mut); white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; flex:1 1 auto; min-width:0; }
+/* .dr-g-name / .dr-g-sub were the single-label pane, replaced by .dr-gcell columns. */
 .dr-g-lane { position:relative; flex:none; }
 .dr-g-bar { position:absolute; top:4px; height:16px; border-radius:3px;
   background:var(--pd-line); overflow:hidden; }
@@ -811,9 +828,14 @@ html.pd-dark td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.2
   font-size:var(--dr-fs-micro); color:var(--pd-ink); }
 .dr-g-sum .dr-g-pct { line-height:12px; }
 .dr-gantt-empty { display:flex; gap:14px; align-items:flex-start; padding:26px; color:var(--pd-mut); }
+/* On a phone the split is not usable — the grid pane would leave the timeline a
+   sliver — so it collapses to code + bar only. */
 @media (max-width:700px){
-  .dr-g-headlbl, .dr-g-lbl { flex-basis:160px; width:160px; }
-  .dr-g-sub { display:none; }
+  .dr-g-headlbl, .dr-g-lbl { flex-basis:130px !important; width:130px !important; }
+  .dr-gc-title, .dr-gc-n { display:none; }
+  .dr-gc-code { flex:1 1 auto !important; width:auto !important; }
+  .dr-g-splitter { display:none; }
+  .dr-g-note { display:none; }
 }
 
 /* ---- Split dashboards (Design vs Individual Services) --------------------

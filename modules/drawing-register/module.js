@@ -453,6 +453,8 @@ window.DrawingRegister = (function () {
     try {
       localStorage.setItem(uiKey('view'), view);
       localStorage.setItem(uiKey('dashscope'), dashScope);
+      localStorage.setItem(uiKey('gsplit'), ganttSplit ? '1' : '0');
+      localStorage.setItem(uiKey('gridw'), String(GANTT_GRID_W));
       localStorage.setItem(uiKey('collapsed'), JSON.stringify(collapsed));
       localStorage.setItem(uiKey('regsort'), JSON.stringify(regSort));
     } catch (e) {}
@@ -466,6 +468,10 @@ window.DrawingRegister = (function () {
       else if (v==='progress') view='overview';    // legacy value migration
       var ds = localStorage.getItem(uiKey('dashscope'));
       if (ds==='design'||ds==='isd') dashScope=ds;
+      var gs = localStorage.getItem(uiKey('gsplit'));
+      if (gs==='0'||gs==='1') ganttSplit = gs==='1';
+      var gw = parseFloat(localStorage.getItem(uiKey('gridw')));
+      if (!isNaN(gw) && gw >= GANTT_GRID_MIN && gw <= GANTT_GRID_MAX) GANTT_GRID_W = gw;
       var c = localStorage.getItem(uiKey('collapsed'));
       if (c){ var o=JSON.parse(c); if (o && typeof o==='object'){ collapsed=o; ok=true; } }
       // Restore the column sort, but VALIDATE the column against REG_SORTABLE —
@@ -1644,7 +1650,28 @@ window.DrawingRegister = (function () {
   //   fill   = the same percentage the tree shows, so the two cannot disagree
   var GANTT_DAY_MIN = 2, GANTT_DAY_MAX = 26;
   var ganttZoom = 6;              // px per day
-  var GANTT_LABEL_W = 300;
+  // ⚠️ SPLIT LAYOUT: the grid pane and the timeline are ONE row each, side by side in a
+  // single scroller — not two panes with synchronised scrollTop. Row alignment is then
+  // structural rather than something two scroll handlers have to keep agreeing on,
+  // which is the usual source of "the bars drift out of line by a row" bugs. The grid
+  // pane is sticky-left; the timeline scrolls horizontally under it.
+  var GANTT_GRID_W = 460;                    // width of the grid pane, drag to change
+  // ⚠️ The minimum is 210, not 180. The column widths are scaled by gridW/natural with
+  // a 0.45 floor (below that the numeric columns are unreadable), and 0.45 × 444px of
+  // natural width is ~200px — so a 180px minimum let the columns overflow the pane and
+  // clip the % column at the narrowest split. 210 keeps the floor case fitting.
+  var GANTT_GRID_MIN = 210, GANTT_GRID_MAX = 900;
+  var ganttSplit = true;                     // grid + timeline, or timeline only
+  // The grid pane's columns, kept deliberately short: this is a companion to the
+  // timeline, not a second Registry. Code and title carry the identity, the counters
+  // and percent carry the progress the bar is drawing.
+  var GANTT_COLS = [
+    { k:'code',  label:'Code',  w:118, cls:'dr-gc-code' },
+    { k:'title', label:'Title', w:200, cls:'dr-gc-title' },
+    { k:'sh',    label:'Sh',    w:38,  cls:'dr-gc-n dr-r' },
+    { k:'ap',    label:'Appr',  w:44,  cls:'dr-gc-n dr-r' },
+    { k:'pct',   label:'%',     w:44,  cls:'dr-gc-n dr-r' }
+  ];
 
   function gDate(v){
     if (!v) return null;
@@ -1727,13 +1754,36 @@ window.DrawingRegister = (function () {
     var todayLine = (today >= min && today <= max)
       ? '<div class="dr-g-today" style="left:' + (gDays(min, today) * dayw) + 'px" title="Today"></div>' : '';
 
+    var gridW = ganttSplit ? GANTT_GRID_W : 0;
     var rowsHtml = '';
     disp.forEach(function (item, i){
       var sp = spans[i];
       var isGrp = item.type === 'group';
       var label = isGrp ? item.label : (item.row.drawing_code || item.row.drawing_no || item.row.title || '');
-      var sub   = isGrp ? (item.list.length + ' dwg') : Fmt.esc(item.row.title || '');
       var indent = 8 + Math.min(item.level, 6) * 12 - 12;
+      // The grid pane's cells for this row. A level row shows its roll-up, a drawing
+      // its own numbers — the same values the Registry shows, from the same helpers, so
+      // the two views cannot disagree.
+      var cells = '';
+      if (ganttSplit) {
+        var roll = isGrp ? rollupFor(item.node, item.list) : null;
+        var tot  = isGrp ? roll.tot : (num(item.row.no_of_sheets) || 0);
+        var apn  = isGrp ? roll.ap  : approvedOf(item.row);
+        var pctN = isGrp ? roll.pct : Math.round(pctApproved(item.row) * 100);
+        GANTT_COLS.forEach(function (c){
+          var v = c.k === 'code'  ? label
+                : c.k === 'title' ? (isGrp ? (item.list.length + ' dwg') : (item.row.title || ''))
+                : c.k === 'sh'    ? tot
+                : c.k === 'ap'    ? apn
+                : (pctN + '%');
+          cells += '<div class="dr-gcell ' + c.cls + '"' +
+            (c.k === 'code' ? ' style="padding-left:' + indent + 'px"' : '') +
+            ' title="' + Fmt.esc(String(v)) + '">' + Fmt.esc(String(v)) + '</div>';
+        });
+      } else {
+        cells = '<div class="dr-gcell dr-gc-code" style="padding-left:' + indent + 'px" title="' +
+          Fmt.esc(label) + '">' + Fmt.esc(label) + '</div>';
+      }
       var bar = '';
       if (sp) {
         var x = gDays(min, sp.s) * dayw;
@@ -1749,24 +1799,38 @@ window.DrawingRegister = (function () {
       rowsHtml +=
         '<div class="dr-g-row' + (isGrp ? ' dr-g-grow' : '') + '"' +
           (isGrp ? '' : ' data-gid="' + item.row.id + '"') + '>' +
-          '<div class="dr-g-lbl" style="padding-left:' + indent + 'px">' +
-            '<span class="dr-g-name">' + Fmt.esc(label) + '</span>' +
-            '<span class="dr-g-sub">' + sub + '</span></div>' +
+          '<div class="dr-g-lbl">' + cells + '</div>' +
           '<div class="dr-g-lane" style="width:' + W + 'px">' + bar + '</div>' +
         '</div>';
     });
 
+    var headCells = ganttSplit
+      ? GANTT_COLS.map(function (c){ return '<div class="dr-gcell ' + c.cls + '">' + Fmt.esc(c.label) + '</div>'; }).join('')
+      : '<div class="dr-gcell dr-gc-code">Drawing</div>';
     host.innerHTML = ganttToolbar() +
-      '<div class="pd-card dr-gantt">' +
+      '<div class="pd-card dr-gantt' + (ganttSplit ? ' dr-g-split' : '') + '">' +
         '<div class="dr-g-scroll">' +
-          '<div class="dr-g-head" style="width:' + (GANTT_LABEL_W + W) + 'px">' +
-            '<div class="dr-g-headlbl">Drawing</div>' +
+          '<div class="dr-g-head" style="width:' + (gridW + W) + 'px">' +
+            '<div class="dr-g-headlbl">' + headCells +
+              // The splitter sits on the pane's trailing edge, so dragging it widens the
+              // grid at the timeline's expense — the whole point of a split view.
+              (ganttSplit ? '<span class="dr-g-splitter" title="Drag to resize the grid pane"></span>' : '') +
+            '</div>' +
             '<div class="dr-g-ruler" style="width:' + W + 'px">' + ruler + todayLine + '</div>' +
           '</div>' +
-          '<div class="dr-g-body" style="width:' + (GANTT_LABEL_W + W) + 'px">' + rowsHtml + '</div>' +
+          '<div class="dr-g-body" style="width:' + (gridW + W) + 'px">' + rowsHtml + '</div>' +
         '</div>' +
       '</div>';
-    host.style.setProperty('--dr-g-lblw', GANTT_LABEL_W + 'px');
+    host.style.setProperty('--dr-g-lblw', gridW + 'px');
+    // Column widths inside the grid pane, scaled to whatever the splitter has left it,
+    // so the pane never overflows its own width.
+    var natural = GANTT_COLS.reduce(function (n, c){ return n + c.w; }, 0);
+    var scale = ganttSplit ? Math.max(0.45, gridW / natural) : 1;
+    // ⚠️ floor, not round: rounding each column independently can accumulate up to
+    // +0.5px per column over the pane width (measured: 211px of columns in a 210px pane
+    // at the narrowest split), which clips the last column. Flooring can only ever come
+    // in under the pane, and losing at most 1px a column is invisible.
+    GANTT_COLS.forEach(function (c){ host.style.setProperty('--dr-gc-' + c.k, Math.floor(c.w * scale) + 'px'); });
     wireGanttToolbar(host);
     // Clicking a drawing's bar or label opens it, same as the Registry rows.
     host.querySelectorAll('.dr-g-row[data-gid]').forEach(function (el){
@@ -1776,9 +1840,15 @@ window.DrawingRegister = (function () {
 
   function ganttToolbar(){
     return '<div class="dr-listbar dr-g-bar-top">' +
-      '<span class="dr-mut">Bars span the approval window — earliest planned submission to planned approval, ' +
-      'replaced by the actual approval once everything under the row has landed. The fill is the same ' +
-      'percentage the Registry shows.</span>' +
+      '<span class="dr-seg-group">' +
+        '<button class="dr-seg-btn' + (ganttSplit?' active':'') + '" data-gsplit="1" ' +
+          'title="Show the register grid beside the timeline">Grid + Gantt</button>' +
+        '<button class="dr-seg-btn' + (!ganttSplit?' active':'') + '" data-gsplit="0" ' +
+          'title="Timeline only, full width">Gantt only</button>' +
+      '</span>' +
+      '<span class="dr-mut dr-g-note">Bars span the approval window — earliest planned submission to planned ' +
+      'approval, replaced by the actual approval once everything under the row has landed. The fill is the ' +
+      'same percentage the Registry shows.</span>' +
       '<span style="flex:1"></span>' +
       '<label class="dr-mut" for="dr-g-zoom">Zoom</label>' +
       '<input type="range" id="dr-g-zoom" min="' + GANTT_DAY_MIN + '" max="' + GANTT_DAY_MAX + '" value="' + ganttZoom + '">' +
@@ -1787,6 +1857,31 @@ window.DrawingRegister = (function () {
   function wireGanttToolbar(host){
     var z = host.querySelector('#dr-g-zoom');
     if (z) z.oninput = function (){ ganttZoom = +z.value || 6; renderGantt(); };
+    host.querySelectorAll('[data-gsplit]').forEach(function (b){
+      b.onclick = function (){ ganttSplit = b.dataset.gsplit === '1'; saveUI(); renderGantt(); };
+    });
+    // ⚠️ The drag updates the CSS variable LIVE and only re-renders on release: a
+    // re-render per mousemove rebuilds every row and the drag stutters badly on a
+    // register of any size (the 1,257-row SLN101 sheet makes this obvious).
+    var sp = host.querySelector('.dr-g-splitter');
+    if (sp) sp.onmousedown = function (e){
+      e.preventDefault(); e.stopPropagation();
+      var startX = e.clientX, startW = GANTT_GRID_W;
+      document.body.classList.add('gx-resizing');
+      function mv(ev){
+        var w = Math.max(GANTT_GRID_MIN, Math.min(GANTT_GRID_MAX, startW + (ev.clientX - startX)));
+        GANTT_GRID_W = w;
+        host.style.setProperty('--dr-g-lblw', w + 'px');
+      }
+      function up(){
+        document.removeEventListener('mousemove', mv);
+        document.removeEventListener('mouseup', up);
+        document.body.classList.remove('gx-resizing');
+        saveUI(); renderGantt();
+      }
+      document.addEventListener('mousemove', mv);
+      document.addEventListener('mouseup', up);
+    };
   }
 
   var COLSPAN_LABEL = 2;   // Code + Title under a group label (frozen block)
