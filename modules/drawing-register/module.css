@@ -762,62 +762,15 @@ html.pd-dark td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.2
 .dr-hint kbd { display:inline-block; padding:0 4px; border:1px solid var(--pd-line); border-bottom-width:2px;
   border-radius:3px; background:var(--pd-bg); font-family:inherit; font-size:.92em; line-height:1.5; }
 
-/* ---- Gantt view (2026-08-18) ---------------------------------------------
-   Hand-rolled absolutely-positioned bars, matching the planning app's
-   project-schedule Gantt so the same programme reads the same from both sides.
-   The label column is frozen with position:sticky; the lane scrolls under it. */
-.dr-gantt { padding:0; overflow:hidden; }
-.dr-g-bar-top { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-.dr-g-bar-top input[type=range] { width:150px; }
-.dr-g-scroll { overflow:auto; max-height:calc(100vh - 260px); }
-.dr-g-head { display:flex; position:sticky; top:0; z-index:3; background:var(--pd-card);
-  border-bottom:1px solid var(--pd-line); }
-.dr-g-headlbl { flex:0 0 var(--dr-g-lblw,460px); width:var(--dr-g-lblw,460px);
-  position:sticky; left:0; z-index:4; background:var(--pd-card);
-  border-right:1px solid var(--pd-line); padding:0;
-  display:flex; align-items:stretch;
-  font-size:var(--dr-fs-micro); font-weight:700; text-transform:uppercase; letter-spacing:.08em;
-  color:var(--pd-mut); }
-/* The draggable divider between the grid pane and the timeline. */
-/* The pane is already position:sticky, which establishes the containing block
-   the splitter positions against. */
-.dr-g-splitter { position:absolute; top:0; right:-3px; width:7px; height:100%;
-  cursor:col-resize; z-index:5; }
-.dr-g-splitter:hover { background:var(--pd-red-mid); }
-.dr-g-ruler { position:relative; height:26px; flex:none; }
+/* ---- Gantt bars (used by the Registry's Gantt pane, registryGanttHTML) ------
+   ⚠️ The standalone Gantt TAB was removed: the Gantt lives inside the Registry now,
+   and a second copy would have been a lesser, drifting version of the same view. The
+   pane/label/splitter rules that belonged to it went with it; these bar and ruler
+   rules are the part both ever shared. */
 .dr-g-mo { position:absolute; top:0; bottom:0; border-left:1px solid var(--pd-line);
   padding:6px 0 0 5px; font-size:var(--dr-fs-micro); color:var(--pd-mut); white-space:nowrap;
   overflow:hidden; }
 .dr-g-today { position:absolute; top:0; bottom:0; width:0; border-left:2px dashed var(--pd-red); z-index:2; }
-.dr-g-body { position:relative; }
-.dr-g-row { display:flex; align-items:stretch; border-bottom:1px solid var(--pd-line); min-height:26px; }
-.dr-g-row:hover { background:var(--pd-red-light); }
-.dr-g-row[data-gid] { cursor:pointer; }
-.dr-g-grow { background:var(--pd-bg); font-weight:600; }
-.dr-g-grow:hover { background:var(--pd-red-light); }
-.dr-g-lbl { flex:0 0 var(--dr-g-lblw,460px); width:var(--dr-g-lblw,460px);
-  position:sticky; left:0; z-index:2; background:inherit;
-  border-right:1px solid var(--pd-line); padding:0;
-  display:flex; align-items:stretch; min-width:0; }
-/* ---- the grid pane's cells. Widths come from --dr-gc-<key>, which renderGantt()
-   scales to whatever the splitter has left the pane, so the pane can never overflow
-   its own width and push the timeline off. */
-.dr-gcell { padding:4px 8px; display:flex; align-items:center; min-width:0;
-  font-size:var(--dr-fs-sm); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  border-right:1px solid var(--pd-line); }
-.dr-gcell:last-child { border-right:0; }
-.dr-g-headlbl .dr-gcell { font-size:var(--dr-fs-micro); }
-.dr-gc-code  { flex:0 0 var(--dr-gc-code,118px);  width:var(--dr-gc-code,118px); }
-.dr-gc-title { flex:1 1 var(--dr-gc-title,200px); width:var(--dr-gc-title,200px); }
-.dr-gc-n     { flex:0 0 var(--dr-gc-sh,42px);     width:var(--dr-gc-sh,42px);
-               color:var(--pd-mut); font-variant-numeric:tabular-nums; }
-.dr-gc-n.dr-r { justify-content:flex-end; }
-/* ⚠️ position:sticky + background:inherit only works because the ROW paints the
-   colour; a transparent label cell would let the bars scroll visibly under it. */
-.dr-g-grow .dr-g-lbl { background:var(--pd-bg); }
-.dr-g-row:hover .dr-g-lbl { background:var(--pd-red-light); }
-/* .dr-g-name / .dr-g-sub were the single-label pane, replaced by .dr-gcell columns. */
-.dr-g-lane { position:relative; flex:none; }
 .dr-g-bar { position:absolute; top:4px; height:16px; border-radius:3px;
   background:var(--pd-line); overflow:hidden; }
 .dr-g-sum { top:6px; height:12px; border-radius:2px; background:var(--pd-mut); opacity:.35; }
@@ -828,15 +781,6 @@ html.pd-dark td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.2
   font-size:var(--dr-fs-micro); color:var(--pd-ink); }
 .dr-g-sum .dr-g-pct { line-height:12px; }
 .dr-gantt-empty { display:flex; gap:14px; align-items:flex-start; padding:26px; color:var(--pd-mut); }
-/* On a phone the split is not usable — the grid pane would leave the timeline a
-   sliver — so it collapses to code + bar only. */
-@media (max-width:700px){
-  .dr-g-headlbl, .dr-g-lbl { flex-basis:130px !important; width:130px !important; }
-  .dr-gc-title, .dr-gc-n { display:none; }
-  .dr-gc-code { flex:1 1 auto !important; width:auto !important; }
-  .dr-g-splitter { display:none; }
-  .dr-g-note { display:none; }
-}
 
 /* ---- Split dashboards (Design vs Individual Services) --------------------
    The two halves are counted differently (0-or-100 units vs sheets with partial
@@ -853,3 +797,71 @@ html.pd-dark td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.2
 .dr-dashtab.active .dr-dashn { background:rgba(255,255,255,.22); color:#fff; }
 .dr-dashnote { flex:1 1 240px; min-width:0; font-size:var(--dr-fs-micro); font-style:italic; }
 @media (max-width:700px){ .dr-dashnote { flex-basis:100%; } }
+
+/* ============================================================================
+   REGISTRY SPLIT — grid pane | divider | Gantt pane
+   ----------------------------------------------------------------------------
+   Modelled on the planning app's project-schedule split (.ps-grid-pane /
+   .ps-divider / .ps-gantt-pane).
+   ⚠️ ROW ALIGNMENT IS BY FIXED ROW HEIGHT. The register's rows are naturally
+   variable (a wrapped title, a second description line), so split mode pins every
+   row to --dr-rowh and clamps the title to one line. Coupling the scrolling is not
+   enough on its own — with variable heights the bars drift from their rows the
+   further down you scroll.
+   ============================================================================ */
+/* ⚠️ BOTH defined here, not left to a var() fallback. --dr-rg-headh was only ever
+   written as var(--dr-rg-headh,54px) at its two use sites, which is the phantom-variable
+   trap this module already hit with --line: it works by fallback until someone tries to
+   override it centrally and nothing happens. The grid's thead and the Gantt ruler MUST
+   share this height or the first row and the first lane start at different Y. */
+:root { --dr-rowh: 30px; --dr-rg-headh: 54px; }
+.dr-split { display:flex; align-items:stretch; gap:0; min-height:0; }
+.dr-split-grid { flex:0 0 var(--dr-split-w,55%); width:var(--dr-split-w,55%); min-width:0; }
+.dr-split-grid .dr-tablecard { max-height:calc(100vh - 250px); }
+.dr-split-div { flex:0 0 7px; cursor:col-resize; background:var(--pd-line);
+  margin:0 3px; border-radius:2px; }
+.dr-split-div:hover { background:var(--pd-red-mid); }
+.dr-split-gantt { flex:1 1 auto; min-width:0; display:flex; flex-direction:column;
+  background:var(--pd-card); border:1px solid var(--pd-line); border-radius:8px;
+  overflow:hidden; }
+/* The ruler is its own strip: it tracks the lanes horizontally (scrollLeft is set in
+   wireRegSplit) but never scrolls vertically, so it stays pinned like a thead. */
+.dr-rg-head { height:var(--dr-rg-headh,54px); overflow:hidden; position:relative;
+  border-bottom:1px solid var(--pd-line); flex:none; }
+.dr-rg-ruler { position:relative; height:100%; }
+.dr-rg-scroll { flex:1 1 auto; overflow:auto; min-height:0;
+  max-height:calc(100vh - 250px); }
+.dr-rg-body { position:relative; }
+.dr-rg-lane { position:relative; height:var(--dr-rowh,30px);
+  border-bottom:1px solid var(--pd-line); }
+.dr-rg-lane[data-gid]:hover { background:var(--pd-red-light); }
+.dr-rg-grow { background:var(--pd-bg); }
+
+/* ---- split mode: fixed row height, so the lanes line up with the rows -------- */
+body.dr-splitting .dr-table tbody tr { height:var(--dr-rowh,30px); }
+body.dr-splitting .dr-table tbody td { padding-top:0; padding-bottom:0;
+  height:var(--dr-rowh,30px); overflow:hidden; white-space:nowrap; }
+/* The second description line is what makes a row taller than the rest, so it is the
+   one thing that must go. The title's own text still ellipsises. */
+body.dr-splitting .dr-table .dr-sub { display:none; }
+body.dr-splitting .dr-table thead th { height:var(--dr-rg-headh,54px);
+  vertical-align:bottom; }
+/* Editing needs the full cell, so the clamp is lifted while an editor is open. */
+body.dr-splitting .dr-table td.dr-editing { overflow:visible; }
+
+.dr-emptyrow td { text-align:center; padding:30px 14px !important; color:var(--pd-mut); }
+
+@media (max-width:900px){
+  /* Below this the two panes each get too little width to read, so the Gantt stacks
+     under the grid rather than squeezing beside it. */
+  .dr-split { flex-direction:column; }
+  .dr-split-grid { flex:1 1 auto; width:100%; }
+  .dr-split-div { display:none; }
+  .dr-split-gantt { min-height:260px; }
+  /* Stacked, the panes no longer need to share a row height. */
+  body.dr-splitting .dr-table tbody tr,
+  body.dr-splitting .dr-table tbody td { height:auto; }
+  body.dr-splitting .dr-table .dr-sub { display:block; }
+}
+.dr-zoom { width:110px; }
+.dr-zoomlbl { font-size:var(--dr-fs-micro); }

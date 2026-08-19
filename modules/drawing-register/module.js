@@ -453,8 +453,9 @@ window.DrawingRegister = (function () {
     try {
       localStorage.setItem(uiKey('view'), view);
       localStorage.setItem(uiKey('dashscope'), dashScope);
-      localStorage.setItem(uiKey('gsplit'), ganttSplit ? '1' : '0');
-      localStorage.setItem(uiKey('gridw'), String(GANTT_GRID_W));
+      localStorage.setItem(uiKey('regsplit'), regSplit ? '1' : '0');
+      localStorage.setItem(uiKey('regsplitw'), String(REG_SPLIT_W));
+      localStorage.setItem(uiKey('gzoom'), String(ganttZoom));
       localStorage.setItem(uiKey('collapsed'), JSON.stringify(collapsed));
       localStorage.setItem(uiKey('regsort'), JSON.stringify(regSort));
     } catch (e) {}
@@ -463,15 +464,21 @@ window.DrawingRegister = (function () {
     var ok=false;
     try {
       var v = localStorage.getItem(uiKey('view'));
-      if (v==='overview'||v==='backlog'||v==='registry'||v==='gantt') view=v;
+      if (v==='overview'||v==='backlog'||v==='registry') view=v;
+      // The Gantt is inside the Registry now, so a stored 'gantt' lands there with the
+      // split on — otherwise anyone who left the module on that tab reopens to a view
+      // that no longer has a button.
+      else if (v==='gantt'){ view='registry'; regSplit=true; }
       else if (v==='register') view='registry';   // legacy value migration
       else if (v==='progress') view='overview';    // legacy value migration
       var ds = localStorage.getItem(uiKey('dashscope'));
       if (ds==='design'||ds==='isd') dashScope=ds;
-      var gs = localStorage.getItem(uiKey('gsplit'));
-      if (gs==='0'||gs==='1') ganttSplit = gs==='1';
-      var gw = parseFloat(localStorage.getItem(uiKey('gridw')));
-      if (!isNaN(gw) && gw >= GANTT_GRID_MIN && gw <= GANTT_GRID_MAX) GANTT_GRID_W = gw;
+      var rs = localStorage.getItem(uiKey('regsplit'));
+      if (rs==='0'||rs==='1') regSplit = rs==='1';
+      var rw = parseFloat(localStorage.getItem(uiKey('regsplitw')));
+      if (!isNaN(rw) && rw >= REG_SPLIT_MIN && rw <= REG_SPLIT_MAX) REG_SPLIT_W = rw;
+      var gz = parseFloat(localStorage.getItem(uiKey('gzoom')));
+      if (!isNaN(gz) && gz >= GANTT_DAY_MIN && gz <= GANTT_DAY_MAX) ganttZoom = gz;
       var c = localStorage.getItem(uiKey('collapsed'));
       if (c){ var o=JSON.parse(c); if (o && typeof o==='object'){ collapsed=o; ok=true; } }
       // Restore the column sort, but VALIDATE the column against REG_SORTABLE —
@@ -1137,7 +1144,6 @@ window.DrawingRegister = (function () {
     var _scroll = captureScroll();
     if (view === 'overview') { renderProgress(); }
     else if (view === 'backlog') { renderBacklog(); }
-    else if (view === 'gantt') { renderGantt(); }
     else { renderRegister(); }
     restoreScroll(_scroll);
     paintRemote();
@@ -1572,6 +1578,15 @@ window.DrawingRegister = (function () {
         ' ' + ico('x',12) + '</button>' : '';
     var toolbar = '<div class="dr-listbar">' +
       '<button class="dr-rowbtn dr-xall" id="dr-xall">' + (anyOpen ? 'Collapse all' : 'Expand all') + '</button>' +
+      '<span class="dr-seg-group">' +
+        '<button class="dr-seg-btn' + (regSplit?' active':'') + '" id="dr-split-on" ' +
+          'title="Show the Gantt beside the grid">Grid + Gantt</button>' +
+        '<button class="dr-seg-btn' + (!regSplit?' active':'') + '" id="dr-split-off" ' +
+          'title="Grid only, full width">Grid</button>' +
+      '</span>' +
+      (regSplit ? '<label class="dr-mut dr-zoomlbl" for="dr-g-zoom">Zoom</label>' +
+        '<input type="range" id="dr-g-zoom" class="dr-zoom" min="'+GANTT_DAY_MIN+'" max="'+GANTT_DAY_MAX+
+        '" value="'+ganttZoom+'" title="Days per pixel on the timeline">' : '') +
       jump +
       dupLegend +
       sortChip +
@@ -1592,12 +1607,15 @@ window.DrawingRegister = (function () {
         '<span class="dr-cellinfo" id="dr-cellinfo"></span>' : '') +
     '</div>';
 
-    if (!draws.length && !structuralNodes().length) {
-      host.innerHTML = emptyHTML();
-      wireEmpty();
-      return;
-    }
-    if (!disp.length) { host.innerHTML = toolbar + emptyMsg('Nothing matches the filters.'); return; }
+    // ⚠️ An empty register renders the REAL GRID (and the real Gantt), empty — it does
+    // not replace the view with a warning card. A blank spreadsheet you can start typing
+    // into is the thing the user came for; a warning that hides the grid means the first
+    // action on a new project is dismissing a message. The planning app's schedule
+    // behaves the same way, and the register now matches it.
+    // `emptyHTML()`'s guidance is kept, demoted to a banner ABOVE the grid so it informs
+    // without blocking, and only while the register really is untouched.
+    var firstRun = !draws.length && !structuralNodes().length;
+    var banner = firstRun ? emptyHTML() : (!disp.length ? emptyMsg('Nothing matches the filters.') : '');
 
     // Sortable headers. `sh(col, label, cls, extraTitle, colKey)` emits the click
     // target + direction indicator; sorting is applied per leaf group in
@@ -1623,15 +1641,169 @@ window.DrawingRegister = (function () {
       sh('responsible', 'dr-c-resp', '', 'resp') + sh('scope', 'dr-c-scope', '', 'scope') +
       '<th class="dr-actcol"></th></tr>';
 
-    var html = toolbar + '<div class="pd-card dr-tablecard"><table class="pd-table dr-table dr-grid'+(CB?' dr-has-cb':'')+'" style="--cbw:'+(CB?'34px':'0px')+'" tabindex="0"><thead>'+head+'</thead><tbody>';
+    var body = '';
     disp.forEach(function (item) {
-      html += item.type==='drawing' ? drawRowHTML(item, CB) : groupRowHTML(item, CB);
+      body += item.type==='drawing' ? drawRowHTML(item, CB) : groupRowHTML(item, CB);
     });
-    html += '</tbody></table></div>';
+    // An empty tbody still renders the header row and the frozen columns, so the grid is
+    // there to type into. A single hint row sits inside it rather than replacing it.
+    if (!disp.length) {
+      body = '<tr class="dr-emptyrow"><td colspan="'+(CB?12:11)+'">' +
+        (firstRun ? 'No drawings yet — use <strong>+ Drawing</strong>, or import a workbook.'
+                  : 'Nothing matches the filters.') + '</td></tr>';
+    }
+    var grid = '<div class="pd-card dr-tablecard"><table class="pd-table dr-table dr-grid'+(CB?' dr-has-cb':'')+
+      '" style="--cbw:'+(CB?'34px':'0px')+'" tabindex="0"><thead>'+head+'</thead><tbody>' + body +
+      '</tbody></table></div>';
+
+    // ---- SPLIT: the register grid and the Gantt side by side, in the Registry itself.
+    // Modelled on the planning app's project-schedule split (.ps-grid-pane / .ps-divider /
+    // .ps-gantt-pane): two panes, a draggable divider, and ONE fixed row height so the
+    // bars line up with their rows. See wireRegSplit() for the scroll coupling.
+    var html = toolbar + banner + (regSplit
+      ? '<div class="dr-split" id="dr-split">' +
+          '<div class="dr-split-grid" id="dr-split-grid">' + grid + '</div>' +
+          '<div class="dr-split-div" id="dr-split-div" title="Drag to resize · double-click to reset"></div>' +
+          '<div class="dr-split-gantt" id="dr-split-gantt">' + registryGanttHTML(disp) + '</div>' +
+        '</div>'
+      : grid);
     host.innerHTML = html;
+    document.body.classList.toggle('dr-splitting', regSplit);
     ensureColWidths();
     wireRegister(host, disp);
     wireColResize(host);
+    if (regSplit) wireRegSplit(host);
+  }
+
+  // ==========================================================================
+  // REGISTRY SPLIT — the Gantt pane that sits beside the grid
+  // --------------------------------------------------------------------------
+  // ⚠️ ROW ALIGNMENT IS BY FIXED ROW HEIGHT, exactly as the planning app's schedule
+  // does it (its ROWH constant). The register's rows are naturally variable — a wrapped
+  // title, a second description line — so in split mode `body.dr-splitting` pins every
+  // row to REG_ROWH and clamps the title to one line. Without that the bars cannot line
+  // up with their rows no matter how the scrolling is coupled.
+  //
+  // The lane order is `disp` verbatim, the same array the grid rows are built from, so
+  // row N of the grid and lane N of the Gantt are the same item by construction.
+  var REG_ROWH = 30;                     // must match the CSS in module.css
+  var regSplit = true;                   // Registry shows grid + Gantt side by side
+  var REG_SPLIT_W = 0.55;                // grid pane's share of the width
+  var REG_SPLIT_MIN = 0.2, REG_SPLIT_MAX = 0.9;
+
+  function registryGanttHTML(disp){
+    var spans = [], min = null, max = null;
+    disp.forEach(function (item){
+      var sp = ganttSpan(item);
+      spans.push(sp);
+      if (!sp) return;
+      if (!min || sp.s < min) min = sp.s;
+      if (!max || sp.f > max) max = sp.f;
+    });
+    // ⚠️ No dates (or no rows at all) still draws a REAL timeline — a ruler around today
+    // and empty lanes — rather than an empty-state card. The pane is furniture the user
+    // is about to fill, not a result that failed to arrive.
+    if (!min || !max) {
+      var t0 = new Date(); t0.setHours(0,0,0,0);
+      min = gAddDays(t0, -45); max = gAddDays(t0, 75);
+    } else {
+      min = gAddDays(min, -7); max = gAddDays(max, 7);
+    }
+    var total = Math.max(1, gDays(min, max) + 1);
+    var dayw = ganttZoom, W = total * dayw;
+
+    var ruler = '', cur = new Date(min.getFullYear(), min.getMonth(), 1);
+    while (cur <= max) {
+      var next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      var from = cur < min ? min : cur, to = next > max ? max : next;
+      var x = gDays(min, from) * dayw, w = Math.max(0, gDays(from, to) * dayw);
+      if (w > 0) ruler += '<div class="dr-g-mo" style="left:'+x+'px;width:'+w+'px">' +
+        (w > 46 ? Fmt.esc(cur.toLocaleString('en',{month:'short'}) + ' ' + String(cur.getFullYear()).slice(2)) : '') + '</div>';
+      cur = next;
+    }
+    var today = new Date(); today.setHours(0,0,0,0);
+    var todayLine = (today >= min && today <= max)
+      ? '<div class="dr-g-today" style="left:'+(gDays(min, today)*dayw)+'px" title="Today"></div>' : '';
+
+    var lanes = '';
+    disp.forEach(function (item, i){
+      var sp = spans[i], isGrp = item.type === 'group';
+      var bar = '';
+      if (sp) {
+        var x = gDays(min, sp.s) * dayw;
+        var w = Math.max((gDays(sp.s, sp.f) + 1) * dayw, 3);
+        var label = isGrp ? item.label : (item.row.drawing_code || item.row.drawing_no || item.row.title || '');
+        bar = '<div class="dr-g-bar'+(isGrp?' dr-g-sum':'')+(sp.pct>=100?' dr-g-done':'')+
+          '" style="left:'+x+'px;width:'+w+'px" title="'+
+          Fmt.esc(label+' · '+Fmt.date(sp.s.toISOString().slice(0,10))+' → '+
+                  Fmt.date(sp.f.toISOString().slice(0,10))+' · '+sp.pct+'%'+
+                  (sp.actual?' · approved '+Fmt.date(sp.actual):''))+'">' +
+          '<div class="dr-g-fill" style="width:'+sp.pct+'%"></div>' +
+          (w > 34 ? '<span class="dr-g-pct">'+sp.pct+'%</span>' : '') + '</div>';
+      }
+      lanes += '<div class="dr-rg-lane'+(isGrp?' dr-rg-grow':'')+'"'+
+        (isGrp?'':' data-gid="'+item.row.id+'"')+'>'+bar+'</div>';
+    });
+    if (!disp.length) lanes = '<div class="dr-rg-lane"></div>';
+
+    return '<div class="dr-rg-head"><div class="dr-rg-ruler" style="width:'+W+'px">'+ruler+todayLine+'</div></div>' +
+      '<div class="dr-rg-scroll" id="dr-rg-scroll"><div class="dr-rg-body" style="width:'+W+'px">'+lanes+'</div></div>';
+  }
+
+  // The two panes scroll as one. The GRID is the master (it owns the keyboard and the
+  // cell cursor, so it must never be scrolled out from under the user); the Gantt
+  // follows. A re-entrancy guard stops the echo — without it each pane's scroll handler
+  // sets the other, which sets it back, and the panes judder and drift.
+  function wireRegSplit(host){
+    var gridPane = host.querySelector('.dr-tablecard');
+    var lane = host.querySelector('#dr-rg-scroll');
+    var headRuler = host.querySelector('.dr-rg-head');
+    if (!gridPane || !lane) return;
+    var lock = false;
+    function sync(from, to){
+      if (lock) return;
+      lock = true;
+      to.scrollTop = from.scrollTop;
+      lock = false;
+    }
+    gridPane.onscroll = function (){
+      sync(gridPane, lane);
+      // The ruler is a separate strip so it can stay put vertically while tracking the
+      // lane horizontally.
+      if (headRuler) headRuler.scrollLeft = lane.scrollLeft;
+    };
+    lane.onscroll = function (){
+      sync(lane, gridPane);
+      if (headRuler) headRuler.scrollLeft = lane.scrollLeft;
+    };
+    host.style.setProperty('--dr-split-w', (REG_SPLIT_W * 100) + '%');
+
+    var div = host.querySelector('#dr-split-div');
+    if (div) {
+      div.onmousedown = function (e){
+        e.preventDefault();
+        var box = host.querySelector('#dr-split').getBoundingClientRect();
+        document.body.classList.add('gx-resizing');
+        function mv(ev){
+          var f = (ev.clientX - box.left) / box.width;
+          REG_SPLIT_W = Math.max(REG_SPLIT_MIN, Math.min(REG_SPLIT_MAX, f));
+          host.style.setProperty('--dr-split-w', (REG_SPLIT_W * 100) + '%');
+        }
+        function up(){
+          document.removeEventListener('mousemove', mv);
+          document.removeEventListener('mouseup', up);
+          document.body.classList.remove('gx-resizing');
+          saveUI();
+        }
+        document.addEventListener('mousemove', mv);
+        document.addEventListener('mouseup', up);
+      };
+      div.ondblclick = function (){
+        REG_SPLIT_W = 0.55;
+        host.style.setProperty('--dr-split-w', '55%');
+        saveUI();
+      };
+    }
   }
 
   // ==========================================================================
@@ -1650,29 +1822,6 @@ window.DrawingRegister = (function () {
   //   fill   = the same percentage the tree shows, so the two cannot disagree
   var GANTT_DAY_MIN = 2, GANTT_DAY_MAX = 26;
   var ganttZoom = 6;              // px per day
-  // ⚠️ SPLIT LAYOUT: the grid pane and the timeline are ONE row each, side by side in a
-  // single scroller — not two panes with synchronised scrollTop. Row alignment is then
-  // structural rather than something two scroll handlers have to keep agreeing on,
-  // which is the usual source of "the bars drift out of line by a row" bugs. The grid
-  // pane is sticky-left; the timeline scrolls horizontally under it.
-  var GANTT_GRID_W = 460;                    // width of the grid pane, drag to change
-  // ⚠️ The minimum is 210, not 180. The column widths are scaled by gridW/natural with
-  // a 0.45 floor (below that the numeric columns are unreadable), and 0.45 × 444px of
-  // natural width is ~200px — so a 180px minimum let the columns overflow the pane and
-  // clip the % column at the narrowest split. 210 keeps the floor case fitting.
-  var GANTT_GRID_MIN = 210, GANTT_GRID_MAX = 900;
-  var ganttSplit = true;                     // grid + timeline, or timeline only
-  // The grid pane's columns, kept deliberately short: this is a companion to the
-  // timeline, not a second Registry. Code and title carry the identity, the counters
-  // and percent carry the progress the bar is drawing.
-  var GANTT_COLS = [
-    { k:'code',  label:'Code',  w:118, cls:'dr-gc-code' },
-    { k:'title', label:'Title', w:200, cls:'dr-gc-title' },
-    { k:'sh',    label:'Sh',    w:38,  cls:'dr-gc-n dr-r' },
-    { k:'ap',    label:'Appr',  w:44,  cls:'dr-gc-n dr-r' },
-    { k:'pct',   label:'%',     w:44,  cls:'dr-gc-n dr-r' }
-  ];
-
   function gDate(v){
     if (!v) return null;
     var m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -1707,181 +1856,6 @@ window.DrawingRegister = (function () {
     if (!s || !f) return null;
     if (f < s) { var t = s; s = f; f = t; }        // a mis-keyed pair must not draw backwards
     return { s: s, f: f, pct: Math.max(0, Math.min(100, pct || 0)), actual: actual };
-  }
-
-  function renderGantt(){
-    var host = document.getElementById('dr-view');
-    var disp = buildModel();
-    var spans = [], min = null, max = null;
-    disp.forEach(function (item){
-      var sp = ganttSpan(item);
-      spans.push(sp);
-      if (!sp) return;
-      if (!min || sp.s < min) min = sp.s;
-      if (!max || sp.f > max) max = sp.f;
-    });
-    // Nothing dated at all is a real state worth naming, not an empty chart.
-    if (!min || !max) {
-      host.innerHTML = ganttToolbar() +
-        '<div class="pd-card dr-gantt-empty">' + ico('calendar', 22) +
-        '<div><strong>No dates to plot yet.</strong><div class="dr-mut">A drawing appears on the Gantt once it has a planned submission or planned approval date. ' +
-        'Add them in the Registry, or import a workbook that carries them.</div></div></div>';
-      wireGanttToolbar(host);
-      return;
-    }
-    // A little air either side so the first and last bars aren't flush to the edge.
-    min = gAddDays(min, -7); max = gAddDays(max, 7);
-    var total = Math.max(1, gDays(min, max) + 1);
-    var dayw = ganttZoom;
-    var W = total * dayw;
-
-    // ---- month ruler
-    var ruler = '', cur = new Date(min.getFullYear(), min.getMonth(), 1);
-    while (cur <= max) {
-      var next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-      var from = cur < min ? min : cur, to = next > max ? max : next;
-      var x = gDays(min, from) * dayw, w = Math.max(0, gDays(from, to) * dayw);
-      if (w > 0) {
-        ruler += '<div class="dr-g-mo" style="left:' + x + 'px;width:' + w + 'px">' +
-          (w > 46 ? Fmt.esc(cur.toLocaleString('en', { month: 'short' }) + ' ' + String(cur.getFullYear()).slice(2)) : '') +
-          '</div>';
-      }
-      cur = next;
-    }
-    // Today marker — only when today is actually in range, else it would pin to an edge
-    // and read as a real date.
-    var today = new Date(); today.setHours(0,0,0,0);
-    var todayLine = (today >= min && today <= max)
-      ? '<div class="dr-g-today" style="left:' + (gDays(min, today) * dayw) + 'px" title="Today"></div>' : '';
-
-    var gridW = ganttSplit ? GANTT_GRID_W : 0;
-    var rowsHtml = '';
-    disp.forEach(function (item, i){
-      var sp = spans[i];
-      var isGrp = item.type === 'group';
-      var label = isGrp ? item.label : (item.row.drawing_code || item.row.drawing_no || item.row.title || '');
-      var indent = 8 + Math.min(item.level, 6) * 12 - 12;
-      // The grid pane's cells for this row. A level row shows its roll-up, a drawing
-      // its own numbers — the same values the Registry shows, from the same helpers, so
-      // the two views cannot disagree.
-      var cells = '';
-      if (ganttSplit) {
-        var roll = isGrp ? rollupFor(item.node, item.list) : null;
-        var tot  = isGrp ? roll.tot : (num(item.row.no_of_sheets) || 0);
-        var apn  = isGrp ? roll.ap  : approvedOf(item.row);
-        var pctN = isGrp ? roll.pct : Math.round(pctApproved(item.row) * 100);
-        GANTT_COLS.forEach(function (c){
-          var v = c.k === 'code'  ? label
-                : c.k === 'title' ? (isGrp ? (item.list.length + ' dwg') : (item.row.title || ''))
-                : c.k === 'sh'    ? tot
-                : c.k === 'ap'    ? apn
-                : (pctN + '%');
-          cells += '<div class="dr-gcell ' + c.cls + '"' +
-            (c.k === 'code' ? ' style="padding-left:' + indent + 'px"' : '') +
-            ' title="' + Fmt.esc(String(v)) + '">' + Fmt.esc(String(v)) + '</div>';
-        });
-      } else {
-        cells = '<div class="dr-gcell dr-gc-code" style="padding-left:' + indent + 'px" title="' +
-          Fmt.esc(label) + '">' + Fmt.esc(label) + '</div>';
-      }
-      var bar = '';
-      if (sp) {
-        var x = gDays(min, sp.s) * dayw;
-        var w = Math.max((gDays(sp.s, sp.f) + 1) * dayw, 3);
-        var cls = 'dr-g-bar' + (isGrp ? ' dr-g-sum' : '') + (sp.pct >= 100 ? ' dr-g-done' : '');
-        bar = '<div class="' + cls + '" style="left:' + x + 'px;width:' + w + 'px" title="' +
-          Fmt.esc(label + ' · ' + Fmt.date(sp.s.toISOString().slice(0,10)) + ' → ' +
-                  Fmt.date(sp.f.toISOString().slice(0,10)) + ' · ' + sp.pct + '%' +
-                  (sp.actual ? ' · approved ' + Fmt.date(sp.actual) : '')) + '">' +
-          '<div class="dr-g-fill" style="width:' + sp.pct + '%"></div>' +
-          (w > 34 ? '<span class="dr-g-pct">' + sp.pct + '%</span>' : '') + '</div>';
-      }
-      rowsHtml +=
-        '<div class="dr-g-row' + (isGrp ? ' dr-g-grow' : '') + '"' +
-          (isGrp ? '' : ' data-gid="' + item.row.id + '"') + '>' +
-          '<div class="dr-g-lbl">' + cells + '</div>' +
-          '<div class="dr-g-lane" style="width:' + W + 'px">' + bar + '</div>' +
-        '</div>';
-    });
-
-    var headCells = ganttSplit
-      ? GANTT_COLS.map(function (c){ return '<div class="dr-gcell ' + c.cls + '">' + Fmt.esc(c.label) + '</div>'; }).join('')
-      : '<div class="dr-gcell dr-gc-code">Drawing</div>';
-    host.innerHTML = ganttToolbar() +
-      '<div class="pd-card dr-gantt' + (ganttSplit ? ' dr-g-split' : '') + '">' +
-        '<div class="dr-g-scroll">' +
-          '<div class="dr-g-head" style="width:' + (gridW + W) + 'px">' +
-            '<div class="dr-g-headlbl">' + headCells +
-              // The splitter sits on the pane's trailing edge, so dragging it widens the
-              // grid at the timeline's expense — the whole point of a split view.
-              (ganttSplit ? '<span class="dr-g-splitter" title="Drag to resize the grid pane"></span>' : '') +
-            '</div>' +
-            '<div class="dr-g-ruler" style="width:' + W + 'px">' + ruler + todayLine + '</div>' +
-          '</div>' +
-          '<div class="dr-g-body" style="width:' + (gridW + W) + 'px">' + rowsHtml + '</div>' +
-        '</div>' +
-      '</div>';
-    host.style.setProperty('--dr-g-lblw', gridW + 'px');
-    // Column widths inside the grid pane, scaled to whatever the splitter has left it,
-    // so the pane never overflows its own width.
-    var natural = GANTT_COLS.reduce(function (n, c){ return n + c.w; }, 0);
-    var scale = ganttSplit ? Math.max(0.45, gridW / natural) : 1;
-    // ⚠️ floor, not round: rounding each column independently can accumulate up to
-    // +0.5px per column over the pane width (measured: 211px of columns in a 210px pane
-    // at the narrowest split), which clips the last column. Flooring can only ever come
-    // in under the pane, and losing at most 1px a column is invisible.
-    GANTT_COLS.forEach(function (c){ host.style.setProperty('--dr-gc-' + c.k, Math.floor(c.w * scale) + 'px'); });
-    wireGanttToolbar(host);
-    // Clicking a drawing's bar or label opens it, same as the Registry rows.
-    host.querySelectorAll('.dr-g-row[data-gid]').forEach(function (el){
-      el.onclick = function (){ editRowField(el.dataset.gid, 'title'); };
-    });
-  }
-
-  function ganttToolbar(){
-    return '<div class="dr-listbar dr-g-bar-top">' +
-      '<span class="dr-seg-group">' +
-        '<button class="dr-seg-btn' + (ganttSplit?' active':'') + '" data-gsplit="1" ' +
-          'title="Show the register grid beside the timeline">Grid + Gantt</button>' +
-        '<button class="dr-seg-btn' + (!ganttSplit?' active':'') + '" data-gsplit="0" ' +
-          'title="Timeline only, full width">Gantt only</button>' +
-      '</span>' +
-      '<span class="dr-mut dr-g-note">Bars span the approval window — earliest planned submission to planned ' +
-      'approval, replaced by the actual approval once everything under the row has landed. The fill is the ' +
-      'same percentage the Registry shows.</span>' +
-      '<span style="flex:1"></span>' +
-      '<label class="dr-mut" for="dr-g-zoom">Zoom</label>' +
-      '<input type="range" id="dr-g-zoom" min="' + GANTT_DAY_MIN + '" max="' + GANTT_DAY_MAX + '" value="' + ganttZoom + '">' +
-      '</div>';
-  }
-  function wireGanttToolbar(host){
-    var z = host.querySelector('#dr-g-zoom');
-    if (z) z.oninput = function (){ ganttZoom = +z.value || 6; renderGantt(); };
-    host.querySelectorAll('[data-gsplit]').forEach(function (b){
-      b.onclick = function (){ ganttSplit = b.dataset.gsplit === '1'; saveUI(); renderGantt(); };
-    });
-    // ⚠️ The drag updates the CSS variable LIVE and only re-renders on release: a
-    // re-render per mousemove rebuilds every row and the drag stutters badly on a
-    // register of any size (the 1,257-row SLN101 sheet makes this obvious).
-    var sp = host.querySelector('.dr-g-splitter');
-    if (sp) sp.onmousedown = function (e){
-      e.preventDefault(); e.stopPropagation();
-      var startX = e.clientX, startW = GANTT_GRID_W;
-      document.body.classList.add('gx-resizing');
-      function mv(ev){
-        var w = Math.max(GANTT_GRID_MIN, Math.min(GANTT_GRID_MAX, startW + (ev.clientX - startX)));
-        GANTT_GRID_W = w;
-        host.style.setProperty('--dr-g-lblw', w + 'px');
-      }
-      function up(){
-        document.removeEventListener('mousemove', mv);
-        document.removeEventListener('mouseup', up);
-        document.body.classList.remove('gx-resizing');
-        saveUI(); renderGantt();
-      }
-      document.addEventListener('mousemove', mv);
-      document.addEventListener('mouseup', up);
-    };
   }
 
   var COLSPAN_LABEL = 2;   // Code + Title under a group label (frozen block)
@@ -2184,6 +2158,19 @@ window.DrawingRegister = (function () {
     var clr = host.querySelector('#dr-selclear'); if (clr) clr.onclick = function(){ selected={}; render(); };
     var sd  = host.querySelector('#dr-seldel');   if (sd)  sd.onclick  = deleteSelected;
     var ss  = host.querySelector('#dr-selstatus'); if (ss) ss.onchange = function(){ if (ss.value) setStatusSelected(ss.value); };
+
+    var zm = host.querySelector('#dr-g-zoom');
+    if (zm) zm.oninput = function (){
+      ganttZoom = +zm.value || 6;
+      // Only the Gantt pane changes, so re-render just that — rebuilding the whole
+      // Registry per slider tick would drop the cell cursor and stutter badly.
+      var pane = host.querySelector('#dr-split-gantt');
+      if (pane){ pane.innerHTML = registryGanttHTML(buildModel()); wireRegSplit(host); }
+    };
+    var so = host.querySelector('#dr-split-on');
+    if (so) so.onclick = function (){ if (!regSplit){ regSplit = true;  saveUI(); render(); } };
+    var sf = host.querySelector('#dr-split-off');
+    if (sf) sf.onclick = function (){ if (regSplit){  regSplit = false; saveUI(); render(); } };
 
     // keyboard shortcuts (grid focused)
     var grid = host.querySelector('.dr-grid');
@@ -2993,6 +2980,8 @@ window.DrawingRegister = (function () {
 
   function renderProgress() {
     var host = document.getElementById('dr-view');
+    // The dashboard has nothing to plot with no drawings, so here the guidance card IS
+    // the right answer — unlike the Registry, where the grid itself is the thing to show.
     if (!drawingRows().length) { host.innerHTML = emptyHTML(); wireEmpty(); return; }
     var draws = dashRows();
     var isIsd = dashScope === 'isd';
