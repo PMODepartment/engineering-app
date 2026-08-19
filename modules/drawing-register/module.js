@@ -455,7 +455,8 @@ window.DrawingRegister = (function () {
       localStorage.setItem(uiKey('dashscope'), dashScope);
       localStorage.setItem(uiKey('regsplit'), regSplit ? '1' : '0');
       localStorage.setItem(uiKey('regsplitw'), String(REG_SPLIT_W));
-      localStorage.setItem(uiKey('gzoom'), String(ganttZoom));
+      localStorage.setItem(uiKey('gunit'), ganttUnit);
+      localStorage.setItem(uiKey('gscale'), String(ganttScale));
       localStorage.setItem(uiKey('collapsed'), JSON.stringify(collapsed));
       localStorage.setItem(uiKey('regsort'), JSON.stringify(regSort));
     } catch (e) {}
@@ -477,8 +478,10 @@ window.DrawingRegister = (function () {
       if (rs==='0'||rs==='1') regSplit = rs==='1';
       var rw = parseFloat(localStorage.getItem(uiKey('regsplitw')));
       if (!isNaN(rw) && rw >= REG_SPLIT_MIN && rw <= REG_SPLIT_MAX) REG_SPLIT_W = rw;
-      var gz = parseFloat(localStorage.getItem(uiKey('gzoom')));
-      if (!isNaN(gz) && gz >= GANTT_DAY_MIN && gz <= GANTT_DAY_MAX) ganttZoom = gz;
+      var gu = localStorage.getItem(uiKey('gunit'));
+      var gs = parseFloat(localStorage.getItem(uiKey('gscale')));
+      if (GDAYW[gu]) ganttUnit = gu;
+      if (!isNaN(gs) && gs >= GSCALE_MIN && gs <= GSCALE_MAX) ganttScale = gs;
       var c = localStorage.getItem(uiKey('collapsed'));
       if (c){ var o=JSON.parse(c); if (o && typeof o==='object'){ collapsed=o; ok=true; } }
       // Restore the column sort, but VALIDATE the column against REG_SORTABLE —
@@ -1669,13 +1672,16 @@ window.DrawingRegister = (function () {
         '<button class="dr-seg-btn' + (!regSplit?' active':'') + '" id="dr-split-off" ' +
           'title="Grid only, full width">Grid</button>' +
       '</span>' +
-      (regSplit ? '<label class="dr-mut dr-zoomlbl" for="dr-g-zoom">Zoom</label>' +
-        '<input type="range" id="dr-g-zoom" class="dr-zoom" min="'+GANTT_DAY_MIN+'" max="'+GANTT_DAY_MAX+
-        '" value="'+ganttZoom+'" title="Days per pixel on the timeline">' : '') +
+      // Month / Quarter / Year, not a slider — see the note on GDAYW.
+      (regSplit ? '<span class="dr-seg-group" id="dr-g-unit" ' +
+        'title="Timeline scale — Ctrl+scroll over the chart, or drag a column edge in the date header, to fine-tune">' +
+        ['month','quarter','year'].map(function (u){
+          return '<button class="dr-seg-btn'+(ganttUnit===u?' active':'')+'" data-unit="'+u+'">' +
+                 u.charAt(0).toUpperCase() + u.slice(1) + '</button>';
+        }).join('') + '</span>' : '') +
       jump +
       dupLegend +
       sortChip +
-      '<div class="dr-listcount">Showing <strong>'+shown+'</strong> of '+draws.length+' drawings</div>' +
       '<div class="dr-selbar" id="dr-selbar" hidden>' +
         '<span id="dr-selcount"></span>' +
         '<select class="pd-select pd-btn-sm dr-selstatus" id="dr-selstatus" title="Set status for selected">' +
@@ -1685,11 +1691,27 @@ window.DrawingRegister = (function () {
         '<button class="pd-btn pd-btn-sm" id="dr-selclear">Clear</button>' +
         '<button class="pd-btn pd-btn-sm pd-btn-danger" id="dr-seldel">Delete selected</button>' +
       '</div>' +
-      (canWrite ? '<div class="dr-hint">Click a cell · Shift-click or drag for a range · type or F2 to edit · '+
-        '<kbd>Tab</kbd>/<kbd>↵</kbd> move · <kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy-paste (Excel) · '+
-        '<kbd>Ctrl</kbd>+<kbd>D</kbd> fill down · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Del</kbd> clear · '+
-        '<kbd>Esc</kbd> back to rows</div>' +
-        '<span class="dr-cellinfo" id="dr-cellinfo"></span>' : '') +
+    '</div>';
+
+    // ⚠️ EVERYTHING EXPLANATORY GOES BELOW THE GRID, matching the procurement app's Excel
+    // grid. The keyboard cheat-sheet was a permanent multi-line paragraph in the toolbar —
+    // it pushed the data down on every render and was read once. Below the grid it uses
+    // space that was dead, the toolbar stays a single row of actions, and the count and
+    // cell readout sit with it because they are information, not controls.
+    var footer = '<div class="dr-listbar dr-foot">' +
+      (canWrite ? '<details class="dr-help">' +
+        '<summary>' + ico('bulb', 13) + ' How to use this grid <span class="dr-mut">— works like Excel</span></summary>' +
+        '<div class="dr-help-grid">' +
+          '<div><kbd>Click</kbd> select · <kbd>Shift</kbd>+click or drag for a range · type or <kbd>F2</kbd> to edit</div>' +
+          '<div><kbd>Tab</kbd>/<kbd>↵</kbd> move · <kbd>Ctrl</kbd>+<kbd>arrows</kbd> jump to the edge of the data · <kbd>Del</kbd> clear</div>' +
+          '<div><kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy &amp; paste — round-trips with Excel · <kbd>Ctrl</kbd>+<kbd>D</kbd> fill down · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</div>' +
+          '<div>Drag a column border to resize, double-click it to auto-fit · <kbd>Esc</kbd> back to rows</div>' +
+          (regSplit ? '<div>Timeline: <kbd>Ctrl</kbd>+scroll over the chart to zoom, or drag a column edge in the date header</div>' : '') +
+        '</div></details>' : '') +
+      '<div class="dr-foot-right">' +
+        '<span class="dr-cellinfo" id="dr-cellinfo"></span>' +
+        '<div class="dr-listcount">Showing <strong>'+shown+'</strong> of '+draws.length+' drawings</div>' +
+      '</div>' +
     '</div>';
 
     // ⚠️ An empty register renders the REAL GRID (and the real Gantt), empty — it does
@@ -1751,7 +1773,7 @@ window.DrawingRegister = (function () {
           '<div class="dr-split-div" id="dr-split-div" title="Drag to resize · double-click to reset"></div>' +
           '<div class="dr-split-gantt" id="dr-split-gantt">' + registryGanttHTML(disp) + '</div>' +
         '</div>'
-      : grid);
+      : grid) + footer;
     host.innerHTML = html;
     document.body.classList.toggle('dr-splitting', regSplit);
     ensureColWidths();
@@ -1776,6 +1798,25 @@ window.DrawingRegister = (function () {
   var REG_SPLIT_W = 0.55;                // grid pane's share of the width
   var REG_SPLIT_MIN = 0.2, REG_SPLIT_MAX = 0.9;
 
+  // ---- Timeline scale -------------------------------------------------------
+  // ⚠️ NO ZOOM SLIDER. A slider is a control you have to find, aim at and drag before the
+  // chart tells you anything, and it does not say what unit you are looking at. The
+  // planning app's schedule instead offers a Month / Quarter / Year scale and makes fine
+  // adjustment innate — Ctrl+wheel over the chart, or drag a column edge in the date
+  // header — and this now matches it, so the two Gantts behave the same way.
+  //
+  // GDAYW is px per day at each scale; `ganttScale` is the user's own multiplier on top,
+  // clamped and persisted, so a chosen density survives a re-render and a reload.
+  var GDAYW = { month: 4.2, quarter: 1.55, year: 0.62 };
+  var ganttUnit = 'month';               // 'month' | 'quarter' | 'year'
+  var ganttScale = 1;
+  var GSCALE_MIN = 0.35, GSCALE_MAX = 6;
+  function gDayW(){ return GDAYW[ganttUnit] * ganttScale; }
+  function setGanttScale(v){
+    ganttScale = Math.min(GSCALE_MAX, Math.max(GSCALE_MIN, v));
+    saveUI();
+  }
+
   function registryGanttHTML(disp){
     var spans = [], min = null, max = null;
     disp.forEach(function (item){
@@ -1795,16 +1836,44 @@ window.DrawingRegister = (function () {
       min = gAddDays(min, -7); max = gAddDays(max, 7);
     }
     var total = Math.max(1, gDays(min, max) + 1);
-    var dayw = ganttZoom, W = total * dayw;
+    var dayw = gDayW(), W = total * dayw;
 
-    var ruler = '', cur = new Date(min.getFullYear(), min.getMonth(), 1);
+    // ⚠️ TWO TIERS: years on top, the chosen unit beneath — the same shape as the planning
+    // app's date header. A single band of months is unreadable once the register spans more
+    // than a year, because every label repeats with no anchor telling you which year.
+    // In Year scale the year band IS the ruler and there is no second tier.
+    var years = '', cur = new Date(min.getFullYear(), 0, 1);
     while (cur <= max) {
-      var next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-      var from = cur < min ? min : cur, to = next > max ? max : next;
-      var x = gDays(min, from) * dayw, w = Math.max(0, gDays(from, to) * dayw);
-      if (w > 0) ruler += '<div class="dr-g-mo" style="left:'+x+'px;width:'+w+'px">' +
-        (w > 46 ? Fmt.esc(cur.toLocaleString('en',{month:'short'}) + ' ' + String(cur.getFullYear()).slice(2)) : '') + '</div>';
-      cur = next;
+      var ynext = new Date(cur.getFullYear() + 1, 0, 1);
+      var yfrom = cur < min ? min : cur, yto = ynext > max ? max : ynext;
+      var yx = gDays(min, yfrom) * dayw, yw = Math.max(0, gDays(yfrom, yto) * dayw);
+      if (yw > 0) years += '<div class="dr-g-yr" style="left:'+yx+'px;width:'+yw+'px">' +
+        (yw > 30 ? cur.getFullYear() : '') +
+        // The grip is the fine-adjust: dragging it rescales the whole timeline by this
+        // column's own day span, so the drag maps 1:1 onto px-per-day.
+        '<span class="dr-g-grip" data-days="'+Math.max(1, gDays(yfrom, yto))+'" ' +
+        'title="Drag to stretch or squeeze the timeline"></span></div>';
+      cur = ynext;
+    }
+    var ruler = '';
+    if (ganttUnit !== 'year') {
+      var step = ganttUnit === 'quarter' ? 3 : 1;
+      var c2 = new Date(min.getFullYear(), Math.floor(min.getMonth() / step) * step, 1);
+      while (c2 <= max) {
+        var next = new Date(c2.getFullYear(), c2.getMonth() + step, 1);
+        var from = c2 < min ? min : c2, to = next > max ? max : next;
+        var x = gDays(min, from) * dayw, w = Math.max(0, gDays(from, to) * dayw);
+        if (w > 0) {
+          var lbl = ganttUnit === 'quarter'
+            ? 'Q' + (Math.floor(c2.getMonth() / 3) + 1)
+            : c2.toLocaleString('en', { month: 'short' });
+          ruler += '<div class="dr-g-mo" style="left:'+x+'px;width:'+w+'px">' +
+            (w > 26 ? Fmt.esc(lbl) : '') +
+            '<span class="dr-g-grip" data-days="'+Math.max(1, gDays(from, to))+'" ' +
+            'title="Drag to stretch or squeeze the timeline"></span></div>';
+        }
+        c2 = next;
+      }
     }
     var today = new Date(); today.setHours(0,0,0,0);
     var todayLine = (today >= min && today <= max)
@@ -1831,7 +1900,8 @@ window.DrawingRegister = (function () {
     });
     if (!disp.length) lanes = '<div class="dr-rg-lane"></div>';
 
-    return '<div class="dr-rg-head"><div class="dr-rg-ruler" style="width:'+W+'px">'+ruler+todayLine+'</div></div>' +
+    return '<div class="dr-rg-head"><div class="dr-rg-ruler" style="width:'+W+'px">' +
+        '<div class="dr-g-yrs">'+years+'</div><div class="dr-g-mos">'+ruler+'</div>'+todayLine+'</div></div>' +
       '<div class="dr-rg-scroll" id="dr-rg-scroll"><div class="dr-rg-body" style="width:'+W+'px">'+lanes+'</div></div>';
   }
 
@@ -1889,6 +1959,58 @@ window.DrawingRegister = (function () {
         saveUI();
       };
     }
+
+    // ---- innate zoom, so no slider is needed --------------------------------
+    // ⚠️ Ctrl+wheel keeps the date under the POINTER fixed. Rescaling from the left edge
+    // instead makes the chart appear to run away from you: the row you were reading slides
+    // off screen and you have to chase it. The repaint is deferred a frame because the new
+    // width has to be laid out before the corrected scrollLeft means anything.
+    var repaint = window._drRepaintGantt || function (){};
+    if (lane) {
+      lane.addEventListener('wheel', function (e){
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        var box = lane.getBoundingClientRect(), offX = e.clientX - box.left;
+        var wBefore = lane.firstChild ? lane.firstChild.offsetWidth : 0;
+        var ratio = wBefore ? (lane.scrollLeft + offX) / wBefore : 0;
+        setGanttScale(ganttScale * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+        repaint();
+        var raf = window.requestAnimationFrame || function (f){ setTimeout(f, 16); };
+        raf(function (){
+          var l2 = host.querySelector('#dr-rg-scroll');
+          if (!l2 || !l2.firstChild) return;
+          l2.scrollLeft = Math.max(0, ratio * l2.firstChild.offsetWidth - offX);
+        });
+      }, { passive: false });
+    }
+    // Drag a column edge in the date header. `data-days` is that column's own day span, so
+    // the drag converts straight into px-per-day and rescales the whole timeline uniformly.
+    host.querySelectorAll('.dr-g-grip').forEach(function (grip){
+      grip.onmousedown = function (e){
+        e.preventDefault(); e.stopPropagation();
+        var days = parseFloat(grip.dataset.days) || 0;
+        if (!days) return;
+        var sx = e.clientX, startW = gDayW(), raf = false;
+        document.body.classList.add('gx-resizing');
+        function mv(ev){
+          var w = Math.max(0.05, startW + (ev.clientX - sx) / days);
+          setGanttScale(w / GDAYW[ganttUnit]);
+          if (raf) return;
+          raf = true;
+          (window.requestAnimationFrame || function (f){ setTimeout(f, 16); })(function (){
+            raf = false; (window._drRepaintGantt || repaint)();
+          });
+        }
+        function up(){
+          document.removeEventListener('mousemove', mv);
+          document.removeEventListener('mouseup', up);
+          document.body.classList.remove('gx-resizing');
+          saveUI();
+        }
+        document.addEventListener('mousemove', mv);
+        document.addEventListener('mouseup', up);
+      };
+    });
   }
 
   // ==========================================================================
@@ -1905,8 +2027,6 @@ window.DrawingRegister = (function () {
   //   start  = earliest planned SUBMISSION (falls back to the planned approval)
   //   finish = latest planned APPROVAL, replaced by the actual once everything landed
   //   fill   = the same percentage the tree shows, so the two cannot disagree
-  var GANTT_DAY_MIN = 2, GANTT_DAY_MAX = 26;
-  var ganttZoom = 6;              // px per day
   function gDate(v){
     if (!v) return null;
     var m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -2244,14 +2364,23 @@ window.DrawingRegister = (function () {
     var sd  = host.querySelector('#dr-seldel');   if (sd)  sd.onclick  = deleteSelected;
     var ss  = host.querySelector('#dr-selstatus'); if (ss) ss.onchange = function(){ if (ss.value) setStatusSelected(ss.value); };
 
-    var zm = host.querySelector('#dr-g-zoom');
-    if (zm) zm.oninput = function (){
-      ganttZoom = +zm.value || 6;
-      // Only the Gantt pane changes, so re-render just that — rebuilding the whole
-      // Registry per slider tick would drop the cell cursor and stutter badly.
+    // Only the Gantt pane changes on a scale change, so re-render just that — rebuilding
+    // the whole Registry would drop the cell cursor and stutter.
+    function repaintGantt(){
       var pane = host.querySelector('#dr-split-gantt');
       if (pane){ pane.innerHTML = registryGanttHTML(buildModel()); wireRegSplit(host); }
-    };
+    }
+    var unitSeg = host.querySelector('#dr-g-unit');
+    if (unitSeg) unitSeg.querySelectorAll('[data-unit]').forEach(function (b){
+      b.onclick = function (){
+        if (ganttUnit === b.dataset.unit) return;
+        ganttUnit = b.dataset.unit;
+        unitSeg.querySelectorAll('[data-unit]').forEach(function (x){ x.classList.remove('active'); });
+        b.classList.add('active');
+        saveUI(); repaintGantt();
+      };
+    });
+    window._drRepaintGantt = repaintGantt;   // used by the innate-zoom handlers
     var so = host.querySelector('#dr-split-on');
     if (so) so.onclick = function (){ if (!regSplit){ regSplit = true;  saveUI(); render(); } };
     var sf = host.querySelector('#dr-split-off');

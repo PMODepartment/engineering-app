@@ -615,8 +615,22 @@ td.dr-editing { padding:2px 4px; }
 .dr-menu button:hover { background:var(--pd-bg); }
 
 /* list-bar hint */
-.dr-hint { color:var(--pd-muted); font-size:var(--dr-fs-micro); margin-left:auto; }
-@media (max-width:1100px){ .dr-hint { display:none; } }
+/* Footer strip BELOW the grid — the help disclosure (left) and the read-only status
+   readouts (right). Everything here used to sit in the toolbar above the data, where the
+   cheat-sheet alone was three wrapped lines pushing the grid down on every render. */
+.dr-foot { margin-top:8px; margin-bottom:0; align-items:flex-start; }
+.dr-foot-right { margin-left:auto; display:flex; align-items:center; gap:12px; flex-shrink:0; }
+.dr-help { font-size:var(--dr-fs-micro); flex:0 1 auto; min-width:0; }
+/* Expanded, the multi-line help takes the whole row so it can never squeeze the readouts. */
+.dr-help[open] { flex-basis:100%; }
+.dr-help summary { cursor:pointer; color:var(--pd-ink); font-weight:600; list-style:none;
+  display:inline-flex; align-items:center; gap:6px; user-select:none; }
+.dr-help summary::-webkit-details-marker { display:none; }
+.dr-help summary::before { content:'▸'; display:inline-block; transition:transform .15s;
+  color:var(--pd-mut); }
+.dr-help[open] summary::before { transform:rotate(90deg); }
+.dr-help-grid { margin:8px 0 0 18px; display:flex; flex-direction:column; gap:5px;
+  color:var(--pd-muted); line-height:1.6; }
 
 /* structural-level code chip (A-100, AR-000, …) */
 .dr-gcode { font-family:ui-monospace,"SF Mono",Consolas,monospace; font-weight:700; font-size:var(--dr-fs-micro);
@@ -759,7 +773,7 @@ html.pd-dark td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.2
    exists; with no cell selected a keyboard user still gets the container ring. */
 .dr-grid:focus-visible:has(td.dr-cell-cur) { outline:none !important; }
 .dr-cellinfo { margin-left:10px; color:var(--pd-mut); font-size:var(--dr-fs-micro); white-space:nowrap; }
-.dr-hint kbd { display:inline-block; padding:0 4px; border:1px solid var(--pd-line); border-bottom-width:2px;
+.dr-help kbd { display:inline-block; padding:0 4px; border:1px solid var(--pd-line); border-bottom-width:2px;
   border-radius:3px; background:var(--pd-bg); font-family:inherit; font-size:.92em; line-height:1.5; }
 
 /* ---- Gantt bars (used by the Registry's Gantt pane, registryGanttHTML) ------
@@ -814,10 +828,15 @@ html.pd-dark td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.2
    trap this module already hit with --line: it works by fallback until someone tries to
    override it centrally and nothing happens. The grid's thead and the Gantt ruler MUST
    share this height or the first row and the first lane start at different Y. */
-:root { --dr-rowh: 30px; --dr-rg-headh: 54px; }
-.dr-split { display:flex; align-items:stretch; gap:0; min-height:0; }
+/* ⚠️ ONE height for both panes. They were each given their own calc(), which is two
+   numbers to keep in step — and they drifted, which is what made the grid and the Gantt
+   look like different sizes. The panes also have to share a box model (same border, same
+   radius) or their tops and bottoms sit a pixel or two apart at every zoom level. */
+:root { --dr-rowh: 30px; --dr-rg-headh: 54px; --dr-split-h: calc(100vh - 250px); }
+.dr-split { display:flex; align-items:flex-start; gap:0; min-height:0; }
 .dr-split-grid { flex:0 0 var(--dr-split-w,55%); width:var(--dr-split-w,55%); min-width:0; }
-.dr-split-grid .dr-tablecard { max-height:calc(100vh - 250px); }
+.dr-split-grid .dr-tablecard { max-height:var(--dr-split-h); border:1px solid var(--pd-line);
+  border-radius:8px; background:var(--pd-card); }
 .dr-split-div { flex:0 0 7px; cursor:col-resize; background:var(--pd-line);
   margin:0 3px; border-radius:2px; }
 .dr-split-div:hover { background:var(--pd-red-mid); }
@@ -829,8 +848,19 @@ html.pd-dark td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.2
 .dr-rg-head { height:var(--dr-rg-headh,54px); overflow:hidden; position:relative;
   border-bottom:1px solid var(--pd-line); flex:none; }
 .dr-rg-ruler { position:relative; height:100%; }
-.dr-rg-scroll { flex:1 1 auto; overflow:auto; min-height:0;
-  max-height:calc(100vh - 250px); }
+/* Years on top, the chosen unit beneath — the same two-tier date header the planning
+   app's schedule uses. A single band of month names is unreadable past one year. */
+.dr-g-yrs { position:relative; height:24px; }
+.dr-g-mos { position:relative; height:calc(var(--dr-rg-headh,54px) - 25px); }
+.dr-g-yr { position:absolute; top:0; bottom:0; border-left:1px solid var(--pd-line);
+  font-size:var(--dr-fs-micro); font-weight:700; color:var(--pd-ink);
+  padding:3px 0 0 5px; box-sizing:border-box; white-space:nowrap; overflow:hidden; }
+/* The fine-adjust handle. Sits ON the column edge, like a spreadsheet column border —
+   the affordance people already know, and it needs no toolbar space at all. */
+.dr-g-grip { position:absolute; top:0; right:-4px; width:8px; height:100%;
+  cursor:col-resize; z-index:2; }
+.dr-g-grip:hover { background:var(--pd-red-mid); opacity:.5; }
+.dr-rg-scroll { flex:1 1 auto; overflow:auto; min-height:0; max-height:var(--dr-split-h); }
 .dr-rg-body { position:relative; }
 .dr-rg-lane { position:relative; height:var(--dr-rowh,30px);
   border-bottom:1px solid var(--pd-line); }
@@ -863,5 +893,3 @@ body.dr-splitting .dr-table td.dr-editing { overflow:visible; }
   body.dr-splitting .dr-table tbody td { height:auto; }
   body.dr-splitting .dr-table .dr-sub { display:block; }
 }
-.dr-zoom { width:110px; }
-.dr-zoomlbl { font-size:var(--dr-fs-micro); }
