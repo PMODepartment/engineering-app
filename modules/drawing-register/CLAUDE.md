@@ -1,5 +1,106 @@
 # Module: drawing-register
 
+## SLN101 import was structurally wrong — read the tree from the workbook, not from names (2026-08-19) — fmlozano
+User imported the real SLN101 register and reported: three "Schematic Design" rows, **no ISD at all**,
+and wrong levelling under For Construction. All three reproduced against the real workbook (still
+available in this session) with the SHIPPED parser before anything was changed.
+
+### What was actually wrong
+- ⚠️ **`PHASE_RE` knows a fixed list of block names, and neither ISD nor Temporary Works is in it.**
+  So both blocks were swallowed into the preceding top level: **ISD's 323 sheets and TWD's 27 filed
+  under For Construction, and the register showed no ISD top level.** Widening that regex by text was
+  tried twice before and reverted both times, because other workbooks carry the same words one level
+  DOWN — the text genuinely cannot tell the two cases apart.
+- ⚠️ **The insert path never deduped level rows.** A level's identity is its PATH, and this workbook
+  names the same path repeatedly (three Schematic blocks, `TOWER` ×3, `Architectural` ×4 — **54
+  duplicated path keys measured**). Every occurrence was inserted and `idByPath` kept only the LAST, so
+  the drawings filed under one node and the rest rendered as permanent **"0 dwg"** rows. That is exactly
+  the reported "TOWER 0 dwg beside TOWER 414 dwg".
+
+### The fix: the column IS the structure
+The sheet draws the tree as a staircase — **col 8 top level · col 9 building OR trade · col 10 category
+· col 11 the drawing** (measured usage: 6 / 84 / 148 / 1254 rows). Levels are read from that when a
+sheet stratifies (≥3 distinct title columns used, anchored on the shallowest column holding a
+canonical-folding header). A workbook that writes every level in ONE column does not stratify and keeps
+the old heuristics, so this **cannot regress** BAU101/GPR101.
+- **Only the DEEPEST column holds drawings.** Every shallower row is a roll-up; counting one
+  double-counts its children (ISD read **562 sheets against the sheet's own 323** before this).
+- ⚠️ **Col 9 holds TWO tiers** (building and trade), told apart by the code beside them. Proof: that
+  column's sheet counts sum to exactly **2× each block's total**, because both tiers roll the same
+  drawings up.
+- ⚠️ **Inside a folded block the fold owns level 2**, so TEMFACIL / SAFETY / EQUIPMENT are its children
+  at level 3 — treating them as buildings overwrote the fold and destroyed the level it exists to create.
+- ⚠️ **A leaf-column row can still be a category, and NAMING cannot decide it.** This workbook is
+  inconsistent: most branches put the category in its own column, but several write both tiers in the
+  leaf column (SD1's Mechanical is `M-100 "General"` beside `M-101`/`M-102`, its own members).
+  - "round hundred ⇒ category" broke For Construction: **24 real drawings legitimately numbered on a
+    hundred became empty categories**, and that block had reconciled EXACTLY before.
+  - gating that on "this branch has no category tier yet" broke the other direction — the same block
+    mixes both conventions, and Schematic went **611 → 722** sheets.
+  - **What works is ARITHMETIC**: a roll-up's sheet count EQUALS the sum of the rows beneath it. That is
+    the workbook's own bookkeeping rather than a guess about names.
+- ⚠️ The **"no substance" skip must not apply** to a leaf-column row — the column has already proven it
+  is a drawing, and that guard silently dropped **125 real leaf rows** on the first pass.
+
+### Duplicates are fixed in BOTH places, deliberately
+Level rows are deduped by path key at import (first wins; a later occurrence donates a code the first
+lacked), **and `buildModel()` merges same-named levels at render time** — so a register already imported
+reads correctly without a re-import. The merge recurses, because otherwise "TOWER ×3" reappears one level
+down. The FIRST node owns the row's identity (collapse key, rename/delete target) so those actions still
+address a real row; every node in the group contributes its drawings and its children.
+
+### Reconciliation, honestly
+Verified against the workbook's own block subtotals: **For Construction + Temporary Works reconcile
+exactly (225)**. Schematic reads 624 vs 617 and ISD 562 vs 323 — and **ISD's entire 239 gap is the 239
+leaf rows the SOURCE leaves at 0 sheets**, which import as 1 (a drawing is at least one sheet, and 0
+makes its progress undefined). The import preview now REPORTS that count rather than leaving someone to
+discover it by comparing totals. The residual (+7 Schematic, −14 For Construction) is source
+inconsistency — proven by walking the workbook's own trade rollups, where several trades' leaves sum to
+exactly 2× their stated total. **Not silently massaged to match.**
+- ⚠️ **A measurement trap of my own:** reading the sheet with `max_row=1500` truncated it (it is 4,581
+  rows) and produced a wrong subtotal I chased for a while. Read the whole sheet.
+- 14 pipeline checks (`imp_tree`) + 14 merge checks over the shipped `buildModel`.
+
+## Registry: a real timeline scale, and the help text moved below the grid (2026-08-19) — fmlozano
+- ⚠️ **The zoom slider is GONE.** A slider is a control you must find and drag before the chart tells
+  you anything, and it never says what unit you are looking at. Replaced by a **Month / Quarter / Year**
+  scale plus innate fine adjustment, matching the planning app's schedule so the two Gantts behave the
+  same: **Ctrl+scroll** over the chart, or **drag a column edge in the date header** (`.dr-g-grip`,
+  carrying its own `data-days` so the drag converts straight into px-per-day).
+  - ⚠️ The wheel zoom keeps the date **under the pointer** fixed. Rescaling from the left edge makes the
+    row you were reading slide off screen and you have to chase it.
+  - The date header is **two tiers** (years above the unit). One band of month names has no anchor
+    telling you which year — unreadable the moment a register spans more than one.
+- **Everything explanatory now sits BELOW the grid** (`.dr-foot`), the shape the procurement app's grid
+  settled on: the keyboard cheat-sheet was three wrapped lines living permanently in the toolbar,
+  pushing the data down on every render to say something you read once. It is a collapsed `<details>`
+  now, with the row count and cell readout beside it — information, not actions. One action row above
+  the data.
+- ⚠️ **The two panes could disagree about their size** (the reported "grid is not uniform with the Gantt
+  pane"): each had its OWN `max-height: calc(...)` — two numbers to keep in step — and different
+  borders. Both read one `--dr-split-h` and share a box model now, so a mismatch is not expressible.
+- 33 checks (`reg_ui_test`). ⚠️ Read from the CSS rules, not from a jsdom render — jsdom does no layout,
+  and measuring an engine that returns 0 for everything is worse than not measuring.
+
+## Overview KPIs made uniform; the Backlog got its charts (2026-08-19) — fmlozano
+- ⚠️ **`repeat(auto-fit, minmax(170px,1fr))` fills a row then STRETCHES the remainder onto the next
+  line** — six cards rendered as four normal plus two half-width, which is the "KPI cards are not
+  uniform in size" report. `kpiSection(label, cards, n)` passes the count and the grid uses
+  `repeat(var(--dr-kpi-n), minmax(0,1fr))`. The 3-up / 2-up breakpoints need `!important` to beat it.
+- **Both dashboard halves now emit SIX cards** (they were five and six), so switching Design ↔ ISD no
+  longer reflows the row. The design half gained the drawing count its percentage is measured against.
+- **Backlog: table first, charts below** — the procurement app's order, and the right one: this is the
+  screen you work FROM, so the worklist must not be pushed below the fold. Status donut, aging bar and a
+  planned-approval period chart, all scoped to the SAME filtered `list` the table shows.
+  - One Chart.js instance is shared module-wide (`renderPeriodChart` destroys the previous), which is
+    safe only because Overview and Backlog are alternative views of one host and never co-exist.
+  - **Due / Not due filter** — the backlog's own question, so it sits in the card heading rather than the
+    shared filter bar or a second filter row. It reuses the Overdue KPI's test so filter and count cannot
+    disagree; a drawing with no planned date is excluded from "Due only". Session-only, and independent of
+    the drill-through aging chip.
+- 22 checks (`bk_kpi_test`).
+- Assets `module.css/js?v=20260819d`. ⚠️ **Not verified signed-in** — no live login here.
+
 ## SLN101 structure: four fixed top levels, generic sublevels, two progress bases (2026-08-19) — fmlozano
 Reshaped the register against the real **SLN101 `Dwg Registry`** sheet (1,500 rows). The tree was three
 NAMED levels carried as text columns (`phase` › `discipline` › `category`); SLN101 needs FOUR grouping
