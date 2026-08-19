@@ -17,7 +17,7 @@ window.DrawingRegister = (function () {
   var BUCKET = 'drawing-register';
   var profile = null, uid = null, pid = null, projName = '';
   var rows = [];
-  var view = 'overview';                       // overview | backlog | registry
+  var view = 'overview';                       // overview | backlog | registry | gantt
   var filters = { phase: '', discipline: '', scope: '', status: '', search: '', dupsOnly: false };
   var SCOPES = ['Main Contract', 'Change Order'];
 
@@ -452,6 +452,7 @@ window.DrawingRegister = (function () {
   function saveUI(){
     try {
       localStorage.setItem(uiKey('view'), view);
+      localStorage.setItem(uiKey('dashscope'), dashScope);
       localStorage.setItem(uiKey('collapsed'), JSON.stringify(collapsed));
       localStorage.setItem(uiKey('regsort'), JSON.stringify(regSort));
     } catch (e) {}
@@ -460,9 +461,11 @@ window.DrawingRegister = (function () {
     var ok=false;
     try {
       var v = localStorage.getItem(uiKey('view'));
-      if (v==='overview'||v==='backlog'||v==='registry') view=v;
+      if (v==='overview'||v==='backlog'||v==='registry'||v==='gantt') view=v;
       else if (v==='register') view='registry';   // legacy value migration
       else if (v==='progress') view='overview';    // legacy value migration
+      var ds = localStorage.getItem(uiKey('dashscope'));
+      if (ds==='design'||ds==='isd') dashScope=ds;
       var c = localStorage.getItem(uiKey('collapsed'));
       if (c){ var o=JSON.parse(c); if (o && typeof o==='object'){ collapsed=o; ok=true; } }
       // Restore the column sort, but VALIDATE the column against REG_SORTABLE —
@@ -858,18 +861,28 @@ window.DrawingRegister = (function () {
   }
 
   function rollup(list){
-    var tot = 0, ap = 0, minPlanned = null, maxActual = null, allAppr = list.length > 0;
+    var tot = 0, ap = 0, minPlanned = null, maxPlanned = null, maxActual = null, allAppr = list.length > 0;
+    var minStart = null;
     list.forEach(function (r){
       var t = num(r.no_of_sheets) || 0, a = approvedOf(r);
       tot += t; ap += a;
       var pl = inh(r, 'planned_approval');
-      if (validDate(pl) && (!minPlanned || pl < minPlanned)) minPlanned = pl;
+      if (validDate(pl)) {
+        if (!minPlanned || pl < minPlanned) minPlanned = pl;
+        // ⚠️ The LATEST planned approval, which is what a Gantt bar has to finish on.
+        // Using the earliest for both ends draws a zero-duration bar — the same bug the
+        // planning app's Design Development roll-up hit and documents.
+        if (!maxPlanned || pl > maxPlanned) maxPlanned = pl;
+      }
+      var sp = latestSub(r, 'planned');
+      if (validDate(sp) && (!minStart || sp < minStart)) minStart = sp;
       var ac = r.actual_approval;
       if (validDate(ac) && (!maxActual || ac > maxActual)) maxActual = ac;
       if (!(t > 0 && a >= t)) allAppr = false;
     });
     return { tot: tot, ap: ap, pct: tot ? Math.round(ap / tot * 100) : 0,
-             minPlanned: minPlanned, maxActual: allAppr ? maxActual : null, allApproved: allAppr };
+             minPlanned: minPlanned, maxPlanned: maxPlanned, minStart: minStart,
+             maxActual: allAppr ? maxActual : null, allApproved: allAppr };
   }
   // ---- BINARY progress: equal-weight tracking units --------------------------
   // ⚠️ rollup() above is SHEET-WEIGHTED, which is right for Individual Services
@@ -926,15 +939,16 @@ window.DrawingRegister = (function () {
     var dates = rollup(list);
     if (!node || modeOf(node) !== 'binary') {
       return { tot:dates.tot, ap:dates.ap, pct:dates.pct, unitMode:false,
-               minPlanned:dates.minPlanned, maxActual:dates.maxActual,
-               allApproved:dates.allApproved, fallback:false };
+               minPlanned:dates.minPlanned, maxPlanned:dates.maxPlanned, minStart:dates.minStart,
+               maxActual:dates.maxActual, allApproved:dates.allApproved, fallback:false };
     }
     var units = trackingUnitsUnder(node);
     var ap = units.filter(unitApproved).length;
     var tot = units.length;
     return { tot:tot, ap:ap, pct: tot ? Math.round(ap / tot * 100) : 0, unitMode:true,
-             minPlanned:dates.minPlanned, maxActual:dates.maxActual,
-             allApproved: tot > 0 && ap >= tot, fallback: usingUnitFallback(node) };
+             minPlanned:dates.minPlanned, maxPlanned:dates.maxPlanned, minStart:dates.minStart,
+             maxActual:dates.maxActual, allApproved: tot > 0 && ap >= tot,
+             fallback: usingUnitFallback(node) };
   }
 
   // Shared with agingDays()'s guard: a legacy import sentinel like "2000-01-06" is
@@ -1117,6 +1131,7 @@ window.DrawingRegister = (function () {
     var _scroll = captureScroll();
     if (view === 'overview') { renderProgress(); }
     else if (view === 'backlog') { renderBacklog(); }
+    else if (view === 'gantt') { renderGantt(); }
     else { renderRegister(); }
     restoreScroll(_scroll);
     paintRemote();
@@ -1611,6 +1626,167 @@ window.DrawingRegister = (function () {
     ensureColWidths();
     wireRegister(host, disp);
     wireColResize(host);
+  }
+
+  // ==========================================================================
+  // GANTT VIEW
+  // --------------------------------------------------------------------------
+  // Hand-rolled absolutely-positioned divs, deliberately matching the planning
+  // app's project-schedule Gantt (`.ps-bar` / `.ps-bar-fill`) rather than pulling in
+  // a charting library: the two views now show the same programme from two sides, so
+  // they should read the same, and this register already ships no chart dependency
+  // for its tree.
+  //
+  // ⚠️ The bar is the APPROVAL WINDOW, not a work duration — the register only knows
+  // planned and actual approval dates, so inventing a duration would be a fiction.
+  //   start  = earliest planned SUBMISSION (falls back to the planned approval)
+  //   finish = latest planned APPROVAL, replaced by the actual once everything landed
+  //   fill   = the same percentage the tree shows, so the two cannot disagree
+  var GANTT_DAY_MIN = 2, GANTT_DAY_MAX = 26;
+  var ganttZoom = 6;              // px per day
+  var GANTT_LABEL_W = 300;
+
+  function gDate(v){
+    if (!v) return null;
+    var m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return null;
+    // Local midnight, never new Date('YYYY-MM-DD') — that is UTC midnight, which is
+    // the previous evening in UTC+8 and shifts every bar a day west.
+    return new Date(+m[1], +m[2] - 1, +m[3]);
+  }
+  function gDays(a, b){ return Math.round((b - a) / 86400000); }
+  function gAddDays(d, n){ var x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; }
+
+  // The bar for one row: a level uses its subtree roll-up, a drawing its own dates.
+  function ganttSpan(item){
+    var r, start, finish, pct, actual;
+    if (item.type === 'group') {
+      r = rollupFor(item.node, item.list);
+      start  = r.minStart || r.minPlanned;
+      finish = r.maxActual || r.maxPlanned || r.minPlanned;
+      pct = r.pct; actual = r.maxActual;
+    } else {
+      var d = item.row;
+      var pl = inh(d, 'planned_approval');
+      start  = latestSub(d, 'planned') || pl;
+      finish = d.actual_approval || pl || start;
+      pct = Math.round(pctApproved(d) * 100);
+      actual = d.actual_approval;
+    }
+    if (!validDate(start) && !validDate(finish)) return null;
+    if (!validDate(start)) start = finish;
+    if (!validDate(finish)) finish = start;
+    var s = gDate(start), f = gDate(finish);
+    if (!s || !f) return null;
+    if (f < s) { var t = s; s = f; f = t; }        // a mis-keyed pair must not draw backwards
+    return { s: s, f: f, pct: Math.max(0, Math.min(100, pct || 0)), actual: actual };
+  }
+
+  function renderGantt(){
+    var host = document.getElementById('dr-view');
+    var disp = buildModel();
+    var spans = [], min = null, max = null;
+    disp.forEach(function (item){
+      var sp = ganttSpan(item);
+      spans.push(sp);
+      if (!sp) return;
+      if (!min || sp.s < min) min = sp.s;
+      if (!max || sp.f > max) max = sp.f;
+    });
+    // Nothing dated at all is a real state worth naming, not an empty chart.
+    if (!min || !max) {
+      host.innerHTML = ganttToolbar() +
+        '<div class="pd-card dr-gantt-empty">' + ico('calendar', 22) +
+        '<div><strong>No dates to plot yet.</strong><div class="dr-mut">A drawing appears on the Gantt once it has a planned submission or planned approval date. ' +
+        'Add them in the Registry, or import a workbook that carries them.</div></div></div>';
+      wireGanttToolbar(host);
+      return;
+    }
+    // A little air either side so the first and last bars aren't flush to the edge.
+    min = gAddDays(min, -7); max = gAddDays(max, 7);
+    var total = Math.max(1, gDays(min, max) + 1);
+    var dayw = ganttZoom;
+    var W = total * dayw;
+
+    // ---- month ruler
+    var ruler = '', cur = new Date(min.getFullYear(), min.getMonth(), 1);
+    while (cur <= max) {
+      var next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      var from = cur < min ? min : cur, to = next > max ? max : next;
+      var x = gDays(min, from) * dayw, w = Math.max(0, gDays(from, to) * dayw);
+      if (w > 0) {
+        ruler += '<div class="dr-g-mo" style="left:' + x + 'px;width:' + w + 'px">' +
+          (w > 46 ? Fmt.esc(cur.toLocaleString('en', { month: 'short' }) + ' ' + String(cur.getFullYear()).slice(2)) : '') +
+          '</div>';
+      }
+      cur = next;
+    }
+    // Today marker — only when today is actually in range, else it would pin to an edge
+    // and read as a real date.
+    var today = new Date(); today.setHours(0,0,0,0);
+    var todayLine = (today >= min && today <= max)
+      ? '<div class="dr-g-today" style="left:' + (gDays(min, today) * dayw) + 'px" title="Today"></div>' : '';
+
+    var rowsHtml = '';
+    disp.forEach(function (item, i){
+      var sp = spans[i];
+      var isGrp = item.type === 'group';
+      var label = isGrp ? item.label : (item.row.drawing_code || item.row.drawing_no || item.row.title || '');
+      var sub   = isGrp ? (item.list.length + ' dwg') : Fmt.esc(item.row.title || '');
+      var indent = 8 + Math.min(item.level, 6) * 12 - 12;
+      var bar = '';
+      if (sp) {
+        var x = gDays(min, sp.s) * dayw;
+        var w = Math.max((gDays(sp.s, sp.f) + 1) * dayw, 3);
+        var cls = 'dr-g-bar' + (isGrp ? ' dr-g-sum' : '') + (sp.pct >= 100 ? ' dr-g-done' : '');
+        bar = '<div class="' + cls + '" style="left:' + x + 'px;width:' + w + 'px" title="' +
+          Fmt.esc(label + ' · ' + Fmt.date(sp.s.toISOString().slice(0,10)) + ' → ' +
+                  Fmt.date(sp.f.toISOString().slice(0,10)) + ' · ' + sp.pct + '%' +
+                  (sp.actual ? ' · approved ' + Fmt.date(sp.actual) : '')) + '">' +
+          '<div class="dr-g-fill" style="width:' + sp.pct + '%"></div>' +
+          (w > 34 ? '<span class="dr-g-pct">' + sp.pct + '%</span>' : '') + '</div>';
+      }
+      rowsHtml +=
+        '<div class="dr-g-row' + (isGrp ? ' dr-g-grow' : '') + '"' +
+          (isGrp ? '' : ' data-gid="' + item.row.id + '"') + '>' +
+          '<div class="dr-g-lbl" style="padding-left:' + indent + 'px">' +
+            '<span class="dr-g-name">' + Fmt.esc(label) + '</span>' +
+            '<span class="dr-g-sub">' + sub + '</span></div>' +
+          '<div class="dr-g-lane" style="width:' + W + 'px">' + bar + '</div>' +
+        '</div>';
+    });
+
+    host.innerHTML = ganttToolbar() +
+      '<div class="pd-card dr-gantt">' +
+        '<div class="dr-g-scroll">' +
+          '<div class="dr-g-head" style="width:' + (GANTT_LABEL_W + W) + 'px">' +
+            '<div class="dr-g-headlbl">Drawing</div>' +
+            '<div class="dr-g-ruler" style="width:' + W + 'px">' + ruler + todayLine + '</div>' +
+          '</div>' +
+          '<div class="dr-g-body" style="width:' + (GANTT_LABEL_W + W) + 'px">' + rowsHtml + '</div>' +
+        '</div>' +
+      '</div>';
+    host.style.setProperty('--dr-g-lblw', GANTT_LABEL_W + 'px');
+    wireGanttToolbar(host);
+    // Clicking a drawing's bar or label opens it, same as the Registry rows.
+    host.querySelectorAll('.dr-g-row[data-gid]').forEach(function (el){
+      el.onclick = function (){ editRowField(el.dataset.gid, 'title'); };
+    });
+  }
+
+  function ganttToolbar(){
+    return '<div class="dr-listbar dr-g-bar-top">' +
+      '<span class="dr-mut">Bars span the approval window — earliest planned submission to planned approval, ' +
+      'replaced by the actual approval once everything under the row has landed. The fill is the same ' +
+      'percentage the Registry shows.</span>' +
+      '<span style="flex:1"></span>' +
+      '<label class="dr-mut" for="dr-g-zoom">Zoom</label>' +
+      '<input type="range" id="dr-g-zoom" min="' + GANTT_DAY_MIN + '" max="' + GANTT_DAY_MAX + '" value="' + ganttZoom + '">' +
+      '</div>';
+  }
+  function wireGanttToolbar(host){
+    var z = host.querySelector('#dr-g-zoom');
+    if (z) z.oninput = function (){ ganttZoom = +z.value || 6; renderGantt(); };
   }
 
   var COLSPAN_LABEL = 2;   // Code + Title under a group label (frozen block)
@@ -2959,46 +3135,100 @@ window.DrawingRegister = (function () {
   }
 
   // ----------------------------------------------------- progress dashboard --
+  // ⚠️ TWO DASHBOARDS, because one number cannot describe both halves of this
+  // register. Concept / Schematic / For Construction are counted in 0-or-100 UNITS;
+  // Individual Services Drawings are counted in SHEETS with partial credit. Summing
+  // 6 design units and 83 ISD sheets into one "Total sheets" headline produced a
+  // figure that described neither — it was the register's most prominent KPI and it
+  // was meaningless. `dashScope` picks which half is on screen.
+  var dashScope = 'design';                    // design | isd
+  function isIsdRow(r){ return modeOf(r) === 'sheets'; }
+  function dashRows(){
+    var all = drawingRows();
+    return dashScope === 'isd' ? all.filter(isIsdRow) : all.filter(function (r){ return !isIsdRow(r); });
+  }
+  function dashSwitch(){
+    var nD = drawingRows().filter(function (r){ return !isIsdRow(r); }).length;
+    var nI = drawingRows().filter(isIsdRow).length;
+    return '<div class="dr-dashtabs">' +
+      '<button class="dr-dashtab' + (dashScope==='design'?' active':'') + '" data-dash="design">' +
+        'Design Progress <span class="dr-dashn">' + nD + '</span></button>' +
+      '<button class="dr-dashtab' + (dashScope==='isd'?' active':'') + '" data-dash="isd">' +
+        'Individual Services <span class="dr-dashn">' + nI + '</span></button>' +
+      '<span class="dr-dashnote dr-mut">' + (dashScope==='isd'
+        ? 'Counted in sheets — a drawing here carries many, with partial credit.'
+        : 'Counted in 0-or-100 units — a drawing here is approved or it is not.') + '</span></div>';
+  }
+  function wireDashTabs(host){
+    host.querySelectorAll('[data-dash]').forEach(function (b){
+      b.onclick = function (){ dashScope = b.dataset.dash; saveUI(); render(); };
+    });
+  }
+
   function renderProgress() {
     var host = document.getElementById('dr-view');
-    var draws = drawingRows();
-    if (!draws.length) { host.innerHTML = emptyHTML(); wireEmpty(); return; }
+    if (!drawingRows().length) { host.innerHTML = emptyHTML(); wireEmpty(); return; }
+    var draws = dashRows();
+    var isIsd = dashScope === 'isd';
 
+    // ⚠️ `approvedOf()`, not the raw approved_sheets column — the same
+    // two-definitions-of-one-number bug fixed in groupAgg(). Approving a sheet through
+    // the full editor leaves the parent's stored counter stale.
     var totSheets=0, subSheets=0, apSheets=0;
     draws.forEach(function (r){
-      var t=num(r.no_of_sheets)||0, a=num(r.approved_sheets)||0;
+      var t=num(r.no_of_sheets)||0, a=approvedOf(r);
       totSheets+=t; apSheets+=a;
       if (latestSub(r,'actual')) subSheets+=t;
     });
-    var balance = totSheets - apSheets;
+    // The design half is measured in units, so its headline counts DRAWINGS approved,
+    // not sheets — otherwise it silently reintroduces partial credit.
+    var apUnits = draws.filter(function (r){ return isApprovedStatus(statusOf(r.status)); }).length;
+    var balance = isIsd ? (totSheets - apSheets) : (draws.length - apUnits);
+    var pct = isIsd ? (totSheets ? Math.round(apSheets/totSheets*100) : 0)
+                    : (draws.length ? Math.round(apUnits/draws.length*100) : 0);
 
-    // Only "Drawings" is a row set — the rest count SHEETS, so drilling them
+    if (!draws.length) {
+      host.innerHTML = dashSwitch() +
+        '<div class="pd-card dr-gantt-empty">' + ico('info', 22) +
+        '<div><strong>Nothing in this half of the register yet.</strong><div class="dr-mut">' +
+        (isIsd ? 'Individual Services Drawings appear here once that drawing type has drawings.'
+               : 'Concept, Schematic and For Construction drawings appear here.') +
+        '</div></div></div>';
+      wireDashTabs(host);
+      return;
+    }
+
+    // Only "Drawings" is a row set — the rest count sheets or units, so drilling them
     // would land on a list whose row count doesn't match the number clicked.
-    var kpis = kpiSection('Register Overview',
-      kpi(draws.length, 'Drawings', '', { view:'registry', patch:{}, tip:'Show all drawings in the Registry' }) +
-      kpi(totSheets, 'Total sheets') +
-      kpi(subSheets, 'Submitted') +
-      kpi(apSheets, 'Approved') +
-      kpi((totSheets?Math.round(apSheets/totSheets*100):0)+'%', 'Approved %', 'ok') +
-      kpi(balance, 'Balance', balance>0?'warn':''));
+    var kpis = dashSwitch() + kpiSection(isIsd ? 'Individual Services Drawings' : 'Design Progress — Concept / Schematic / For Construction',
+      kpi(draws.length, 'Drawings', '', { view:'registry', patch:{}, tip:'Show these in the Registry' }) +
+      (isIsd ? kpi(totSheets, 'Total sheets') + kpi(subSheets, 'Submitted') + kpi(apSheets, 'Approved sheets')
+             : kpi(apUnits, 'Approved') + kpi(subSheets ? subSheets : 0, 'Submitted')) +
+      kpi(pct+'%', isIsd ? 'Approved % (sheets)' : 'Approved % (drawings)', 'ok') +
+      kpi(balance, isIsd ? 'Balance (sheets)' : 'Balance (drawings)', balance>0?'warn':''));
 
     // by phase
-    var byPhase = groupAgg('phase');
-    var byDisc  = groupAgg('discipline');
+    // Both tables are scoped to the half on screen, so their totals reconcile with the
+    // KPI row above them. "By Drawing Type" is only meaningful on the design half —
+    // the ISD half is a single type by definition, so it shows its levels instead.
+    var byDisc = groupAgg('discipline', draws);
     var host2 = '<div class="dr-dash-grid">' +
-      progTable('Progress by Drawing Type', byPhase, PHASES, 'phase') +
+      (isIsd
+        ? progTable('Progress by Level', groupAgg('category', draws),
+                    Object.keys(groupAgg('category', draws)).sort(), 'category')
+        : progTable('Progress by Drawing Type', groupAgg('phase', draws), TOP_LEVELS, 'phase')) +
       progTable('Progress by Trade', byDisc, Object.keys(DISCIPLINES).map(disciplineName), 'discipline') +
     '</div>';
 
     var drawPeriod = function () {
       renderPeriodChart(document.getElementById('dr-period-chart'),
-        periodScaled(periodBuckets(periodMode), periodValueMode, draws.length), periodValueMode);
+        periodScaled(periodBuckets(periodMode, draws), periodValueMode, draws.length), periodValueMode);
     };
 
     host.innerHTML = kpis +
       '<div class="dr-dash-grid">' +
-        '<div class="pd-card"><h3 class="dr-h3">Drawings by Status</h3>' + donutSVG(statusCounts()) + '</div>' +
-        '<div class="pd-card"><h3 class="dr-h3">Open Items by Aging</h3>' + agingBarSVG(agingBuckets()) + '</div>' +
+        '<div class="pd-card"><h3 class="dr-h3">Drawings by Status</h3>' + donutSVG(statusCounts(draws)) + '</div>' +
+        '<div class="pd-card"><h3 class="dr-h3">Open Items by Aging</h3>' + agingBarSVG(agingBuckets(draws)) + '</div>' +
       '</div>' +
       '<div class="pd-card"><h3 class="dr-h3">Drawings by Period — Planned vs Actual Approval' +
         '<span class="dr-seg" id="dr-permode">' +
@@ -3015,6 +3245,7 @@ window.DrawingRegister = (function () {
       host2;
 
     drawPeriod();
+    wireDashTabs(host);
     wireDrills(host);   // KPI card, donut legend, aging bar + legend, prog tables
     var pm = document.getElementById('dr-permode');
     if (pm) pm.querySelectorAll('.dr-seg-btn').forEach(function (b){
@@ -3052,9 +3283,9 @@ window.DrawingRegister = (function () {
     if (a >= 0)    return '0-30d (current)';
     return 'Future';
   }
-  function agingBuckets() {
+  function agingBuckets(list) {
     var b = {}; AGING_ORDER.forEach(function (k){ b[k]=0; });
-    drawingRows().forEach(function (r){
+    (list || drawingRows()).forEach(function (r){
       if (!(!isApprovedStatus(r.status) || r.status==='Resubmit')) return;
       b[agingBucketOf(r)]++;
     });
@@ -3115,9 +3346,9 @@ window.DrawingRegister = (function () {
     if (mode === 'quarter') { var p = key.split('-Q'); return 'Q'+p[1]+" '"+p[0].slice(2); }
     var p = key.split('-'); return MNAME3[+p[1]-1] + " '" + p[0].slice(2);
   }
-  function periodBuckets(mode) {
+  function periodBuckets(mode, list) {
     var pMap = {}, aMap = {};
-    drawingRows().forEach(function (r) {
+    (list || drawingRows()).forEach(function (r) {
       if (r.planned_approval) { var k = periodKeyOf(r.planned_approval, mode); if (k) pMap[k] = (pMap[k]||0)+1; }
       if (r.actual_approval)  { var k2 = periodKeyOf(r.actual_approval, mode); if (k2) aMap[k2] = (aMap[k2]||0)+1; }
     });
@@ -3202,12 +3433,12 @@ window.DrawingRegister = (function () {
   // back to the empty string that statusCls() recognises.
   function statusKey(label) { return statusCls(label === NOT_STARTED ? '' : label).slice(3); }
   function statusVar(label) { return 'var(--dr-' + statusKey(label) + '-arc)'; }
-  function statusCounts() {
+  function statusCounts(list) {
     // ⚠️ Blank used to be counted as 'Submitted' by the `|| 'Submitted'` fallback,
     // so the donut reported 823 not-yet-started drawings as awaiting review — the
     // single biggest slice was a fiction. Blank is now its own labelled slice.
     var m = {}; m[NOT_STARTED] = 0; STATUSES.forEach(function (s){ m[s]=0; });
-    drawingRows().forEach(function (r){
+    (list || drawingRows()).forEach(function (r){
       var s = statusOf(r.status) || NOT_STARTED;
       m[s] = (m[s]||0) + 1;
     });
@@ -3252,9 +3483,9 @@ window.DrawingRegister = (function () {
   // two-definitions-of-one-number bug approvedOf() was written to end: approving a
   // sheet through the full editor leaves the parent's stored counter stale, so the
   // progress tables and the grid disagreed on the same register.
-  function groupAgg(key) {
+  function groupAgg(key, list) {
     var m = {};
-    drawingRows().forEach(function (r) {
+    (list || drawingRows()).forEach(function (r) {
       var k = r[key] || '—';
       var g = m[k] || (m[k]={label:k, dwg:0, sheets:0, submitted:0, approved:0});
       var t=num(r.no_of_sheets)||0, a=approvedOf(r);
