@@ -59,10 +59,10 @@ a:hover { text-decoration: underline; }
 .pd-sidebar .pd-brand {
   font-size: 0;                                  /* hides the inline text node beside the logo */
   display: block; margin: -4px -4px 14px; padding: 4px 4px 14px;
-  border-bottom: 1px solid rgba(255,255,255,.09);
+  border-bottom: 1px solid rgba(255,255,255,.08);
 }
 .pd-brand-logo {
-  display: block; width: 100%; max-width: 188px; height: auto;
+  display: block; width: 100%; height: auto;
   margin: 0 0 9px; object-fit: contain; object-position: left center;
 }
 .pd-sidebar .pd-brand small {
@@ -71,7 +71,7 @@ a:hover { text-decoration: underline; }
 }
 .pd-sidebar nav { margin-top: 18px; display: flex; flex-direction: column; gap: 2px; }
 .pd-sidebar nav a {
-  color: #cbd2dd; padding: 10px 12px; border-radius: 8px; font-size: 13.5px;
+  color: #cbd2dd; padding: 9px 12px; border-radius: 8px; font-size: 13px;
   display: flex; align-items: center; gap: 10px; white-space: nowrap;
 }
 .pd-sidebar nav a:hover { background: rgba(255,255,255,.08); color: #fff; text-decoration: none; }
@@ -79,8 +79,8 @@ a:hover { text-decoration: underline; }
 .pd-content { flex: 1; min-width: 0; }
 /* Section labels grouping the nav by scope (Portfolio / Project / System) */
 .pd-sidebar .pd-navsec {
-  font-size: 9.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
-  color: #7c8698; padding: 15px 12px 5px;
+  font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: rgba(255,255,255,.3); padding: 15px 12px 5px;
 }
 .pd-sidebar nav .pd-navsec:first-child { padding-top: 2px; }
 /* Stacked label + optional sub-caption (e.g. current project under Project Home) */
@@ -113,7 +113,6 @@ a:hover { text-decoration: underline; }
 .pd-app.pd-collapsed .pd-sidebar nav a,
 .pd-app.pd-collapsed .pd-nav-sibling { justify-content: center; padding: 11px 0; gap: 0; font-size: 0; }
 .pd-app.pd-collapsed .pd-navtxt { display: none; }   /* wrapped labels (with sub-captions whose own font-size ignores the font-size:0 trick) */
-.pd-app.pd-collapsed .pd-navico { margin-right: 0; }
 .pd-app.pd-collapsed .pd-navsec { display: none; }
 .pd-app.pd-collapsed .pd-brand-logo, .pd-app.pd-collapsed .pd-brand small { display: none; }
 .pd-app.pd-collapsed .pd-brand { margin-bottom: 8px; padding-bottom: 8px; }
@@ -129,11 +128,15 @@ a:hover { text-decoration: underline; }
 /* ---- Top bar ---- */
 .pd-topbar {
   background: var(--pd-card); border-bottom: 1px solid var(--pd-line);
-  padding: 12px 22px; display: flex; align-items: center; gap: 14px;
+  /* ⚠️ min-height, NOT height — the PRC-App topbar is a single 60px row, but
+     every module here re-declares `.pd-topbar { flex-wrap: wrap }` and the
+     drawing register's tool cluster genuinely wraps to several rows on a narrow
+     screen. A fixed height would clip those rows away. */
+  min-height: 60px; padding: 0 24px; display: flex; align-items: center; gap: 14px;
   position: sticky; top: 0; z-index: 20;
 }
 .pd-topbar h1 { font-size: 18px; margin: 0; font-weight: 800; letter-spacing: -.01em; }
-.pd-topbar-mark { height: 30px; width: auto; display: block; }
+.pd-topbar-mark { height: 26px; width: auto; display: block; }
 #user-bar { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .pd-userbar-name { font-weight: 600; }
 .pd-userbar-role {
@@ -399,47 +402,11 @@ html.pd-dark .pd-module-card:hover { box-shadow: 0 10px 26px rgba(0,0,0,.5); }
 .pd-pill-ok { background: rgba(31,143,78,.12); color: var(--pd-ok); }
 .pd-pill-muted { background: var(--pd-line); color: var(--pd-muted); }
 
-/* workspace context chip (topbar) */
-.pd-ws-context { display: inline-flex; align-items: center; gap: 9px; margin-left: 14px;
-  background: var(--pd-bg); border: 1px solid var(--pd-line); border-radius: 8px;
-  padding: 6px 12px; cursor: default; color: var(--pd-ink); }
-.pd-ws-context-ic { color: var(--pd-red); font-size: 15px; }
-.pd-ws-context-txt { display: flex; flex-direction: column; line-height: 1.15; text-align: left; }
-.pd-ws-context-txt small { color: var(--pd-muted); font-size: 11px; }
-
-/* selector two-pane shell */
-.pd-proj-shell { display: flex; gap: 16px; align-items: flex-start; padding-top: 14px; }
-.pd-tree-pane { flex: 0 0 270px; background: var(--pd-card); border: 1px solid var(--pd-line);
-  border-radius: var(--pd-radius); overflow: hidden; }
-.pd-proj-pane { flex: 1 1 auto; min-width: 0; }
-.pd-tree-head { display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 14px; font-weight: 700; border-bottom: 1px solid var(--pd-line); background: var(--pd-bg); }
-.pd-tree-search { padding: 10px 12px; border-bottom: 1px solid var(--pd-line); }
-.pd-tree-search .pd-input-sm { width: 100%; box-sizing: border-box; }
-.pd-tree { max-height: calc(100vh - 240px); overflow: auto; padding: 6px 0; }
-.pd-tree-node { display: flex; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer;
-  font-size: 13.5px; border-left: 3px solid transparent; }
-.pd-tree-node:hover { background: var(--pd-bg); }
-.pd-tree-node.active { background: var(--pd-red-light); border-left-color: var(--pd-red); font-weight: 600; }
-.pd-tree-node.dim { opacity: .45; }
-.pd-tree-ic { font-size: 13px; }
-.pd-tree-name { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pd-tree-count { font-size: 11px; color: var(--pd-muted); background: var(--pd-bg);
+/* Count chip on a grouped table header row. All that survives of the old
+   group-head tree pane — the pane itself is gone (flat project list now). */
+.pd-count-chip { font-size: 11px; color: var(--pd-muted); background: var(--pd-bg);
   border: 1px solid var(--pd-line); border-radius: 999px; padding: 0 7px; min-width: 18px; text-align: center; }
-/* ⚠️ Was a hardcoded `#fff`. In dark mode the active row is a dark maroon, so a
-   white chip read as a glaring blob — and the bug was INVISIBLE because the
-   "All Projects" row was never given the .active class in the first place (its
-   id is '__all__' but the scope variable is null, so they never matched). Fixing
-   the highlight exposed this. Tokens only, never a literal surface colour. */
-.pd-tree-node.active .pd-tree-count { background: var(--pd-card); border-color: var(--pd-red-mid); color: var(--pd-ink); }
-/* Gear to edit/delete a workspace or program. Hidden until hover/selection so the tree stays
-   calm; opacity (not display) keeps it keyboard-reachable — focus-visible reveals it. */
-.pd-tree-edit { flex: 0 0 auto; border: none; background: transparent; cursor: pointer;
-  color: var(--pd-muted); padding: 2px; border-radius: 5px; line-height: 1;
-  display: inline-flex; align-items: center; opacity: 0; transition: opacity .12s; }
-.pd-tree-node:hover .pd-tree-edit, .pd-tree-node.active .pd-tree-edit { opacity: 1; }
-.pd-tree-edit:hover { color: var(--pd-red); background: var(--pd-card); }
-.pd-tree-edit:focus-visible { opacity: 1; outline: 2px solid var(--pd-red); outline-offset: 1px; }
+.pd-proj-pane { flex: 1 1 auto; min-width: 0; }
 .pd-icon-btn { border: none; background: transparent; cursor: pointer; font-size: 18px; color: var(--pd-red); line-height: 1; }
 
 /* toolbar */
@@ -542,12 +509,6 @@ html.pd-dark .pd-module-card:hover { box-shadow: 0 10px 26px rgba(0,0,0,.5); }
 .pd-rollup-gh { font-size: 13px; color: var(--pd-muted); font-weight: 600; }
 .pd-proj-row.cur td { background: var(--pd-red-light); }
 
-@media (max-width: 860px) {
-  .pd-proj-shell { flex-direction: column; }
-  .pd-tree-pane { flex: 1 1 auto; width: 100%; }
-  .pd-ws-context { display: none; }
-}
-
 /* ============================================================================
    ICONS — alignment + theming for the shared SVG icon set (icons.js)
    ============================================================================ */
@@ -556,7 +517,9 @@ html.pd-dark .pd-module-card:hover { box-shadow: 0 10px 26px rgba(0,0,0,.5); }
 
 /* sidebar nav: icon + label on one row */
 .pd-sidebar nav a { display: flex; align-items: center; }
-.pd-navico { width: 18px; height: 18px; margin-right: 11px; flex: none; opacity: .9; }
+/* 16px with no margin — the flex `gap: 10px` on the row already spaces it,
+   matching the PRC-App sidebar. */
+.pd-navico { width: 16px; height: 16px; flex: none; opacity: .9; }
 
 /* module launcher tiles: brand-red glyph centered in the tinted square */
 .pd-module-icon { display: flex; align-items: center; justify-content: center; }
@@ -567,9 +530,6 @@ html.pd-dark .pd-module-card:hover { box-shadow: 0 10px 26px rgba(0,0,0,.5); }
 .pd-info-ic { display: flex; }
 .pd-info-ic .pd-ico { color: var(--pd-red); }
 
-/* tree, project rows, switcher, context chip: muted glyphs that inherit color */
-.pd-tree-ic { display: inline-flex; align-items: center; color: var(--pd-muted); }
-.pd-tree-node.active .pd-tree-ic { color: var(--pd-red); }
 .pd-proj-ic { display: inline-flex; align-items: center; color: var(--pd-red); }
 .pd-projsw-ic { display: inline-flex; align-items: center; color: var(--pd-red); }
 .pd-rollup-gh { display: inline-flex; align-items: center; gap: 5px; }
@@ -657,7 +617,6 @@ body { overflow-x: clip; }
   .pd-app.pd-collapsed .pd-nav-sibling { justify-content: flex-start; padding: 12px; gap: 10px; font-size: 13.5px; }
   .pd-app.pd-collapsed .pd-navtxt { display: flex; }
   .pd-app.pd-collapsed .pd-navsec { display: block; }
-  .pd-app.pd-collapsed .pd-navico { margin-right: 11px; }
   .pd-app.pd-collapsed .pd-brand-logo, .pd-app.pd-collapsed .pd-brand small { display: block; }
   .pd-app.pd-collapsed .pd-brand { margin-bottom: 14px; padding-bottom: 14px; }
 
@@ -671,8 +630,6 @@ body { overflow-x: clip; }
   body.pd-noscroll { overflow: hidden; }
 
   .pd-main { padding: 16px; }
-  /* Project selector: the tree stacks above the list and stops eating height. */
-  .pd-tree { max-height: 300px; }
 }
 
 /* ---- Phone ---- */
@@ -921,45 +878,9 @@ body { overflow-x: clip; }
   .pd-topbar .pd-tb-main h1 { flex: 1 1 auto; min-width: 0; font-size: 15px; }
 }
 
-/* Coarse pointers (touch): reveal controls that are hover-gated on desktop,
-   since a touch device never produces the hover that would show them. */
-@media (hover: none) {
-  .pd-tree-edit { opacity: 1; }
-}
-
 /* ---------------------------------------------------------------------------
-   Group-head scope pane + grouped card view
+   Grouped card view
    --------------------------------------------------------------------------- */
-
-/* The pane is a FILTER, not a tree — one flat level. It sticks so the scope
-   stays reachable while a long project list scrolls.
-   ⚠️ DESKTOP ONLY. Below 860px the shell stacks to a column and the pane sits
-   ABOVE the list, so sticking it would pin a ~355px block to the top of a phone
-   screen and the projects would scroll underneath it. Measured at 375px before
-   this guard: pane 355px tall AND sticky. Keep this in sync with the 860px
-   `.pd-proj-shell { flex-direction: column }` rule below. */
-@media (min-width: 861px) { .pd-tree-pane { position: sticky; top: 0; } }
-
-/* The scope rows are the main tap target in this pane, so they get the same
-   44px minimum the rest of the suite uses on touch. Measured 34px before. */
-@media (max-width: 700px) {
-  .pd-tree-node { min-height: var(--pd-tap); padding-top: 4px; padding-bottom: 4px; }
-}
-.pd-tree-head { text-transform: uppercase; letter-spacing: .04em; font-size: 11px; color: var(--pd-muted); }
-.pd-tree-head-count { font-size: 11px; color: var(--pd-muted); background: var(--pd-card);
-  border: 1px solid var(--pd-line); border-radius: 999px; padding: 0 7px; font-weight: 600; }
-
-/* "All Projects" is a scope reset, not a group head — a rule above it separates
-   the two ideas, and another sits above the unassigned bucket for the same reason. */
-.pd-tree-sep { height: 1px; background: var(--pd-line); margin: 6px 12px; }
-.pd-tree-empty { padding: 14px 12px; font-size: 12.5px; color: var(--pd-muted); text-align: center; }
-.pd-tree-node { border-radius: 0; }
-.pd-tree-node.active .pd-tree-name { color: var(--pd-ink); }
-/* A zero-count group head is real but empty — dim the COUNT only, not the row,
-   so it stays obviously clickable (an inactive group head dims the whole row,
-   and the two states must not look the same). */
-.pd-tree-node .pd-tree-count.zero { opacity: .5; }
-
 /* Grouped CARD view. The list view groups by the Group-by selection; the card
    view used to ignore it entirely and render one flat run of cards, silently
    discarding the grouping the user had just chosen. Same headers, both views. */

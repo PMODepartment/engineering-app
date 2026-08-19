@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <link rel="apple-touch-icon" href="assets/img/icon.png" />
-  <script src="assets/js/theme.js?v=20260813d"></script>
+  <script src="assets/js/theme.js?v=20260819a"></script>
   <title>Projects — Engineering App</title>
-  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260813d" />
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260819a" />
 </head>
 <body>
   <div class="pd-app">
@@ -17,25 +17,10 @@
       <div class="pd-topbar">
         <img class="pd-topbar-mark" src="assets/img/favicon.png" alt="Megawide" />
         <h1>Projects</h1>
-        <button class="pd-ws-context" id="gh-context" type="button" title="Current group head filter">
-          <span class="pd-ws-context-ic" data-ico="group" data-ico-size="18"></span>
-          <span class="pd-ws-context-txt"><strong id="gh-context-name">All Projects</strong><small id="gh-context-sub">Every group head</small></span>
-        </button>
         <div id="user-bar"></div>
       </div>
 
-      <div class="pd-main pd-proj-shell">
-        <!-- Left: group heads. Flat by design — a group head is a TAG, not a
-             tree node, so this list is a filter, not a hierarchy to drill.
-             Read-only here: group heads, like projects, are SOURCED from the
-             Planners Dashboard (see perm.js / migration 0009). -->
-        <aside class="pd-tree-pane">
-          <div class="pd-tree-head"><span>Group Heads</span><span class="pd-tree-head-count" id="gh-total"></span></div>
-          <div class="pd-tree-search"><input class="pd-input pd-input-sm" id="gh-search" type="search" placeholder="Search group heads…" /></div>
-          <div class="pd-tree" id="gh-list"></div>
-        </aside>
-
-        <!-- Right: projects -->
+      <div class="pd-main">
         <section class="pd-proj-pane">
           <div class="pd-toolbar">
             <div class="pd-toolbar-left">
@@ -43,7 +28,6 @@
             </div>
             <div class="pd-toolbar-right">
               <select class="pd-select pd-input-sm" id="group-by" title="Group projects by">
-                <option value="grouphead">Group by: Group Head</option>
                 <option value="status">Group by: Status</option>
                 <option value="none">Group by: None</option>
               </select>
@@ -67,13 +51,13 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="assets/js/config.js?v=20260813d"></script>
-  <script src="assets/js/auth.js?v=20260813d"></script>
-  <script src="assets/js/db.js?v=20260813d"></script>
-  <script src="assets/js/ui.js?v=20260813d"></script>
-  <script src="assets/js/icons.js?v=20260813d"></script>
-  <script src="assets/js/perm.js?v=20260813d"></script>
-  <script src="assets/js/nav.js?v=20260813d"></script>
+  <script src="assets/js/config.js?v=20260819a"></script>
+  <script src="assets/js/auth.js?v=20260819a"></script>
+  <script src="assets/js/db.js?v=20260819a"></script>
+  <script src="assets/js/ui.js?v=20260819a"></script>
+  <script src="assets/js/icons.js?v=20260819a"></script>
+  <script src="assets/js/perm.js?v=20260819a"></script>
+  <script src="assets/js/nav.js?v=20260819a"></script>
   <script>
   (function () {
     // A project carries ONE group_head_id. There is no tree: sorting, filtering
@@ -81,8 +65,7 @@
     // bucket, not a hidden state — an unassigned project must stay reachable.
     var NONE = '__nogh__';
     var GH = [], PROJ = [], ghById = {};
-    var selectedGh = null;          // null = all group heads
-    var view = 'list', groupBy = 'grouphead', sortBy = 'name';
+    var view = 'list', groupBy = 'status', sortBy = 'name';
 
     // ---- landing here CLEARS the current project -----------------------------
     // This page IS the selection step, so arriving at it means "I have not
@@ -143,7 +126,6 @@
         GH = res[0]; PROJ = res[1];
       } catch (e) { UI.toast('Load failed: ' + e.message, 'error'); return; }
       GH.forEach(function (g) { ghById[g.id] = g; });
-      renderGhList();
       render();
       wireToolbar();
     }
@@ -163,60 +145,10 @@
       return PROJ.filter(function (p) { return ghIdOf(p) === id; }).length;
     }
 
-    // ---- Group-head list (left pane) ----
-    function renderGhList() {
-      var q = (document.getElementById('gh-search').value || '').toLowerCase();
-      var host = document.getElementById('gh-list');
-      // `selectedGh === null` and the All row's id ('__all__') are the SAME state.
-      // Normalise before comparing, or the default scope renders unhighlighted.
-      var activeId = (selectedGh === null) ? '__all__' : selectedGh;
-      function row(id, label, count, extraCls) {
-        var cls = 'pd-tree-node' + (activeId === id ? ' active' : '') + (extraCls || '');
-        return '<div class="' + cls + '" data-gh="' + Fmt.esc(id) + '" style="padding-left:8px;">' +
-          '<span class="pd-tree-ic">' + Icons.svg(id === '__all__' ? 'org' : 'group', 15) + '</span>' +
-          '<span class="pd-tree-name">' + Fmt.esc(label) + '</span>' +
-          '<span class="pd-tree-count' + (count ? '' : ' zero') + '">' + count + '</span></div>';
-      }
-      var shown = 0;
-      var html = row('__all__', 'All Projects', PROJ.length) + '<div class="pd-tree-sep"></div>';
-      GH.slice().sort(function (a, b) {
-        return (a.sort_order || 0) - (b.sort_order || 0) || String(a.name).localeCompare(String(b.name));
-      }).forEach(function (g) {
-        if (q && g.name.toLowerCase().indexOf(q) === -1) return;
-        shown++;
-        // Inactive group heads are retired, not deleted — projects assigned to
-        // one keep working and stay visible, so the row must still render.
-        html += row(g.id, g.name + (g.active === false ? ' (inactive)' : ''), countFor(g.id), g.active === false ? ' dim' : '');
-      });
-      if (q && !shown) html += '<div class="pd-tree-empty">No group head matches “' + Fmt.esc(q) + '”.</div>';
-      var nUn = countFor(NONE);
-      // The unassigned bucket is a different KIND of row from a real group head,
-      // so it is separated rather than sorted in among them.
-      if (nUn && !q) html += '<div class="pd-tree-sep"></div>' + row(NONE, '— No group head —', nUn);
-      host.innerHTML = html;
-      var tot = document.getElementById('gh-total');
-      if (tot) tot.textContent = GH.length;
-
-      host.querySelectorAll('[data-gh]').forEach(function (el) {
-        el.onclick = function () {
-          var id = el.dataset.gh;
-          selectedGh = (id === '__all__') ? null : id;
-          updateContext(); renderGhList(); render();
-        };
-      });
-    }
-
-    function updateContext() {
-      var n = document.getElementById('gh-context-name'), s = document.getElementById('gh-context-sub');
-      if (selectedGh === null) { n.textContent = 'All Projects'; s.textContent = 'Every group head'; }
-      else { n.textContent = ghLabel(selectedGh); s.textContent = countFor(selectedGh) + ' project' + (countFor(selectedGh) === 1 ? '' : 's'); }
-    }
-
     // ---- Projects in scope + search + sort ----
     function projectsInScope() {
       var q = (document.getElementById('proj-search').value || '').toLowerCase();
       var list = PROJ.slice();
-      if (selectedGh !== null) list = list.filter(function (p) { return ghIdOf(p) === selectedGh; });
       if (q) list = list.filter(function (p) {
         return (p.name || '').toLowerCase().indexOf(q) !== -1 || (p.id || '').toLowerCase().indexOf(q) !== -1;
       });
@@ -255,7 +187,7 @@
       document.getElementById('proj-count').textContent = list.length + (list.length === 1 ? ' project' : ' projects');
       var area = document.getElementById('proj-area');
       if (!list.length) {
-        area.innerHTML = '<div class="pd-empty">No projects' + (selectedGh !== null ? ' for this group head' : '') + '.</div>';
+        area.innerHTML = '<div class="pd-empty">No projects.</div>';
         return;
       }
       view === 'cards' ? renderCards(area, list) : renderList(area, list);
@@ -302,7 +234,7 @@
       groupProjects(list).forEach(function (g) {
         if (groupBy !== 'none') {
           rows += '<tr class="pd-group-row"><td colspan="6">' + Fmt.esc(groupLabelOf(g[0])) +
-            ' <span class="pd-tree-count">' + g[1].length + '</span></td></tr>';
+            ' <span class="pd-count-chip">' + g[1].length + '</span></td></tr>';
         }
         g[1].forEach(function (p) {
           rows += '<tr class="pd-proj-row" data-open="' + Fmt.esc(p.id) + '">' +
@@ -355,7 +287,6 @@
       // ⚠️ 'input' alone is not enough: the native clear (×) and Esc fire 'search'
       // and 'change' but NOT 'input', which left the list filtered after clearing.
       bindSearch(document.getElementById('proj-search'), render);
-      bindSearch(document.getElementById('gh-search'), renderGhList);
       document.getElementById('group-by').onchange = function () { groupBy = this.value; render(); };
       document.getElementById('sort-by').onchange = function () { sortBy = this.value; render(); };
       document.getElementById('vt-list').onclick = function () { view = 'list'; setVt(); render(); };

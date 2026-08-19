@@ -67,22 +67,20 @@
     return { el: overlay, close: close };
   }
 
-  // ---- Project selector (shared group-head browser) ------------------------
-  // Upgrades a native project <select> into a two-level browser: GROUP HEADS at
-  // the root, their projects one level in (scales to 100s of projects), with a
-  // breadcrumb and a search box that flattens to matching projects across every
-  // group. The <select> stays the source of truth (its value + change events
-  // still fire), so existing `sel.onchange` handlers keep working. The list is
-  // built from PDb.getProjects + PDb.getGroupHeads, but FILTERED to the ids
-  // present in the select's options — so any module-level access filtering
+  // ---- Project selector (shared, flat) -------------------------------------
+  // Upgrades a native project <select> into a searchable flat list of projects.
+  // The <select> stays the source of truth (its value + change events still
+  // fire), so existing `sel.onchange` handlers keep working. The list is built
+  // from PDb.getProjects, FILTERED to the ids present in the select's options — so any module-level access filtering
   // already applied to the options is respected. Safe to call again to refresh.
   // The trigger button copies the select's classes/inline style so each module's
   // per-topbar look carries.
   //
-  // ⚠️ This replaced a recursive Workspace → Program → Group folder walk. The
-  // depth is fixed at one now, so `path` is a group-head id ('' = root) rather
-  // than an arbitrary node id, and there is no ancestor chain to compute.
-  var _pdProjCache = null, _pdGhCache = null;   // per-page (one load), shared across instances
+  // ⚠️ There is NO foldering left here. This was a recursive Workspace → Program
+  // → Group walk, then a one-level group-head drill-down; it is now a flat
+  // searchable list. Do not reintroduce a hierarchy — a project is picked by
+  // name, and every folder level was a click between the user and that name.
+  var _pdProjCache = null;   // per-page (one load), shared across instances
   function enhanceProjectSelect(sel) {
     if (!sel) return null;
     if (sel.__pdEnhanced) { sel.__pdEnhanced.refresh(); return sel.__pdEnhanced; }
@@ -105,8 +103,7 @@
     pop.hidden = true;
     wrap.appendChild(pop);
 
-    var NONE = '__nogh__';                              // bucket for projects with no group head
-    var path = '', search = '', ghs = [], projs = [];   // path = group-head id, '' = root
+    var search = '', projs = [];
 
     function labelFor(v) {
       var o = Array.prototype.filter.call(sel.options, function (o) { return o.value === v; })[0];
@@ -121,63 +118,45 @@
     }
     function ico(name, size) { return window.Icons ? Icons.svg(name, size) : ''; }
     function byName(a, b) { return String(a.name || a.id).localeCompare(String(b.name || b.id)); }
-    function node(id) { return ghs.filter(function (g) { return g.id === id; })[0]; }
 
-    function head(pathId, q) {
-      var cur = pathId ? node(pathId) : null;
-      var curName = cur ? cur.name : (pathId === NONE ? '— No group head —' : '');
-      // One level deep, so the "trail" is at most All › <group head>.
-      var bc = q ? '' : '<div class="pd-pss-crumbs"><span class="pd-pss-crumb" data-crumb="">All</span>' +
-        (curName ? '<span class="pd-pss-sep">›</span><span class="pd-pss-crumb" data-crumb="' + esc(pathId) + '">' + esc(curName) + '</span>' : '') + '</div>';
-      return '<div class="pd-pss-search"><input type="text" class="pd-pss-q" placeholder="Search all projects…" value="' + esc(q || search) + '">' + bc + '</div>';
+    // No foldering. This is a flat, searchable project list — the same shape as
+    // the Projects page and the Procurement App's picker. Grouping the switcher
+    // by group head meant two clicks and a mental model ("which head owns this?")
+    // to reach a project the user could already name.
+    function head() {
+      return '<div class="pd-pss-search"><input type="text" class="pd-pss-q" ' +
+        'placeholder="Search projects…" value="' + esc(search) + '"></div>';
     }
     function render() {
       var ids = {};
       Array.prototype.forEach.call(sel.options, function (o) { if (o.value) ids[o.value] = 1; });
       var P = projs.filter(function (p) { return ids[p.id]; });
-      // Bucket by group head. NONE is a real bucket, not a silent drop — a
-      // project with no group head must still be selectable.
-      var pm = {}; P.forEach(function (p) { var k = p.group_head_id || NONE; (pm[k] = pm[k] || []).push(p); });
-      function projRow(p) { return '<div class="pd-pss-proj' + (p.id === sel.value ? ' sel' : '') + '" data-proj="' + esc(p.id) + '">' + ico('project', 14) + '<span>' + esc(p.name || p.id) + '</span></div>'; }
-      var q = search.trim().toLowerCase(), body = '';
-      if (q) {
-        var matches = P.filter(function (p) { return (p.name || '').toLowerCase().indexOf(q) !== -1 || (p.id || '').toLowerCase().indexOf(q) !== -1; }).sort(byName);
-        body = matches.length ? matches.map(projRow).join('') : '<div class="pd-pss-empty">No projects match “' + esc(search) + '”.</div>';
-        pop.innerHTML = head('', q) + '<div class="pd-pss-tree">' + body + '</div>';
-      } else if (!path) {
-        // Root: one folder per group head that actually has projects here, plus
-        // the unassigned bucket last. An empty group head is not shown — it
-        // would be a dead end.
-        var folders = ghs.slice().sort(function (a, b) {
-          return (a.sort_order || 0) - (b.sort_order || 0) || String(a.name).localeCompare(String(b.name));
-        }).filter(function (g) { return (pm[g.id] || []).length; });
-        body += folders.map(function (g) {
-          var n = (pm[g.id] || []).length;
-          return '<div class="pd-pss-folder" data-open="' + esc(g.id) + '">' + ico('group', 15) +
-            '<span class="pd-pss-name">' + esc(g.name) + '</span>' +
-            '<span class="pd-pss-badge pd-pss-group">group head</span>' +
-            '<span class="pd-pss-count" title="' + n + ' project' + (n === 1 ? '' : 's') + '">' + n + '</span>' +
-            '<span class="pd-pss-chev">›</span></div>';
-        }).join('');
-        if ((pm[NONE] || []).length) {
-          body += '<div class="pd-pss-folder" data-open="' + NONE + '">' + ico('group', 15) +
-            '<span class="pd-pss-name">— No group head —</span>' +
-            '<span class="pd-pss-count">' + pm[NONE].length + '</span>' +
-            '<span class="pd-pss-chev">›</span></div>';
-        }
-        if (!body) body = '<div class="pd-pss-empty">No projects available.</div>';
-        pop.innerHTML = head('', '') + '<div class="pd-pss-tree">' + body + '</div>';
-      } else {
-        body = (pm[path] || []).slice().sort(byName).map(projRow).join('');
-        if (!body) body = '<div class="pd-pss-empty">No projects in this group.</div>';
-        pop.innerHTML = head(path, '') + '<div class="pd-pss-tree">' + body + '</div>';
+      function projRow(p) {
+        return '<div class="pd-pss-proj' + (p.id === sel.value ? ' sel' : '') + '" data-proj="' +
+          esc(p.id) + '">' + ico('project', 14) + '<span>' + esc(p.name || p.id) + '</span></div>';
       }
+      var q = search.trim().toLowerCase();
+      var list = (q ? P.filter(function (p) {
+        return (p.name || '').toLowerCase().indexOf(q) !== -1 ||
+               (p.id || '').toLowerCase().indexOf(q) !== -1;
+      }) : P).sort(byName);
+      var body = list.length ? list.map(projRow).join('')
+        : '<div class="pd-pss-empty">' + (q ? 'No projects match \u201c' + esc(search) + '\u201d.'
+                                            : 'No projects available.') + '</div>';
+      pop.innerHTML = head() + '<div class="pd-pss-tree">' + body + '</div>';
       var qi = pop.querySelector('.pd-pss-q');
-      if (qi) qi.oninput = function () { var pos = qi.selectionStart; search = qi.value; render(); var q2 = pop.querySelector('.pd-pss-q'); if (q2) { q2.focus(); try { q2.setSelectionRange(pos, pos); } catch (e) {} } };
-      pop.querySelectorAll('.pd-pss-crumb').forEach(function (c) { c.onclick = function (e) { e.stopPropagation(); path = c.dataset.crumb || ''; render(); }; });
-      pop.querySelectorAll('.pd-pss-folder').forEach(function (f) { f.onclick = function (e) { e.stopPropagation(); path = f.dataset.open; render(); }; });
-      pop.querySelectorAll('.pd-pss-proj').forEach(function (r) { r.onclick = function (e) { e.stopPropagation(); choose(r.dataset.proj); }; });
+      if (qi) qi.oninput = function () {
+        var pos = qi.selectionStart; search = qi.value; render();
+        var q2 = pop.querySelector('.pd-pss-q');
+        if (q2) { q2.focus(); try { q2.setSelectionRange(pos, pos); } catch (e) {} }
+      };
+      pop.querySelectorAll('.pd-pss-proj').forEach(function (r) {
+        r.onclick = function (e) { e.stopPropagation(); choose(r.dataset.proj); };
+      });
       if (window.Icons) Icons.hydrate(pop);
+      // Keep the selected project in view without scrolling the whole page.
+      var selRow = pop.querySelector('.pd-pss-proj.sel');
+      if (selRow && selRow.scrollIntoView) selRow.scrollIntoView({ block: 'nearest' });
     }
     function choose(v) {
       if (v !== sel.value) { sel.value = v; sel.dispatchEvent(new Event('change', { bubbles: true })); }
@@ -185,15 +164,12 @@
     }
     async function ensureData() {
       if (!_pdProjCache) { try { _pdProjCache = await PDb.getProjects(); } catch (e) { _pdProjCache = []; } }
-      if (!_pdGhCache) { try { _pdGhCache = await PDb.getGroupHeads(); } catch (e) { _pdGhCache = []; } }
     }
     async function open() {
       pop.hidden = false; wrap.classList.add('open');
       if (!projs.length) pop.innerHTML = '<div class="pd-pss-empty">Loading…</div>';
-      await ensureData(); projs = _pdProjCache || []; ghs = _pdGhCache || [];
-      search = ''; var cur = projs.filter(function (p) { return p.id === sel.value; })[0];
-      // Open inside the current project's group so it is visible immediately.
-      path = cur ? (cur.group_head_id || NONE) : '';
+      await ensureData(); projs = _pdProjCache || [];
+      search = '';
       render();
       var qi = pop.querySelector('.pd-pss-q'); if (qi) setTimeout(function () { qi.focus(); }, 0);
     }
