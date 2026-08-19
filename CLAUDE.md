@@ -71,7 +71,15 @@ Planners schema changed and the projection needs looking at.
 
 ## Modules
 
-- `modules/drawing-register/` — live
+- `modules/drawing-register/` — live. ⚠️ **Four FIXED top levels; levels 2..N are
+  generic and named per project** (`drawing_level_defs`, migration `0017`), with two
+  incompatible progress bases — 0-or-100 tracking units for CD/SD/FCD, partial sheet
+  credit for ISD. Read `modules/drawing-register/CLAUDE.md` before touching its tree
+  or its percentages.
+  ⚠️ **planning-app has a TWIN `drawing_register` table and a twin module** (the
+  pre-cutover original). Engineering App is authoritative; planning-app's Design
+  Development roll-up still reads its own local copy, so the two disagree until the
+  bridge lands. Do not "fix" that by copying rows between projects.
 - `modules/material-submittal/` — live
 - `modules/method-register/` — live (Summary + Registry, migration `0013`);
   see `modules/method-register/CLAUDE.md`

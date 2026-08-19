@@ -1,5 +1,83 @@
 # Module: drawing-register
 
+## SLN101 structure: four fixed top levels, generic sublevels, two progress bases (2026-08-19) — fmlozano
+Reshaped the register against the real **SLN101 `Dwg Registry`** sheet (1,500 rows). The tree was three
+NAMED levels carried as text columns (`phase` › `discipline` › `category`); SLN101 needs FOUR grouping
+levels and they do not mean what those column names say.
+
+- **The top level is a CLOSED SET OF FOUR** — Concept Design · Schematic Design · For Construction
+  Drawings · Individual Services Drawings (`TOP_LEVELS`). Schematic Design 1 and 2 (LOD 100/200)
+  **merge completely**; Temporary Works, Combined Services and As-Built **fold in as level-2 children
+  of For Construction** rather than standing as top levels.
+- ⚠️ **`(Scheme 1)` / `(Scheme 2)` are NOT levels — they are the `scope` column** (Main Contract /
+  Change Order). Engineering must finish the superseded Scheme 1 set as the costing baseline for a
+  change order, so **those rows are retained**, moved onto `scope`, never deleted.
+- **Levels 2..N are generic.** Depth comes from `parent_id`; each project NAMES its own levels in the
+  new `drawing_level_defs` table (SLN101: 2=Building, 3=Trade, 4=Category). `buildModel()` is a
+  recursion over `parent_id` now, and collapse keys are derived from a node's **id** (`'G:'+id`), not
+  concatenated text — which also fixed `renameGroup`/`deleteLevel`, both of which used to bulk-update
+  **by matching text** and could strand children whose text no longer matched.
+- **Two progress bases, because averaging them is meaningless.** `track_mode='binary'` (CD/SD/FCD)
+  counts **tracking-unit nodes** at equal weight — a unit the Technical Officer designates
+  (`is_tracking_unit`, typically the trade node: "Architectural Drawings 0 → 100"). `'sheets'` (ISD)
+  keeps partial sheet credit. On a binary branch, per-sheet break-out is **refused** and the leaf's
+  `no_of_sheets` is pinned to 1, so "0 or 100 only" is structural rather than a convention.
+  - ⚠️ **Nested tracking units are REFUSED, not resolved** — flagging a node whose ancestor or
+    descendant is already flagged would count one unit twice and the percentages would silently stop
+    summing to 100.
+  - ⚠️ **The no-flag fallback counts leaf DRAWINGS, never sheets.** Falling back to sheet counts would
+    give a 12-sheet FCD drawing with 7 approved a 58% partial credit — exactly what "no partial
+    credit" forbids. The fallback is surfaced on the level-1 row, not hidden.
+- **Split dashboards.** Design Progress (Concept/Schematic/For Construction, counted in tracking
+  units) and ISD Progress (counted in sheets) are separate tabs for the same reason.
+- **Migration `../../migrations/0017-drawing-register-levels.sql` (USER RUNS IT).** Idempotent —
+  verified three consecutive runs byte-identical. Traps hit while writing it, all fixed:
+  - ⚠️ **A self-referencing cycle:** once the fold renamed the Temporary Works phase node to "For
+    Construction Drawings" it looked like the real FCD root and became its own parent.
+  - ⚠️ **Non-idempotency:** re-deriving parentage from text on run 2 yanked `Structural` from level 3
+    back to level 2. **Every link is now guarded on `parent_id is null`** — initialise, never re-assert.
+  - ⚠️ **700% progress:** pinning a binary leaf to 1 sheet left `approved_sheets` at 7.
+  - It **reports unclassifiable top levels via `raise notice` and leaves them alone** rather than
+    guessing — a wrong guess loses real rows.
+- ⚠️ **`assets/js/engdata.js` had to ship with it.** `drawingStats()` classified a row as a sheet by
+  `!!parent_id`, but a drawing now carries a group `parent_id` too — so **every drawing counted as a
+  sheet** and the dashboard tile read zero (measured: 1 drawing where there were 3). A row is a sheet
+  only when **its parent is itself a drawing**. `indexSheets()` needed the identical one-line rule.
+
+## The Gantt lives inside the Registry, and the empty state no longer hides the grid (2026-08-19) — fmlozano
+- **Side-by-side split, not a tab.** The Gantt was its own view, so reading a drawing's dates meant
+  leaving the grid. It is now a resizable pane beside the Registry (`.dr-split` / `.dr-split-div` /
+  `.dr-split-gantt`), matching the planning app's project-schedule split: one master scroller, a
+  draggable divider (double-click to reset), zoom slider, and a **Grid+Gantt / Grid** toggle.
+  ⚠️ **Row alignment comes from a FIXED row height** (`--dr-rowh: 30px`, applied via
+  `body.dr-splitting`), the same approach project-schedule uses — scroll-sync alone cannot align two
+  panes whose rows are different heights. `body.dr-splitting` also hides `.dr-sub` (the sheet-count
+  sub-line) since a variable-height row would break the lane pairing.
+  ⚠️ The bidirectional `scrollTop` sync needs a re-entrancy `lock`, or the two panes fight each other.
+- **The empty state no longer REPLACES the view.** A project with no drawings used to show a "No
+  drawings yet" card *instead of* the register — hiding the surface it was describing. It now renders
+  the real (empty) grid and a real timeline ruler drawn around today (±45/75 days when nothing is
+  dated), with the guidance demoted to a banner above. Same behaviour as the planning app's schedule.
+- The standalone Gantt tab, its toolbar and its persistence keys are gone; a stored `view === 'gantt'`
+  migrates to `registry` with the split on. ⚠️ Two `saveUI`/`restoreUI` lines still referenced the
+  deleted `ganttSplit`/`GANTT_GRID_W` after that removal — persistence is silent when it breaks, so
+  check it whenever a view is deleted.
+- Assets `module.css/js?v=20260819a`. **Not verified signed-in** — no live login here; the split's
+  geometry and the empty-state paths are covered by a Node harness (23 checks), not by clicking.
+
+## Excel grid extracted to `assets/js/gridx.js`, shared with Material Submittal (2026-08-19) — fmlozano
+Multi-cell selection, keyboard nav, TSV clipboard, Ctrl+D/Z, Ctrl+Arrow jump, column resize and
+autofit are now one engine (`window.GridX`) rather than ~270 lines duplicated into a second module.
+The host supplies `rowIds`/`rowOf`/`valueOf`/`patchFor`/`persist`/`beginEdit`/`canWrite`.
+- ⚠️ **The coordinate space is DATA ROWS ONLY.** Group and section headers carry no `data-f`, so they
+  are unaddressable — a decorative row that gains `data-f` becomes selectable and the whole model
+  breaks. Same rule the procurement app's grid documents.
+- ⚠️ `window.CSS.escape`, not a bare `CSS.escape` — the two are only equivalent in a browser, and the
+  harness runs in Node.
+- ⚠️ Material Submittal's frozen columns had **hardcoded sticky offsets** (`left:0` / `left:190px`),
+  which desync the moment the code column becomes resizable; the second offset reads
+  `var(--msc-code,190px)` now.
+
 ## Sheet count is an estimate — added "Remove sheets" (2026-08-11) — fmlozano
 User: the Technical Officer's sheet count is an intellectual guess made up front, so the real count
 may come in higher or lower once work starts — the register needs to be equally easy to correct in
