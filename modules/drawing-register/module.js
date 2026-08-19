@@ -1462,7 +1462,23 @@ window.DrawingRegister = (function () {
       return !isSheet(r) && (!r.parent_id || !rowById[r.parent_id]);
     });
 
-    roots.forEach(function (n){ walk(n, 1); });
+    // ⚠️ MERGE SAME-NAMED TOP LEVELS AT RENDER TIME. The top level is a CLOSED SET of
+    // four, so two level-1 nodes with the same name are the same level — but a register
+    // imported before the importer deduped them holds one node per workbook block, and
+    // SLN101 writes three "Schematic Design" blocks (SD1 Scheme 1, SD2 Scheme 1, SD2
+    // Scheme 2). Rendering one row each produced the reported three Schematic Design rows,
+    // two of them permanently empty at "0 dwg" because the drawings could only file under
+    // one of them.
+    //
+    // Merging here rather than only in the importer means EXISTING data reads correctly
+    // without a re-import, and the roll-up on the merged row covers every node's subtree.
+    var rootGroups = [], rootByName = {};
+    roots.forEach(function (n){
+      var nm = nodeName(n);
+      if (!rootByName[nm]) { rootByName[nm] = { name: nm, nodes: [] }; rootGroups.push(rootByName[nm]); }
+      rootByName[nm].nodes.push(n);
+    });
+    rootGroups.forEach(function (grp){ walkTop(grp); });
 
     if (orphans.length) {
       var okey = 'G:__orphans__';
@@ -1473,6 +1489,67 @@ window.DrawingRegister = (function () {
     return disp;
 
     // ---- recursion ---------------------------------------------------------
+    // One row for a top level, however many nodes carry that name. The FIRST node owns the
+    // row's identity (collapse key, rename/delete target, tracking-unit flag) so those
+    // actions still address a real row; every node in the group contributes its drawings
+    // and its child levels.
+    function walkTop(grp){
+      var nodes = grp.nodes, primary = nodes[0];
+      var list = [];
+      nodes.forEach(function (n){ list = list.concat(collect(n)); });
+      if (filt && !list.length) return;
+      var key = 'G:' + primary.id;
+      disp.push({ type:'group', level:1, key:key, label:grp.name,
+                  code:nodeCode(primary), ctx:ctxOf(primary), nodeId:primary.id, list:list,
+                  node:primary, trackMode:modeOf(primary), unit:!!primary.is_tracking_unit,
+                  mergedNodes: nodes.length > 1 ? nodes.map(function (n){ return n.id; }) : null });
+      if (isCollapsed(key)) return;
+      nodes.forEach(function (n){
+        regSortList(nodeDraws(n).filter(pass)).forEach(function (r){ pushDrawing(r, 2); });
+      });
+      // ⚠️ Child levels are merged by NAME across the grouped nodes too, or the same
+      // "TOWER ×3" duplication just reappears one level down — which is exactly what the
+      // register showed (TOWER at 0 dwg beside TOWER at 414 dwg).
+      var kidGroups = [], kidByName = {};
+      nodes.forEach(function (n){
+        sortNodes(nodeKids(n)).forEach(function (c){
+          var nm = nodeName(c);
+          if (!kidByName[nm]) { kidByName[nm] = { name: nm, nodes: [] }; kidGroups.push(kidByName[nm]); }
+          kidByName[nm].nodes.push(c);
+        });
+      });
+      kidGroups.forEach(function (kg){ walkGroup(kg, 2); });
+    }
+
+    // The same merge, at any depth below the top.
+    function walkGroup(grp, level){
+      if (grp.nodes.length === 1) { walk(grp.nodes[0], level); return; }
+      var nodes = grp.nodes, primary = nodes[0];
+      var list = [];
+      nodes.forEach(function (n){ list = list.concat(collect(n)); });
+      if (filt && !list.length) return;
+      var key = 'G:' + primary.id;
+      disp.push({ type:'group', level:level, key:key, label:grp.name,
+                  code:nodeCode(primary), ctx:ctxOf(primary), nodeId:primary.id, list:list,
+                  node:primary, trackMode:modeOf(primary), unit:!!primary.is_tracking_unit,
+                  mergedNodes: nodes.map(function (n){ return n.id; }) });
+      if (isCollapsed(key)) return;
+      nodes.forEach(function (n){
+        regSortList(nodeDraws(n).filter(pass)).forEach(function (r){ pushDrawing(r, level + 1); });
+      });
+      if (level < MAX_LEVEL) {
+        var kidGroups = [], kidByName = {};
+        nodes.forEach(function (n){
+          sortNodes(nodeKids(n)).forEach(function (c){
+            var nm = nodeName(c);
+            if (!kidByName[nm]) { kidByName[nm] = { name: nm, nodes: [] }; kidGroups.push(kidByName[nm]); }
+            kidByName[nm].nodes.push(c);
+          });
+        });
+        kidGroups.forEach(function (kg){ walkGroup(kg, level + 1); });
+      }
+    }
+
     function walk(node, level){
       var list = collect(node);
       // Under an active filter a level with nothing left in it is hidden entirely,
@@ -1488,7 +1565,15 @@ window.DrawingRegister = (function () {
       // below every child level.
       regSortList(nodeDraws(node).filter(pass)).forEach(function (r){ pushDrawing(r, level + 1); });
       if (level < MAX_LEVEL) {
-        sortNodes(nodeKids(node)).forEach(function (c){ walk(c, level + 1); });
+        // Route through walkGroup so same-named siblings merge at every depth, not just
+        // the two the top-level walker handles directly.
+        var kidGroups = [], kidByName = {};
+        sortNodes(nodeKids(node)).forEach(function (c){
+          var nm = nodeName(c);
+          if (!kidByName[nm]) { kidByName[nm] = { name: nm, nodes: [] }; kidGroups.push(kidByName[nm]); }
+          kidByName[nm].nodes.push(c);
+        });
+        kidGroups.forEach(function (kg){ walkGroup(kg, level + 1); });
       }
     }
 
@@ -3915,9 +4000,30 @@ window.DrawingRegister = (function () {
               var nDraw = c.drawings, nNode = c.recs.length - nDraw;
               var phases = [];
               c.recs.forEach(function (p){ if (p.node_kind==='phase' && p.phase && phases.indexOf(p.phase)===-1) phases.push(p.phase); });
+              // Sheets per top level, and how much of it is inferred rather than stated.
+              // ⚠️ A drawing with no sheet count in the source is imported as ONE sheet —
+              // it is at least one drawing sheet, and 0 would make its progress
+              // undefined. That inflates a block's total against the workbook's own
+              // subtotal, so the count is REPORTED rather than left to be discovered by
+              // someone comparing the two: SLN101's Individual Services block has 239
+              // such rows, which is its entire 562-vs-323 discrepancy.
+              var perTop = {}, noCount = 0;
+              c.recs.forEach(function (p){
+                if ((p.node_kind||'drawing') !== 'drawing') return;
+                var k = p.phase || '—';
+                perTop[k] = (perTop[k]||0) + (+p.no_of_sheets||0);
+                if (p._noSheetCount) noCount++;
+              });
+              var perTopTxt = Object.keys(perTop).map(function (k){
+                return Fmt.esc(k) + ' ' + perTop[k];
+              }).join(' · ');
               m.el.querySelector('#dr-imp-info').innerHTML =
                 '<strong>'+nDraw+'</strong> drawings' + (nNode?' + '+nNode+' level rows':'') + ' found.' +
                 (phases.length ? '<br>Drawing types (L1): '+Fmt.esc(phases.join(' · ')) : '<br>No top-level drawing-type rows detected.') +
+                (perTopTxt ? '<br>Sheets by drawing type: ' + perTopTxt : '') +
+                (noCount ? '<br><span style="color:var(--pd-amber,#B45309)">' + noCount +
+                   ' drawing' + (noCount===1?'':'s') + ' carry no sheet count in the workbook — ' +
+                   'imported as 1 sheet each, so these totals read higher than the sheet\'s own subtotals.</span>' : '') +
                 '<br>Sample:<br>' +
                 c.recs.filter(function(p){return (p.node_kind||'drawing')==='drawing';}).slice(0,6).map(function (d){
                   return '• '+Fmt.esc((d.phase||'')+' / '+(d.discipline||'')+' — '+(d.drawing_no||d.title));
@@ -3976,8 +4082,27 @@ window.DrawingRegister = (function () {
         // Pass 1 inserts the LEVEL rows shallowest-first, collecting id-by-path-key;
         // pass 2 inserts the drawings with their parent_id resolved. A one-pass insert
         // would import a flat register with every drawing unparented.
-        var nodeRecs = recs.filter(function (r){ return (r.node_kind||'drawing') !== 'drawing'; })
-                           .sort(function (a,b){ return (a.level||1) - (b.level||1); });
+        // ⚠️ DEDUPE THE LEVEL ROWS BY PATH KEY BEFORE INSERTING. A level's identity is its
+        // path, and a workbook names the same path many times over — SLN101 writes three
+        // "Schematic Design" blocks (SD1 Scheme 1, SD2 Scheme 1, SD2 Scheme 2), which all
+        // FOLD to the one top level by design. Inserting each occurrence produced three
+        // level-1 rows; `idByPath` then kept only the LAST, so the drawings all filed under
+        // it and the other two rendered as permanent empty "0 dwg" rows. Measured on the
+        // real workbook: 54 duplicated path keys, including TOWER ×3 and Architectural ×4.
+        //
+        // First occurrence wins, but a later one DONATES a code the first was missing — the
+        // block header carrying the code is not always the first one seen.
+        var byPath = {}, nodeRecs = [];
+        recs.filter(function (r){ return (r.node_kind||'drawing') !== 'drawing'; })
+            .forEach(function (r){
+              var k = r._pkey || '';
+              var seen = byPath[k];
+              if (!seen) { byPath[k] = r; nodeRecs.push(r); return; }
+              if (!seen.dwg_number && r.dwg_number) {
+                seen.dwg_number = seen.drawing_no = seen.drawing_code = r.dwg_number;
+              }
+            });
+        nodeRecs.sort(function (a,b){ return (a.level||1) - (b.level||1); });
         var drawRecs = recs.filter(function (r){ return (r.node_kind||'drawing') === 'drawing'; });
         var idByPath = {};
         function strip(r){
@@ -4238,6 +4363,60 @@ window.DrawingRegister = (function () {
     // ⇒ A register whose top-level blocks aren't classic design phases must declare them in the
     //   explicit "Row Level" column (per-file, cannot regress anyone else). That is exactly what the
     //   prepared BAU101 import file does, and it yields all five L1s.
+    // ---- does this sheet encode the LEVEL in the indent COLUMN? --------------
+    // The SLN101 layout writes the tree as a staircase across the title columns:
+    // col 8 top level, col 9 building OR trade, col 10 category, col 11 the drawing.
+    // That is a far stronger signal than any text heuristic — it is the structure the
+    // author actually drew — so when a sheet stratifies we read levels from it.
+    //
+    // ⚠️ SELF-SELECTING, and deliberately so. `PHASE_RE` only knows a fixed list of
+    // block names, so "INDIVIDUAL SERVICES DRAWINGS (ISD)" and "TEMPORARY WORKS
+    // DRAWINGS (TWD)" were NOT recognised as top levels and their entire blocks were
+    // silently swallowed into the preceding one — measured on the real workbook: ISD's
+    // 323 sheets and TWD's 27 landed under For Construction, and the register showed no
+    // ISD top level at all. Widening PHASE_RE by text was tried twice before and
+    // reverted both times because other workbooks carry those same words one level
+    // DOWN. The column tells the two cases apart; the text cannot.
+    //
+    // Requires ≥3 distinct title columns in use. A workbook that writes every level in
+    // one column (the prepared BAU101/GPR101 files) does not stratify, so it keeps the
+    // old heuristics untouched and cannot regress.
+    var colUse = {}, colDistinct = 0;
+    for (var pr = hdr+1; pr < g.length; pr++) {
+      var prow = g[pr]; if (!prow || !prow.join('').trim()) continue;
+      for (var pc = titleStart; pc <= titleEnd && pc < prow.length; pc++) {
+        if (String(prow[pc]).trim()) {
+          if (!colUse[pc]) { colUse[pc] = 0; colDistinct++; }
+          colUse[pc]++;
+          break;
+        }
+      }
+    }
+    var colMode = colDistinct >= 3;
+    // The DEEPEST title column in use is the leaf tier — measured on the real workbook:
+    // columns 8/9/10/11 carry 6 / 84 / 148 / 1254 rows, and only column 11's sheet counts
+    // sum to the sheet's own block subtotals (ISD 323, FCD 198, TWD 27 — exact). Every
+    // shallower column is a ROLL-UP, so counting one as a drawing double-counts its
+    // children (ISD read 562 against 323 before this).
+    var leafCol = -1;
+    Object.keys(colUse).forEach(function (k){ if (+k > leafCol) leafCol = +k; });
+    // The top-level column is the SHALLOWEST column carrying a header that folds to one
+    // of the four canonical top levels — not merely the shallowest column in use, which
+    // a stray note in an early column would otherwise claim.
+    var topCol = -1;
+    if (colMode) {
+      for (var qr = hdr+1; qr < g.length && topCol < 0; qr++) {
+        var qrow = g[qr]; if (!qrow || !qrow.join('').trim()) continue;
+        for (var qc = titleStart; qc <= titleEnd && qc < qrow.length; qc++) {
+          var qt = String(qrow[qc]).trim();
+          if (!qt) continue;
+          if (foldTopLevel(qt).top) topCol = qc;
+          break;                              // only the FIRST filled column counts
+        }
+      }
+      if (topCol < 0) colMode = false;         // nothing canonical to anchor on
+    }
+
     for (var r=hdr+1; r<g.length; r++) {
       var row = g[r]; if (!row || !row.join('').trim()) continue;
       // find which indent column holds the title text
@@ -4245,6 +4424,7 @@ window.DrawingRegister = (function () {
       for (var tc=titleStart; tc<=titleEnd && tc<row.length; tc++) {
         if (String(row[tc]).trim()) { indentText = String(row[tc]).trim(); indentCol = tc; break; }
       }
+      var colLeaf = false;   // set when the column model has proven this row is a drawing
       var noCode = String(cell(row, ci.no)).trim();
       var sheets = intOf(cell(row, ci.sheets));
       var hasDates = subCols.some(function (s){ return dateOf(cell(row,s.c)); });
@@ -4285,6 +4465,75 @@ window.DrawingRegister = (function () {
         }
         // 'drawing' → fall through to the sheet branch below, skipping the
         // header heuristics entirely.
+      }
+
+      // ---- column-driven level, when the sheet stratifies -------------------
+      // Depth is the indent column's offset from the top-level column. Deterministic:
+      // no guessing from dates, descriptions or sheet counts, which is what made a
+      // titled-but-dateless drawing import as a phantom category.
+      if (colMode && !lvl && indentText && indentCol >= 0) {
+        var off = indentCol - topCol;
+        // A row ABOVE the leaf column is a heading, whatever it looks like; a row AT the
+        // leaf column is a drawing unless the workbook's own numbering says otherwise.
+        if (indentCol < leafCol) {
+          if (off <= 0) {
+            // A top-level header. Anything in this column that does NOT fold to one of the
+            // four is left to the heuristics rather than invented as a fifth top level.
+            if (foldTopLevel(indentText).top) {
+              setTopLevel(indentText);
+              recs.push(nodeRec('phase', noCode, cur.phase));
+              // Temporary Works / Combined Services / As-Built are level-2 nodes under For
+              // Construction now, not top levels of their own.
+              if (cur.fold) recs.push(nodeRec('discipline', '', cur.fold));
+              continue;
+            }
+          } else if (off === 1) {
+            // ⚠️ ONE column holds two different tiers. A building (TOWER, TW1-4) and a
+            // trade (ARCHITECTURAL, AR-00000) both sit here and are told apart by the CODE
+            // beside them — disciplineFromCode() already knows the trade prefixes. The
+            // measured proof: this column's sheet counts sum to exactly TWICE each block's
+            // total, because both tiers roll the same drawings up.
+            var asTrade = disciplineHeader(indentText) || (disciplineFromCode(noCode) ? mapDiscipline(indentText) : '');
+            if (asTrade) {
+              cur.discipline = canonDiscipline(asTrade) || asTrade; cur.category = '';
+              var rpC = String(cell(row, ci.resp)).trim(); if (rpC) cur.responsible = rpC;
+              recs.push(nodeRec('discipline', noCode, indentText)); continue;
+            }
+            // ⚠️ Inside a FOLDED block the fold already occupies level 2 (Temporary Works
+            // under For Construction), so TEMFACIL / SAFETY / EQUIPMENT are its children —
+            // level 3 — not siblings. Treating them as buildings would overwrite the fold
+            // and lose the very level the fold exists to create.
+            if (cur.fold) {
+              cur.discipline = indentText; cur.category = '';
+              recs.push(nodeRec('discipline', noCode, indentText)); continue;
+            }
+            cur.building = indentText; cur.discipline = ''; cur.category = '';
+            recs.push(nodeRec('building', noCode, indentText)); continue;
+          } else {
+            cur.category = indentText;
+            recs.push(nodeRec('category', noCode, indentText)); continue;
+          }
+        } else if (roundHundredCategory(r, noCode, indentCol)) {
+          // ⚠️ THE SAME WORKBOOK PUTS CATEGORIES IN TWO DIFFERENT COLUMNS. Most branches
+          // write the category one column in (A-100 "Floor Plan" at col 10, A-101… at col
+          // 11), but several write BOTH tiers in the leaf column — SD1's Mechanical block
+          // is M-100 "General" beside M-101/M-102, its own children.
+          //
+          // The workbook marks the difference by its OWN convention: a round hundred is the
+          // group, the numbers after it are its drawings. Measured: without this, Mechanical
+          // alone summed to 18 sheets against the sheet's stated 9 — and it is where the
+          // register's "193 duplicate codes" come from, since M-100/M-101 repeat under each
+          // category.
+          cur.category = indentText;
+          recs.push(nodeRec('category', noCode, indentText)); continue;
+        }
+        // Otherwise it is a drawing at the leaf column; fall through to the sheet branch.
+        //
+        // ⚠️ And it must NOT be dropped by the "no substance" guard further down. In this
+        // layout the column has already PROVEN the row is a drawing, while that guard skips
+        // anything with no date, no sheet count and no description — which is exactly how
+        // 125 real leaf rows went missing on the first pass.
+        colLeaf = true;
       }
 
       // ---- classify the row by its title/code, NOT by whether it has dates
@@ -4336,7 +4585,7 @@ window.DrawingRegister = (function () {
       // heuristics can't otherwise reject. A row the workbook has EXPLICITLY
       // declared a drawing must never be dropped by it — BAU101 has titled
       // sheets carrying no date, no description and no sheet count.
-      if (!lvl && !hasDates && !sheets && !desc && !dwgno) continue;
+      if (!lvl && !colLeaf && !hasDates && !sheets && !desc && !dwgno) continue;
 
       var subs = [], blByRev = {};
       subCols.forEach(function (s){
@@ -4357,6 +4606,9 @@ window.DrawingRegister = (function () {
       subs.sort(function(a,b){ return a.rev-b.rev; });
 
       recs.push({
+        // Reported in the import preview — see the note there. Kept as a `_`-prefixed
+        // key so the existing strip drops it before the row is written.
+        _noSheetCount: !sheets,
         node_kind: 'drawing',
         proj_code: String(cell(row, ci.projectName)).trim() || undefined,
         building_ref: String(cell(row, ci.building)).trim() || cur.building,
@@ -4392,6 +4644,46 @@ window.DrawingRegister = (function () {
       recs._unclassifiedTops = Object.keys(unclassifiedTops);
     }
     return recs;
+
+    // Is this leaf-column row actually a CATEGORY rather than a drawing?
+    //
+    // ⚠️ This workbook is inconsistent about where categories live — most branches put them
+    // in their own column, but several write BOTH tiers in the leaf column (SD1's Mechanical
+    // block has M-100 "General" beside M-101/M-102, its own members). Two weaker rules were
+    // tried and measurably failed:
+    //   • "round hundred ⇒ category" turned 24 real For-Construction drawings that are
+    //     legitimately numbered on a hundred into empty categories, breaking a block that
+    //     had reconciled exactly.
+    //   • gating that on "this branch has no category tier yet" broke the other direction,
+    //     because the same block mixes both conventions (Schematic went 611 → 722 sheets).
+    //
+    // What actually distinguishes them is ARITHMETIC: a rollup's sheet count EQUALS the sum
+    // of the rows beneath it. That is the workbook's own bookkeeping, not a naming guess.
+    function roundHundredCategory(rowIdx, code, col){
+      var m = /^([A-Za-z]+)-0*(\d+)$/.exec(String(code || '').trim());
+      if (!m) return false;
+      var n = +m[2];
+      if (!n || n % 100 !== 0) return false;             // only a round hundred can be a group
+      var own = intOf(cell(g[rowIdx], ci.sheets));
+      if (!own) return false;                            // a 0-sheet row proves nothing
+      var sum = 0, seen = 0;
+      for (var k = rowIdx + 1; k < g.length; k++) {
+        var nrow = g[k];
+        if (!nrow || !nrow.join('').trim()) continue;
+        // Stay at this tier: a row in a shallower column has left the group.
+        var ncol = -1;
+        for (var nc = titleStart; nc <= titleEnd && nc < nrow.length; nc++) {
+          if (String(nrow[nc]).trim()) { ncol = nc; break; }
+        }
+        if (ncol >= 0 && ncol < col) break;
+        var nm = /^([A-Za-z]+)-0*(\d+)$/.exec(String(cell(nrow, ci.no)).trim());
+        if (!nm) break;
+        if (nm[1].toUpperCase() !== m[1].toUpperCase()) break;   // different code family
+        if ((+nm[2]) % 100 === 0) break;                         // the next group starts here
+        sum += intOf(cell(nrow, ci.sheets)); seen++;
+      }
+      return seen > 0 && sum === own;
+    }
 
     // Non-empty tiers only, joined by a separator that cannot occur in a label.
     function pathKey(parts){
