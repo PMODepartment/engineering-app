@@ -76,6 +76,11 @@ Planners schema changed and the projection needs looking at.
   with two incompatible progress bases — 0-or-100 tracking units for CD/SD/FCD/TWD,
   partial sheet credit for ISD. Read `modules/drawing-register/CLAUDE.md` before
   touching its tree or its percentages.
+  ⚠️ **A SCHEME IS NOT A LEVEL.** SLN101 has `Schematic Design 1/2 (Scheme 1)` and
+  `(Scheme 2)`; a scheme is a **lens ABOVE level 1** — `drawing_scheme_defs`,
+  migration `0019` — never a sixth top level and never in the importer's level
+  path key. The Technical Officer adds and renames them from **+ Level →
+  Schemes…**. Read that module's `CLAUDE.md` before changing this.
   ⚠️ **`Temporary Works Drawings` is a TOP LEVEL, not a child of For Construction.**
   0017 folded it under FCD; **0018 undid that by explicit instruction** (2026-08-20).
   Combined Services and As-Built remain folded. The importer's `foldTopLevel()` and

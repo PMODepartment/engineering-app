@@ -8,7 +8,7 @@
   <script src="../../assets/js/theme.js?v=20260819d"></script>
   <title>Drawing Register · Engineering App</title>
   <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260819d" />
-  <link rel="stylesheet" href="module.css?v=20260820a" />
+  <link rel="stylesheet" href="module.css?v=20260820c" />
 </head>
 <body>
   <div class="pd-app">
@@ -33,9 +33,10 @@
           <button class="pd-btn dr-tb-labeled pd-btn-primary" id="dr-add" data-perm="create" title="Add a drawing under the selected level (Enter)">+ Add</button>
           <div class="dr-menuwrap">
             <button class="pd-btn dr-tb-labeled" id="dr-addlevel" data-perm="create" style="display:none;">+ Level <span data-ico="chevronDown" data-ico-size="13"></span></button>
-            <!-- Built at click time by module.js: the four drawing types are fixed
-                 (migration 0017), so this offers "add a sublevel inside the selected
-                 level" plus the per-project level-name editor. -->
+            <!-- Built at click time by module.js: the five drawing types are fixed
+                 (migrations 0017 + 0018), so this offers "add a sublevel inside the
+                 selected level", the per-project level-name editor, and the Schemes
+                 editor — a scheme is a lens over the tree, never a level in it. -->
             <div class="dr-menu" id="dr-addlevel-menu" hidden></div>
           </div>
           <span class="dr-tb-sep"></span>
@@ -55,6 +56,11 @@
           <input class="pd-input dr-search" id="dr-f-search" placeholder="Search code, title, description…" />
           <select class="pd-select" id="dr-f-phase"><option value="">All drawing types</option></select>
           <select class="pd-select" id="dr-f-discipline"><option value="">All disciplines</option></select>
+          <!-- Scheme: the design-variant lens. HIDDEN until this project actually
+               has one (populateFilterSelects), because most registers have a single
+               design and an "All schemes" select there would advertise a dimension
+               they do not have. -->
+          <select class="pd-select" id="dr-f-scheme" hidden><option value="">All schemes</option></select>
           <select class="pd-select" id="dr-f-scope">
             <option value="">All scopes</option>
             <option>Main Contract</option>
@@ -103,7 +109,7 @@
   <script src="../../assets/js/offline.js?v=20260819d"></script>
   <script src="../../assets/js/collab.js?v=20260819d"></script>
   <script src="../../assets/js/autosave.js?v=20260819d"></script>
-  <script src="module.js?v=20260820b"></script>
+  <script src="module.js?v=20260820c"></script>
   <script>
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);

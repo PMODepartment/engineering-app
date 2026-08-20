@@ -525,6 +525,16 @@ html.pd-dark {
   font-weight:700; background:var(--pd-line); color:var(--pd-ink); }
 .dr-scopetag.dr-co { background:#fde3c8; color:#7a3e00; }
 html.pd-dark .dr-scopetag.dr-co { background:#5a3a12; color:#ffcf9e; }
+/* The Scheme cell's <select> borrows the status pill's shape (.dr-stsel) and the
+   scope tag's colours, so a scheme that IS a change order reads the same amber
+   whether the register is showing schemes or plain scopes — one meaning for that
+   colour in this grid, not two.
+   ⚠️ `.dr-stsel` alone would leave it on the --st-bg fallback, i.e. the plain
+   card background, which reads as an empty cell next to the pill-shaped tags in
+   the same column. */
+.dr-stsel[data-scheme] { background:var(--pd-line); color:var(--pd-ink); }
+.dr-stsel[data-scheme].dr-co { background:#fde3c8; color:#7a3e00; }
+html.pd-dark .dr-stsel[data-scheme].dr-co { background:#5a3a12; color:#ffcf9e; }
 .dr-grid th.dr-freeze { z-index:3; }                    /* header corner above all */
 .dr-freeze-cb    { left:0; }
 .dr-freeze-code, .dr-freeze-grp { left:var(--cbw,0px); }

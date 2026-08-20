@@ -18,7 +18,7 @@ window.DrawingRegister = (function () {
   var profile = null, uid = null, pid = null, projName = '';
   var rows = [];
   var view = 'overview';                       // overview | backlog | registry | gantt
-  var filters = { phase: '', discipline: '', scope: '', status: '', search: '', dupsOnly: false };
+  var filters = { phase: '', discipline: '', scheme: '', scope: '', status: '', search: '', dupsOnly: false };
   var SCOPES = ['Main Contract', 'Change Order'];
 
   // ---- Registry column widths [drag-resize + double-click auto-fit] --------
@@ -238,7 +238,7 @@ window.DrawingRegister = (function () {
     }
     var m = UI.modal(
       '<h2 style="margin-top:0;">Name the levels</h2>' +
-      '<p class="dr-mut" style="margin-top:0;">The four drawing types are fixed. Everything below them is ' +
+      '<p class="dr-mut" style="margin-top:0;">The five drawing types are fixed. Everything below them is ' +
       'yours to structure — name the levels to match how this project is actually broken down ' +
       '(SLN101 uses <strong>Building › Trade › Category</strong>). Blank falls back to “Level N”.</p>' +
       body +
@@ -267,6 +267,210 @@ window.DrawingRegister = (function () {
       UI.toast('Level names saved','ok');
     };
   }
+  // ---- Schemes -------------------------------------------------------------
+  // ⚠️ A SCHEME IS NOT A LEVEL. The ask was "let the technical officer add
+  // schemes at level 1"; this is the answer to it, deliberately built one rung
+  // ABOVE level 1 instead. SLN101's own workbook writes its blocks as
+  //     SCHEMATIC DESIGN 1 (Scheme 1) / SCHEMATIC DESIGN 2 (Scheme 1) /
+  //     SCHEMATIC DESIGN 2 (Scheme 2)
+  // — the scheme is a parenthetical qualifier ON a drawing type, not a sibling
+  // of one. Three things break if it becomes a level-1 node:
+  //   • TOP_LEVELS stops being a closed set of five, and phaseIdx(), the
+  //     Overview's five-lane Gantt, groupAgg('phase'), TRACK_MODE and migrations
+  //     0017/0018's classifier all key off that closure.
+  //   • A scheme CUTS ACROSS drawing types. SLN101's Scheme 2 touches only
+  //     Schematic Design today, but a change-order redesign produces FCD, TWD and
+  //     ISD in Scheme 2 as well — so scheme-as-level-1 duplicates the whole
+  //     five-type tree per scheme and "Schematic Design progress" stops being one
+  //     number.
+  //   • openImport() dedupes level nodes BY PATH KEY. Putting the scheme in that
+  //     key re-splits the three Schematic Design blocks into three level-1 rows —
+  //     the exact regression that dedupe exists to prevent.
+  // ⚠️ WHAT WAS GENUINELY MISSING, and what this does fix: there was no way to
+  // CREATE a scheme at all. Schemes only ever arrived from an import, which read
+  // "(Scheme 2)" into the two-valued `scope`, so a Scheme 3 had nowhere to go —
+  // it collapsed into the same "Change Order" bucket as Scheme 2.
+  // ⚠️ `scope` IS NOT REPLACED. Scheme (which variant) and scope (Main Contract /
+  // Change Order) are two facts that are merely 1:1 in SLN101. The transmittal top
+  // sheet and the Excel export read `scope`, so it stays — and the scheme's own
+  // scope is written through to it so the two cannot drift.
+  var SCHEME_TABLE = 'drawing_scheme_defs';
+  var schemeDefs = [];                // [{id,name,scope,superseded,sort_order}]
+  // A project with no defs has no scheme dimension, and every scheme control is
+  // hidden — the correct state for a register with one design, which is most.
+  function hasSchemes(){ return schemeDefs.length > 0; }
+  function schemeDef(name){
+    if (!name) return null;
+    for (var i = 0; i < schemeDefs.length; i++) if (schemeDefs[i].name === name) return schemeDefs[i];
+    return null;
+  }
+  // The commercial fact for a row. Falls back to its own stored `scope`, so a
+  // register with no schemes behaves exactly as it did before 0019.
+  function scopeOfRow(r){
+    var d = schemeDef(r && r.scheme);
+    return (d && d.scope) || (r && r.scope) || SCOPES[0];
+  }
+  // What the Scope/Scheme column and its filter show. The scheme is the finer
+  // value and subsumes the scope, so it wins where one is set.
+  function schemeLabelOf(r){
+    return (r && r.scheme) || scopeOfRow(r);
+  }
+  function schemeUseCount(name){
+    var n = 0;
+    rows.forEach(function (r){ if (!isNode(r) && (r.scheme||'') === name) n++; });
+    return n;
+  }
+  async function loadSchemeDefs(){
+    schemeDefs = [];
+    if (!pid) return;
+    var res = await sb().from(SCHEME_TABLE)
+      .select('id,name,scope,superseded,sort_order').eq('project_id', pid);
+    // Deploy-order safe, exactly like loadLevelDefs(): before migration 0019 is
+    // run the table does not exist, and "no schemes" is a fully working state
+    // rather than a failure to render.
+    if (res.error) return;
+    schemeDefs = (res.data || []).sort(function (a, b){
+      return (a.sort_order||0) - (b.sort_order||0) ||
+             String(a.name||'').localeCompare(String(b.name||''));
+    });
+  }
+
+  // The per-project scheme editor — the "option for the technical officer to add
+  // schemes" the request asked for. Mirrors openLevelNames(): a working copy,
+  // nothing written until Save.
+  function openSchemes(){
+    if (!pid){ UI.toast('Select a project first','warn'); return; }
+    var work = schemeDefs.map(function (s){
+      return { id:s.id, name:s.name, scope:s.scope||SCOPES[0],
+               superseded:!!s.superseded, _orig:s.name };
+    });
+    var m = UI.modal(
+      '<h2 style="margin-top:0;">Schemes</h2>' +
+      '<p class="dr-mut" style="margin-top:0;">A <strong>scheme</strong> is a design variant of the ' +
+      'whole project — SLN101 carries <strong>Scheme 1</strong> and <strong>Scheme 2</strong>. It is ' +
+      'not a drawing type: it cuts across all five of them, so it filters the register rather than ' +
+      'sitting inside it. Each scheme carries its own commercial scope, which is what the transmittal ' +
+      'sheet and the Excel export report.</p>' +
+      '<div id="f-sch-body"></div>' +
+      '<p style="margin:6px 0 0;"><button class="pd-btn" id="f-sch-add" type="button">+ Add scheme</button></p>' +
+      '<p class="dr-mut" style="margin-top:10px;">A superseded scheme is <strong>kept and still ' +
+      'tracked</strong> — engineering has to finish it, because it is the baseline a change order’s ' +
+      'cost and time impact is measured against. The label says so; it never hides rows.</p>' +
+      '<div style="text-align:right;margin-top:14px;"><button class="pd-btn" id="f-sch-cancel" type="button">Cancel</button> ' +
+      '<button class="pd-btn pd-btn-primary" id="f-sch-save" type="button">Save</button></div>');
+
+    function paint(){
+      var host = m.el.querySelector('#f-sch-body');
+      host.innerHTML =
+        '<table class="pd-table dr-table"><thead><tr><th>Scheme</th><th>Commercial scope</th>' +
+        '<th>Superseded</th><th class="dr-r">Drawings</th><th></th></tr></thead><tbody>' +
+        (work.length ? work.map(function (w, i){
+          // Only a scheme that already exists can hold drawings — a row added in
+          // this dialog has none by definition.
+          var used = w._orig ? schemeUseCount(w._orig) : 0;
+          return '<tr>' +
+            '<td><input class="pd-input" data-sn="'+i+'" maxlength="60" value="'+Fmt.esc(w.name)+'" placeholder="Scheme '+(i+1)+'"></td>' +
+            '<td><select class="pd-select" data-ss="'+i+'">' +
+              SCOPES.map(function (s){ return '<option'+(w.scope===s?' selected':'')+'>'+s+'</option>'; }).join('') +
+            '</select></td>' +
+            '<td><input type="checkbox" data-sx="'+i+'"'+(w.superseded?' checked':'')+'></td>' +
+            '<td class="dr-r">'+used+'</td>' +
+            '<td><button class="pd-btn" type="button" data-sd="'+i+'"'+(used?' disabled':'')+' title="'+
+              Fmt.esc(used ? 'In use by '+used+' drawing'+(used===1?'':'s')+' — move them to another scheme first'
+                           : 'Remove this scheme')+'">Remove</button></td>' +
+          '</tr>';
+        }).join('') : '<tr><td colspan="5" class="dr-mut">No schemes yet — this project has one design.</td></tr>') +
+        '</tbody></table>';
+      // Read every control back into `work` on change, so a repaint (add/remove)
+      // never discards typing that has not been committed yet.
+      host.querySelectorAll('[data-sn]').forEach(function (el){
+        el.oninput = function (){ work[+el.dataset.sn].name = el.value; };
+      });
+      host.querySelectorAll('[data-ss]').forEach(function (el){
+        el.onchange = function (){ work[+el.dataset.ss].scope = el.value; };
+      });
+      host.querySelectorAll('[data-sx]').forEach(function (el){
+        el.onchange = function (){ work[+el.dataset.sx].superseded = el.checked; };
+      });
+      host.querySelectorAll('[data-sd]').forEach(function (el){
+        el.onclick = function (){ work.splice(+el.dataset.sd, 1); paint(); };
+      });
+    }
+    paint();
+
+    m.el.querySelector('#f-sch-add').onclick = function (){
+      // Default the new scheme to a change order: the first scheme is the main
+      // contract and already exists by the time anyone opens this dialog twice.
+      var n = work.length + 1;
+      work.push({ id:null, name:uniqueName('Scheme '+n, work.map(function(w){return w.name;})),
+                  scope: work.length ? 'Change Order' : SCOPES[0], superseded:false, _orig:null });
+      paint();
+    };
+    m.el.querySelector('#f-sch-cancel').onclick = m.close;
+    m.el.querySelector('#f-sch-save').onclick = async function (){
+      var seen = {};
+      for (var i = 0; i < work.length; i++) {
+        work[i].name = String(work[i].name||'').trim();
+        if (!work[i].name){ UI.toast('Every scheme needs a name','warn'); return; }
+        var k = work[i].name.toLowerCase();
+        if (seen[k]){ UI.toast('Two schemes are both called “'+work[i].name+'” — names must be unique','warn'); return; }
+        seen[k] = 1;
+      }
+      // Deletes first, and only of defs no drawing references (the Remove button
+      // is already disabled for those; this is the guard for a stale count).
+      var keep = {}; work.forEach(function (w){ if (w.id) keep[w.id] = 1; });
+      var dels = schemeDefs.filter(function (s){ return !keep[s.id]; });
+      for (var d = 0; d < dels.length; d++) {
+        if (schemeUseCount(dels[d].name)){
+          UI.toast('“'+dels[d].name+'” still has drawings — move them to another scheme first','warn'); return;
+        }
+      }
+      if (dels.length) {
+        var rd = await sb().from(SCHEME_TABLE).delete().in('id', dels.map(function (s){ return s.id; }));
+        if (rd.error){ UI.toast(rd.error.message,'error'); return; }
+      }
+      // Deletes ran first deliberately: it frees a name for a rename in the same
+      // save (delete "Scheme 2", rename "Scheme 3" → "Scheme 2").
+      // ⚠️ SWAPPING two names in one save still collides on `unique (project_id,
+      // name)` and is reported as a DB error rather than half-applied. Left as a
+      // loud failure rather than given a two-phase rename: swapping scheme names
+      // is not a thing anyone does, and a temporary-name dance is more code to be
+      // wrong in than the case is worth.
+      for (var j = 0; j < work.length; j++) {
+        var w = work[j];
+        var payload = { project_id:pid, name:w.name, scope:w.scope,
+                        superseded:!!w.superseded, sort_order:j + 1 };
+        var res;
+        if (w.id) {
+          res = await sb().from(SCHEME_TABLE).update(payload).eq('id', w.id);
+        } else {
+          payload.created_by = uid;
+          res = await sb().from(SCHEME_TABLE).insert(payload);
+        }
+        if (res.error){ UI.toast(res.error.message,'error'); return; }
+        // ⚠️ A RENAME HAS TO CARRY THE DRAWINGS. `scheme` is denormalised text on
+        // every drawing (the same trade-off `phase` makes), so renaming only the
+        // def would strand every row under a name nothing defines any more — the
+        // rows would read as scheme-less and their scope would stop following the
+        // def. Same reasoning as renameGroup().
+        if (w._orig && w._orig !== w.name) {
+          var rr = await sb().from(TABLE).update({ scheme: w.name })
+            .eq('project_id', pid).eq('scheme', w._orig);
+          if (rr.error){ UI.toast(rr.error.message,'error'); return; }
+        }
+        // Keep the stored `scope` in step with the scheme's, for the same reason:
+        // the export and the transmittal read the row, not the def.
+        var rs = await sb().from(TABLE).update({ scope: w.scope })
+          .eq('project_id', pid).eq('scheme', w.name).neq('scope', w.scope);
+        if (rs.error){ UI.toast(rs.error.message,'error'); return; }
+      }
+      m.close();
+      await loadSchemeDefs();
+      await load();
+      UI.toast('Schemes saved','ok');
+    };
+  }
+
   var NODE_LABELS = { phase:'Drawing Type', discipline:'Discipline', category:'Category', drawing:'Drawing' };
 
   // selection ordering (display order of drawing ids) for shift-click + arrows
@@ -298,6 +502,12 @@ window.DrawingRegister = (function () {
     sheets:'Sh', appr:'Appr', latest_sub:'Latest Sub.', approval:'Approval',
     responsible:'Resp.', scope:'Scope'
   };
+  // The last column reports the SCHEME once the project has any, and the plain
+  // commercial scope otherwise — a header reading "Scope" over cells reading
+  // "Scheme 2" would be a lie, and a twelfth column on an already very wide grid
+  // to say the same thing twice would be worse. The scheme subsumes the scope
+  // (each scheme carries one), so nothing is lost.
+  function scopeColLabel(){ return hasSchemes() ? 'Scheme' : 'Scope'; }
   function regSortVal(r, col){
     switch (col){
       case 'code':        return drawCode(r).toLowerCase();
@@ -309,7 +519,7 @@ window.DrawingRegister = (function () {
       case 'latest_sub':  return latestSub(r,'actual') || latestSub(r,'planned') || '';
       case 'approval':    return r.actual_approval || r.planned_approval || '';
       case 'responsible': return (r.responsible||'').toLowerCase();
-      case 'scope':       return (r.scope||SCOPES[0]).toLowerCase();
+      case 'scope':       return schemeLabelOf(r).toLowerCase();
       default:            return 0;
     }
   }
@@ -554,11 +764,18 @@ window.DrawingRegister = (function () {
             ? '<button data-act="add">Add ' + Fmt.esc(levelLabel(lvl)) +
               ' inside “' + Fmt.esc(nodeName(parent)) + '”</button>'
             : '<button disabled title="Click a level row first">Select a level to add inside</button>') +
-          '<button data-act="names">Name levels…</button>';
+          '<button data-act="names">Name levels…</button>' +
+          // Schemes live in this menu because they answer the same kind of
+          // question — how is THIS project structured — but they are deliberately
+          // NOT an "Add drawing type" item: see the note on schemeDefs for why a
+          // scheme cannot be a level.
+          '<button data-act="schemes">Schemes…</button>';
         lvlMenu.querySelectorAll('[data-act]').forEach(function (b){
           b.onclick = function (){
             lvlMenu.hidden = true;
-            if (b.dataset.act === 'add') addLevel(); else openLevelNames();
+            if (b.dataset.act === 'add') addLevel();
+            else if (b.dataset.act === 'schemes') openSchemes();
+            else openLevelNames();
           };
         });
         lvlMenu.hidden = false;
@@ -591,9 +808,14 @@ window.DrawingRegister = (function () {
     // Material Submittal log). ⚠️ Do not fold search back in with the selects:
     // every keystroke ran computeDups() + buildModel() + a full innerHTML rebuild
     // over every row, which is visible typing lag on a 1,000+ drawing register.
+    // The Scheme control only exists in the DOM once the page has one to offer, so
+    // every read of it has to tolerate its absence rather than throw and take the
+    // rest of readFilters() down with it.
+    function elVal(id){ var el = document.getElementById(id); return el ? el.value : ''; }
     function readFilters() {
       filters.phase      = document.getElementById('dr-f-phase').value;
       filters.discipline = document.getElementById('dr-f-discipline').value;
+      filters.scheme     = elVal('dr-f-scheme');
       filters.scope      = document.getElementById('dr-f-scope').value;
       filters.status     = document.getElementById('dr-f-status').value;
       filters.search     = document.getElementById('dr-f-search').value.toLowerCase().trim();
@@ -603,8 +825,9 @@ window.DrawingRegister = (function () {
       fCollapsed = {};
       syncClearFilt();
     }
-    ['dr-f-phase','dr-f-discipline','dr-f-scope','dr-f-status'].forEach(function (id) {
-      document.getElementById(id).onchange = function () { readFilters(); render(); };
+    ['dr-f-phase','dr-f-discipline','dr-f-scheme','dr-f-scope','dr-f-status'].forEach(function (id) {
+      var el = document.getElementById(id); if (!el) return;
+      el.onchange = function () { readFilters(); render(); };
     });
     var sEl = document.getElementById('dr-f-search'), sT = null;
     sEl.oninput = function () {
@@ -615,8 +838,8 @@ window.DrawingRegister = (function () {
     if (cf) cf.onclick = function () {
       clearTimeout(sT);
       filters.dupsOnly = false;
-      ['dr-f-phase','dr-f-discipline','dr-f-scope','dr-f-status','dr-f-search'].forEach(function (id) {
-        document.getElementById(id).value = '';
+      ['dr-f-phase','dr-f-discipline','dr-f-scheme','dr-f-scope','dr-f-status','dr-f-search'].forEach(function (id) {
+        var el = document.getElementById(id); if (el) el.value = '';
       });
       readFilters(); render();
     };
@@ -637,10 +860,12 @@ window.DrawingRegister = (function () {
   function applyFilterValues(f){
     document.getElementById('dr-f-phase').value = f.phase||'';
     document.getElementById('dr-f-discipline').value = f.discipline||'';
+    var sc = document.getElementById('dr-f-scheme'); if (sc) sc.value = f.scheme||'';
     document.getElementById('dr-f-scope').value = f.scope||'';
     document.getElementById('dr-f-status').value = f.status||'';
     document.getElementById('dr-f-search').value = f.search||'';
-    filters.phase=f.phase||''; filters.discipline=f.discipline||''; filters.scope=f.scope||''; filters.status=f.status||''; filters.search=(f.search||'').toLowerCase().trim();
+    filters.phase=f.phase||''; filters.discipline=f.discipline||''; filters.scheme=f.scheme||'';
+    filters.scope=f.scope||''; filters.status=f.status||''; filters.search=(f.search||'').toLowerCase().trim();
     render();
   }
   function renderViewsMenu(){
@@ -657,7 +882,13 @@ window.DrawingRegister = (function () {
     var save = menu.querySelector('#dr-view-save');
     if (save) save.onclick = function(){
       var name = (prompt('Name this view:', '')||'').trim(); if (!name) return;
-      var v = getViews(); v.push({ name:name, f:{ phase:filters.phase, discipline:filters.discipline, status:filters.status, search:document.getElementById('dr-f-search').value } });
+      // ⚠️ `scheme` and `scope` are saved too. applyFilterValues() has always
+      // restored scope, but nothing ever wrote it — so a view saved while a scope
+      // filter was set reopened showing every scope, silently wider than the view
+      // the user named.
+      var v = getViews(); v.push({ name:name, f:{ phase:filters.phase, discipline:filters.discipline,
+        scheme:filters.scheme, scope:filters.scope, status:filters.status,
+        search:document.getElementById('dr-f-search').value } });
       setViews(v); renderViewsMenu();
     };
   }
@@ -721,6 +952,7 @@ window.DrawingRegister = (function () {
     rows = all;
     if (!fromCache && window.PDSync) PDSync.cachePut('dr:' + pid, all);   // refresh the offline cache
     await loadLevelDefs();
+    await loadSchemeDefs();
     if (opts.reset) {
       // fresh view (project switch / import / clear): reset selection; restore
       // the saved per-project view + collapse state, else default to phases collapsed
@@ -1037,14 +1269,18 @@ window.DrawingRegister = (function () {
   function drawingRows(){ return rows.filter(function (r){ return !isNode(r) && !isSheet(r); }); }
   function sheetRows(){ return rows.filter(function (r){ return !isNode(r) && isSheet(r); }); }
   function structuralNodes(){ return rows.filter(isNode); }
-  function anyFilter(){ return !!(filters.phase || filters.discipline || filters.scope || filters.status || filters.search || filters.dupsOnly); }
+  function anyFilter(){ return !!(filters.phase || filters.discipline || filters.scheme || filters.scope || filters.status || filters.search || filters.dupsOnly); }
 
   // Shared by the Registry filter bar AND the Backlog tab (dupsOnly is Registry-only).
   function matchesFilters(r, opts) {
     opts = opts || {};
     if (!opts.skipDups && filters.dupsOnly && !dupSet[dupKey(r)]) return false;
     if (filters.phase && r.phase !== filters.phase) return false;
-    if (filters.scope && (r.scope || SCOPES[0]) !== filters.scope) return false;
+    // The scheme lens. ⚠️ Matched on the ROW's own scheme and nothing inherited:
+    // a level node deliberately carries no scheme (0019), so inheriting one up the
+    // tree would make every drawing under a level match every scheme.
+    if (filters.scheme && (r.scheme || '') !== filters.scheme) return false;
+    if (filters.scope && scopeOfRow(r) !== filters.scope) return false;
     if (filters.discipline &&
         r.discipline !== filters.discipline &&
         disciplineName(r.discipline) !== filters.discipline) return false;
@@ -1057,7 +1293,7 @@ window.DrawingRegister = (function () {
     }
     if (filters.search) {
       var hay = [r.drawing_no, r.drawing_code, r.title, r.description, r.discipline,
-                 r.category, r.phase, r.responsible, r.revision, r.remarks].join(' ').toLowerCase();
+                 r.category, r.phase, r.scheme, r.responsible, r.revision, r.remarks].join(' ').toLowerCase();
       if (hay.indexOf(filters.search) === -1) return false;
     }
     return true;
@@ -1442,6 +1678,26 @@ window.DrawingRegister = (function () {
     var dList = Object.keys(dSet).sort();
     dc.innerHTML = '<option value="">All disciplines</option>' + dList.map(function (d){
       return '<option'+(filters.discipline===d?' selected':'')+'>'+Fmt.esc(d)+'</option>'; }).join('');
+
+    // ⚠️ The Scheme control is HIDDEN, not merely empty, on a register with no
+    // schemes — which is most of them. An always-present "All schemes" select
+    // would advertise a dimension the project does not have, in a filter bar that
+    // already carries four. It appears the moment a scheme is defined or imported.
+    var sc = document.getElementById('dr-f-scheme');
+    if (sc) {
+      // A scheme present on the DATA but missing from the defs is still offered
+      // (ranked after the defined ones) — a register imported before its defs were
+      // created must not have rows that no filter can reach.
+      var seen = {}, sList = [];
+      schemeDefs.forEach(function (s){ if (s.name && !seen[s.name]){ seen[s.name]=1; sList.push(s.name); } });
+      rows.forEach(function (r){ if (r.scheme && !seen[r.scheme]){ seen[r.scheme]=1; sList.push(r.scheme); } });
+      sc.hidden = !sList.length;
+      if (!sList.length) { sc.value = ''; filters.scheme = ''; }
+      sc.innerHTML = '<option value="">All schemes</option>' + sList.map(function (s){
+        var d = schemeDef(s);
+        return '<option value="'+Fmt.esc(s)+'"'+(filters.scheme===s?' selected':'')+'>' +
+          Fmt.esc(s + (d && d.superseded ? ' (superseded)' : '')) + '</option>'; }).join('');
+    }
   }
 
   // ---- duplicate-code detection [feature 2] --------------------------------
@@ -1789,7 +2045,7 @@ window.DrawingRegister = (function () {
                 : 'Click to sort by this column');
       var grip = colKey ? '<span class="dr-colgrip" data-colw="'+colKey+'" title="Drag to resize · double-click to fit content" onclick="event.stopPropagation()"></span>' : '';
       return '<th class="'+cls+' dr-sortable'+(active?' dr-sorted':'')+'" data-scol="'+col+'" title="'+Fmt.esc(tip)+'">' +
-        Fmt.esc(REG_SORTABLE[col]) +
+        Fmt.esc(col === 'scope' ? scopeColLabel() : REG_SORTABLE[col]) +
         (active ? ' <span class="dr-sortind">'+(regSort.dir===1?'▲':'▼')+'</span>' : '') + grip + '</th>';
     }
     var head = '<tr>' +
@@ -2189,6 +2445,23 @@ window.DrawingRegister = (function () {
     '</select>';
   }
 
+  // ⚠️ Includes the row's OWN value even when no def matches it, for the same
+  // reason phaseOptions() does: a <select> silently reports its first option when
+  // the stored value has none, so saving any other cell on that row would write
+  // "Scheme 1" straight over a scheme the defs have not caught up with yet.
+  function schemeSelect(r){
+    var cur = r.scheme || '';
+    var seen = {}, list = [];
+    schemeDefs.forEach(function (s){ if (s.name && !seen[s.name]){ seen[s.name]=1; list.push(s.name); } });
+    if (cur && !seen[cur]) list.push(cur);
+    return '<select class="dr-stsel'+(scopeOfRow(r)==='Change Order'?' dr-co':'')+'" data-scheme="'+r.id+'"'+
+      ' title="'+Fmt.esc(scopeOfRow(r))+'">' +
+      '<option value=""'+(cur?'':' selected')+'>—</option>' +
+      list.map(function (s){
+        return '<option'+(cur===s?' selected':'')+'>'+Fmt.esc(s)+'</option>'; }).join('') +
+    '</select>';
+  }
+
   function drawRowHTML(item, CB) {
     var r = item.row;
     var kids = item.sheets || null;               // set only on a drawing broken out per sheet
@@ -2239,8 +2512,19 @@ window.DrawingRegister = (function () {
       '<td class="dr-nowrap dr-c-date dr-c-apprd'+(kids?'':ed)+'" data-f="actual_approval" data-t="date">'+
         (appr?'<span class="'+(apprIsActual?'':'dr-mut')+'" title="'+(apprIsActual?'Actual approval':'Planned approval — not yet approved')+'">'+Fmt.date(appr)+'</span>':'—')+'</td>' +
       '<td class="dr-c-resp'+ed+'" data-f="responsible" data-t="text">'+Fmt.esc(r.responsible)+'</td>' +
-      '<td class="dr-c-scope'+(kids?'':ed)+'" data-f="scope" data-t="text">'+
-        '<span class="dr-scopetag'+((r.scope||SCOPES[0])==='Change Order'?' dr-co':'')+'">'+Fmt.esc(r.scope||SCOPES[0])+'</span></td>' +
+      // Scheme when the project has any, scope otherwise. ⚠️ The scheme is a
+      // SELECT rather than the free-text inline edit the scope cell used, because
+      // its value has to stay inside the defined list — a typo'd "Sheme 2" would
+      // be a row no filter reaches and no def gives a commercial scope to.
+      // The Change-Order red still keys off the SCHEME'S scope via scopeOfRow(),
+      // so the colour keeps meaning the same thing it always did.
+      '<td class="dr-c-scope'+((kids||hasSchemes())?'':ed)+'" data-f="scope" data-t="text">'+
+        (hasSchemes()
+          ? (CB ? schemeSelect(r)
+                : '<span class="dr-scopetag'+(scopeOfRow(r)==='Change Order'?' dr-co':'')+'" title="'+
+                  Fmt.esc(scopeOfRow(r))+'">'+Fmt.esc(schemeLabelOf(r))+'</span>')
+          : '<span class="dr-scopetag'+((r.scope||SCOPES[0])==='Change Order'?' dr-co':'')+'">'+Fmt.esc(r.scope||SCOPES[0])+'</span>')+
+      '</td>' +
       '<td class="dr-nowrap dr-actcol">'+(r.file_url?'<button class="dr-iconbtn" data-view="'+Fmt.esc(r.file_url)+'" title="View approved file">'+ico('eye',15)+'</button>':'')+
         (canWrite && (canBreakOut || kids) ? '<button class="dr-iconbtn" data-sheets="'+r.id+'" title="'+(kids?'Manage sheets':'Break out into one row per sheet')+'">'+ico('columns',15)+'</button>' : '')+
         '<button class="dr-iconbtn" data-edit="'+r.id+'" title="Full editor">'+ico('pencil',15)+'</button>' +
@@ -2349,6 +2633,23 @@ window.DrawingRegister = (function () {
         // the last one lands — its actual approval date. Re-render so the parent
         // row and every group roll-up above it move with it.
         if (isSheet(r)) { await syncParent(r.parent_id); render(); }
+      };
+    });
+
+    // scheme dropdowns (only rendered when the project has schemes)
+    host.querySelectorAll('select[data-scheme]').forEach(function (sel){
+      sel.onclick = function(e){ e.stopPropagation(); };
+      sel.onchange = async function(){
+        var r = rows.find(function(x){return x.id===sel.dataset.scheme;}); if(!r) return;
+        var d = schemeDef(sel.value);
+        // ⚠️ `scope` is written through with the scheme, not left to be derived at
+        // read time. The Excel export and the printed transmittal read the stored
+        // column, so leaving it stale would have the register and the paper it
+        // produces disagree about which drawings are change-order work.
+        var patch = { scheme: sel.value || null };
+        if (d) patch.scope = d.scope;
+        await persistCell(r, patch);
+        render();
       };
     });
 
@@ -2804,7 +3105,7 @@ window.DrawingRegister = (function () {
     // tables, the Excel export and the cross-app Design Development sync (which
     // keys off `discipline`) all keep seeing the name the user sees.
     var lvl = node.level || 1;
-    if (lvl === 1) { UI.toast('The four drawing types are fixed and cannot be renamed','warn'); return; }
+    if (lvl === 1) { UI.toast('The five drawing types are fixed and cannot be renamed','warn'); return; }
     if (lvl === 2) patch.discipline = newVal; else patch.category = newVal;
     var res = await sb().from(TABLE).update(patch).eq('id', nodeId);
     if (res.error){ UI.toast(res.error.message,'error'); return; }
@@ -2844,7 +3145,7 @@ window.DrawingRegister = (function () {
     var node = ds.nodeid ? rowById[ds.nodeid] : null;
     if (!node){ UI.toast('Select a level to delete','warn'); return; }
     if ((node.level || 1) === 1){
-      UI.toast('The four drawing types are fixed — delete the levels inside it instead','warn');
+      UI.toast('The five drawing types are fixed — delete the levels inside it instead','warn');
       return;
     }
     var ids = descendantIds(node);
@@ -2922,7 +3223,7 @@ window.DrawingRegister = (function () {
   // declared in code. Now depth is created by the USER: this adds a child ONE LEVEL
   // BELOW whichever level row is selected, to any depth, and the level's meaning is
   // whatever that project named it in drawing_level_defs.
-  // The four top levels are fixed and cannot be added to (migration 0017).
+  // The five top levels are fixed and cannot be added to (0017 + 0018).
   async function addLevel(){
     if (!pid){ UI.toast('Select a project first','warn'); return; }
     var ctx = selCtx || {};
@@ -2979,6 +3280,16 @@ window.DrawingRegister = (function () {
       phase:ctx.phase||'', discipline:ctx.discipline||'', category:ctx.category||'',
       title:'', status:'Submitted', no_of_sheets:1, approved_sheets:0, approved_pct:0,
       submissions:[], dwg_number:code, drawing_no:code, drawing_code:code, sort_order:nextOrder() };
+    // ⚠️ A quick-add lands in the scheme you are LOOKING AT. Without this, adding a
+    // drawing while filtered to Scheme 2 creates a scheme-less row that the very
+    // filter you are under then hides — it would read as the add having failed.
+    // With no scheme filter set, the first scheme is the default, matching the
+    // importer's rule that scheme 1 is the main contract.
+    if (hasSchemes()) {
+      var sch = filters.scheme || schemeDefs[0].name;
+      data.scheme = sch;
+      var sd = schemeDef(sch); if (sd) data.scope = sd.scope;
+    }
     var res=await sb().from(TABLE).insert(data); if(res.error){ UI.toast(res.error.message,'error'); return; }
     // expand the target group so the new row is visible (buildModel keys the
     // phase by phase-text OR 'Ungrouped' — mirror that, else the row is hidden)
@@ -3157,7 +3468,11 @@ window.DrawingRegister = (function () {
         // The sheet inherits its place in the tree so every existing grouping,
         // filter and export keeps working on it unchanged.
         phase: p.phase || '', discipline: p.discipline || '', category: (p.category || '').trim(),
-        scope: p.scope || SCOPES[0],
+        // A sheet is part of its drawing, so it is in the same scheme by
+        // definition — without this the Scheme filter would hide the sheets of
+        // every drawing it shows.
+        scheme: p.scheme || null,
+        scope: scopeOfRow(p),
         title: 'Sheet ' + (have + i), status: appr ? seed.ok : seed.rest,
         no_of_sheets: 1, approved_sheets: appr ? 1 : 0, approved_pct: appr ? 1 : 0, submissions: [],
         // The sheets shared one approval date as a single row; carrying it down
@@ -3882,7 +4197,18 @@ window.DrawingRegister = (function () {
       '<div class="dr-grid3">' +
         field('Drawing type','<select class="pd-select" id="f-phase">'+opt(phaseOptions(r.phase), r.phase, true)+'</select>') +
         field('Category','<input class="pd-input" id="f-cat" value="'+Fmt.esc(r.category)+'" placeholder="Floor Plan">') +
-        field('Scope','<select class="pd-select" id="f-scope">'+opt(SCOPES, r.scope||SCOPES[0])+'</select>') +
+        // The Scheme select REPLACES the Scope one where schemes exist — the
+        // scheme carries the scope, and offering both invites a row whose scope
+        // contradicts its scheme's.
+        (hasSchemes()
+          ? field('Scheme','<select class="pd-select" id="f-scheme">'+
+              opt(schemeDefs.map(function (s){ return s.name; })
+                    .concat(r.scheme && !schemeDef(r.scheme) ? [r.scheme] : []),
+                  // A NEW drawing defaults to the scheme currently being viewed —
+                  // same rule as the quick-add, and for the same reason: a
+                  // scheme-less row is invisible under the filter that created it.
+                  r.scheme || (isNew ? (filters.scheme || schemeDefs[0].name) : ''), true)+'</select>')
+          : field('Scope','<select class="pd-select" id="f-scope">'+opt(SCOPES, r.scope||SCOPES[0])+'</select>')) +
       '</div>' +
       field('Sheet title','<input class="pd-input" id="f-title" value="'+Fmt.esc(r.title)+'">') +
       field('Description','<textarea class="pd-textarea" id="f-desc" rows="2">'+Fmt.esc(r.description)+'</textarea>') +
@@ -4042,7 +4368,6 @@ window.DrawingRegister = (function () {
         dwg_number:   m.el.querySelector('#f-num').value.trim(),
         phase:        m.el.querySelector('#f-phase').value,
         category:     m.el.querySelector('#f-cat').value.trim(),
-        scope:        m.el.querySelector('#f-scope').value || SCOPES[0],
         title:        m.el.querySelector('#f-title').value.trim(),
         description:  m.el.querySelector('#f-desc').value.trim(),
         no_of_sheets: sheets,
@@ -4058,6 +4383,17 @@ window.DrawingRegister = (function () {
         remarks:      m.el.querySelector('#f-rem').value.trim(),
         updated_at:   new Date().toISOString()
       };
+      // Scheme and scope are ONE control: the form shows whichever the project
+      // actually has (see the Sheet section above). The scheme carries the scope,
+      // so picking a scheme writes both and they cannot end up contradicting.
+      var schEl = m.el.querySelector('#f-scheme');
+      if (schEl) {
+        data.scheme = schEl.value || null;
+        var schD = schemeDef(schEl.value);
+        if (schD) data.scope = schD.scope;
+      } else {
+        data.scope = m.el.querySelector('#f-scope').value || SCOPES[0];
+      }
       // ⚠️ On a SINGLE-sheet row the status IS the approval state — the same rule
       // persistCell applies to an inline edit. Without it here, approving a sheet
       // through the full editor left `approved_sheets` at whatever the (untouched)
@@ -4372,6 +4708,8 @@ window.DrawingRegister = (function () {
             issue_date:(subs[0]&&subs[0].actual)||null,
             due_date:(subs[0]&&subs[0].planned)||null,
             remarks:p.remarks,
+            // Only drawings carry a scheme — see nodeRec()'s note.
+            scheme: ((p.node_kind || 'drawing') === 'drawing' && p.scheme) || null,
             scope: p.scope || SCOPES[0],
             level: p.level || null,
             // path keys, stripped before the write — see the two-pass insert below
@@ -4449,13 +4787,40 @@ window.DrawingRegister = (function () {
           go.textContent = 'Importing '+Math.min(i+200,drawRecs.length)+' / '+drawRecs.length+'…';
           await new Promise(function (r){ setTimeout(r, 0); });
         }
+        // ---- schemes the workbook declared ---------------------------------
+        // ⚠️ The defs are created HERE rather than left to migration 0019, which
+        // only ever runs once: a workbook importing a Scheme 3 next year would
+        // otherwise write a scheme onto 400 drawings that nothing defines — no
+        // filter option, no commercial scope, and a Scheme column showing a value
+        // the Schemes dialog does not list.
+        // Insert-only and per name, so re-importing never clobbers a scope or a
+        // "superseded" the Technical Officer has since set by hand.
+        var wbSchemes = {};
+        drawRecs.forEach(function (r){ if (r.scheme) wbSchemes[r.scheme] = 1; });
+        var newSchemes = Object.keys(wbSchemes).filter(function (n){ return !schemeDef(n); }).sort();
+        if (newSchemes.length) {
+          var base = schemeDefs.length;
+          var sres = await sb().from(SCHEME_TABLE).insert(newSchemes.map(function (n, k){
+            var no = parseInt(String(n).replace(/\D+/g, ''), 10);
+            return { project_id: pid, created_by: uid, name: n,
+                     // First scheme = main contract, every later one a change
+                     // order — the same rule foldTopLevel() applies to the header.
+                     scope: (no > 1 ? 'Change Order' : SCOPES[0]),
+                     superseded: false, sort_order: base + k + 1,
+                     notes: 'Created by an Excel import from the "(Scheme n)" block headers.' };
+          }));
+          // A missing table (0019 not run yet) must not fail the import — the rows
+          // are already in, and the scheme text on them stays readable.
+          if (sres.error) UI.toast('Imported, but the schemes could not be saved: '+sres.error.message, 'warn');
+        }
         var dc = drawRecs.length;
-        UI.toast('Imported '+dc+' drawings into '+nodeRecs.length+' levels', 'ok');
+        UI.toast('Imported '+dc+' drawings into '+nodeRecs.length+' levels' +
+                 (newSchemes.length ? ' · schemes: '+newSchemes.join(', ') : ''), 'ok');
         // Anything the fold could not classify becomes a top level of its own, which
         // is a data question — say so rather than letting it pass unnoticed.
         var un = parsed && parsed._unclassifiedTops;
         if (un && un.length) {
-          UI.toast('Not one of the four drawing types, imported under its own name: '+un.join(', ')+
+          UI.toast('Not one of the five drawing types, imported under its own name: '+un.join(', ')+
                    ' — reclassify or rename these blocks in the workbook.', 'warn');
         }
         m.close(); load({ reset:true });
@@ -4632,7 +4997,7 @@ window.DrawingRegister = (function () {
     function intOf(v){ var n=parseInt(String(v).replace(/[^\d.-]/g,''),10); return isFinite(n)?n:0; }
 
     var recs = [];
-    var cur = { phase:'', discipline:'', category:'', building:'', responsible:'', scope:'', fold:'' };
+    var cur = { phase:'', discipline:'', category:'', building:'', responsible:'', scheme:'', scope:'', fold:'' };
     // Anchored so only genuine phase-block titles match — NOT category/sheet
     // titles that merely contain "schematic"/"construction" (e.g. "Schematic
     // Diagrams", "Construction Notes", "Neighbor's As-Built and Crack Mapping").
@@ -4932,8 +5297,10 @@ window.DrawingRegister = (function () {
         planned_approval: dateOf(cell(row, ci.papp)),
         actual_approval: dateOf(cell(row, ci.aapp)),
         remarks: [String(cell(row, ci.rem)).trim(), fileRef ? ('File: '+fileRef) : ''].filter(Boolean).join(' · '),
-        // Main Contract vs Change Order comes from the block header ("(Scheme 2)"),
-        // not from anything on the drawing's own row.
+        // The scheme, and the Main Contract / Change Order that follows from it,
+        // come from the block header ("(Scheme 2)") — never from anything on the
+        // drawing's own row.
+        scheme: cur.scheme || '',
         scope: cur.scope || SCOPES[0],
         // The level this drawing belongs to, as a path key openImport() resolves to a
         // real parent_id once the nodes have ids. Deepest populated tier wins.
@@ -5006,6 +5373,7 @@ window.DrawingRegister = (function () {
     function setTopLevel(text){
       var f = foldTopLevel(text);
       cur.phase = f.top || f.raw;          // unclassifiable keeps its own name
+      cur.scheme = f.scheme;
       cur.scope = f.scope;
       cur.fold  = f.fold;
       cur.building = f.fold || '';         // a folded block IS the level-2 node
@@ -5030,6 +5398,12 @@ window.DrawingRegister = (function () {
         phase: cur.phase,
         discipline: kind==='phase' ? '' : (kind==='building' ? name : cur.discipline),
         category: kind==='category' ? cur.category : '',
+        // ⚠️ NO `scheme` HERE, deliberately (migration 0019 enforces the same
+        // rule in SQL). A level belongs to every scheme; only a drawing belongs to
+        // one. The three "Schematic Design" blocks fold to ONE level node and
+        // first-occurrence wins the dedupe below, so a scheme on a node would
+        // label the merged Schematic Design level "Scheme 1" and be wrong for two
+        // thirds of what hangs under it.
         scope: cur.scope || SCOPES[0],
         dwg_number: code||'', drawing_no: code||'', drawing_code: code||'',
         title: name,
@@ -5119,11 +5493,12 @@ window.DrawingRegister = (function () {
   // register would otherwise be shaped one way by a backfill and another way by the
   // next import of the same workbook.
   //
-  // Returns { top, scope, fold }:
-  //   top   — one of the five fixed top levels
-  //   scope — 'Change Order' when the sheet said "(Scheme 2)", else 'Main Contract'
-  //   fold  — a level-2 name when the block is one of the two that fold under For
-  //           Construction (Combined Services / As-Built), else ''
+  // Returns { top, scheme, scope, fold }:
+  //   top    — one of the five fixed top levels
+  //   scheme — the named scheme from "(Scheme n)", e.g. 'Scheme 2', else ''
+  //   scope  — 'Change Order' for any scheme past the first, else 'Main Contract'
+  //   fold   — a level-2 name when the block is one of the two that fold under For
+  //            Construction (Combined Services / As-Built), else ''
   // ⚠️ TEMPORARY WORKS NO LONGER FOLDS (2026-08-20, migration 0018). It returns a top
   // level with an EMPTY fold, so the importer emits it as a level-1 block and its
   // disciplines land at level 2 like any other top level's. Re-adding it to the fold
@@ -5131,19 +5506,40 @@ window.DrawingRegister = (function () {
   // A block we cannot classify keeps its own name and is reported, never guessed at.
   function foldTopLevel(s){
     var t = norm(s);
-    // "(Scheme 2)" is a change order, not a design stage. Read it BEFORE the fold,
-    // because the fold discards the suffix.
-    var scope = /scheme\s*2/.test(t) ? 'Change Order' : 'Main Contract';
+    // "(Scheme n)" is a design variant, not a design stage. Read it BEFORE the
+    // fold, because the fold discards the suffix.
+    // ⚠️ WAS `/scheme\s*2/ ? 'Change Order' : 'Main Contract'` and nothing else,
+    // which is why a Scheme 3 had nowhere to go — it landed in the same
+    // "Change Order" bucket as Scheme 2 and became indistinguishable from it. The
+    // NUMBER is captured now (migration 0019), and the scope is derived from it:
+    // the first scheme is the main contract, every later one is a change order.
+    var sm = /scheme\s*(\d+)/.exec(t);
+    var schemeNo = sm ? parseInt(sm[1], 10) : 0;
+    var scheme = schemeNo ? 'Scheme ' + schemeNo : '';
+    var scope = schemeNo > 1 ? 'Change Order' : 'Main Contract';
+    // ⚠️ REAL BUG FOUND WHILE VERIFYING, and it is exactly the case this feature
+    // is about. The Schematic test below matches the bare word "scheme", so ANY
+    // block carrying a "(Scheme n)" suffix classified as Schematic Design —
+    // "FOR CONSTRUCTION DRAWINGS (Scheme 3)" imported as SD, silently, before it
+    // ever reached a top-level check of its own. SLN101 only puts the suffix on
+    // its SD blocks, which is the only reason it never bit; a change-order
+    // redesign puts it on FCD/TWD/ISD too. So the PARENTHESISED qualifier is
+    // stripped before classifying.
+    // ⚠️ Only the parenthesised form. A header that is nothing but "Scheme 1"
+    // still has to reach the `scheme` alternative below and land in Schematic
+    // Design — stripping that would leave an empty string and an unclassifiable
+    // block.
+    var ct = t.replace(/\(\s*scheme\s*\d+\s*\)/g, ' ').replace(/\s+/g, ' ').trim() || t;
     var top = '', fold = '';
-    if (/concept|\becd\b/.test(t)) top = 'Concept Design';
-    else if (/individual\s*service|\bisd\b/.test(t)) top = 'Individual Services Drawings';
-    else if (/temporary\s*works|\btw[dg]\b/.test(t)) top = 'Temporary Works Drawings';
-    else if (/combined\s*service|\bcsd\b/.test(t))   { top = 'For Construction Drawings'; fold = 'Combined Services'; }
-    else if (/as[- ]?built|\babd\b/.test(t))          { top = 'For Construction Drawings'; fold = 'As-Built'; }
+    if (/concept|\becd\b/.test(ct)) top = 'Concept Design';
+    else if (/individual\s*service|\bisd\b/.test(ct)) top = 'Individual Services Drawings';
+    else if (/temporary\s*works|\btw[dg]\b/.test(ct)) top = 'Temporary Works Drawings';
+    else if (/combined\s*service|\bcsd\b/.test(ct))   { top = 'For Construction Drawings'; fold = 'Combined Services'; }
+    else if (/as[- ]?built|\babd\b/.test(ct))          { top = 'For Construction Drawings'; fold = 'As-Built'; }
     // SD1 and SD2 merge completely — the LOD distinction is deliberately dropped.
-    else if (/schematic|scheme|\bsd[12]?\b/.test(t)) top = 'Schematic Design';
-    else if (/construction|contract|\bfcd\b/.test(t)) top = 'For Construction Drawings';
-    return { top: top, scope: scope, fold: fold,
+    else if (/schematic|scheme|\bsd[12]?\b/.test(ct)) top = 'Schematic Design';
+    else if (/construction|contract|\bfcd\b/.test(ct)) top = 'For Construction Drawings';
+    return { top: top, scheme: scheme, scope: scope, fold: fold,
              raw: String(s||'').replace(/\s+/g,' ').trim() };
   }
 
@@ -5167,6 +5563,10 @@ window.DrawingRegister = (function () {
     var scopeParts = [];
     if (filters.phase) scopeParts.push('Drawing type: ' + filters.phase);
     if (filters.discipline) scopeParts.push('Discipline: ' + disciplineName(filters.discipline));
+    // A transmittal covering only one scheme has to SAY so — it is the difference
+    // between submitting the main-contract set and submitting a change order.
+    if (filters.scheme) scopeParts.push('Scheme: ' + filters.scheme);
+    if (filters.scope) scopeParts.push('Scope: ' + filters.scope);
     if (filters.status) scopeParts.push('Status: ' + filters.status);
     if (filters.search) scopeParts.push('Search: "' + filters.search + '"');
     var scopeLine = scopeParts.length ? scopeParts.join(' · ') : 'All drawings';
@@ -5210,13 +5610,17 @@ window.DrawingRegister = (function () {
     // It matches none of them, so the export stays round-trippable; a re-import
     // brings the sheets back as flat drawings, since the importer has no per-sheet
     // level of its own.
-    var aoa = [['Drawing Code','Sheet Of','Type of Drawing','Discipline','Category','Scope','Sheet Title','Description',
+    // ⚠️ "Scheme" is a SEPARATE column from "Scope", unlike the grid, which shows
+    // one or the other. A spreadsheet is where the two are pivoted against each
+    // other, and neither header matches any importer probe, so the export stays
+    // round-trippable.
+    var aoa = [['Drawing Code','Sheet Of','Type of Drawing','Discipline','Category','Scheme','Scope','Sheet Title','Description',
       'Rev','Status','No. of Sheets','Approved Sheets','Approved %',
       'Latest Planned Sub.','Latest Actual Sub.','Planned Approval','Actual Approval','Responsible','Remarks']];
     var put = function (r, parent) {
       aoa.push([r.drawing_code||r.drawing_no,
         parent ? (parent.drawing_code||parent.drawing_no||'') : '',
-        r.phase, r.discipline, r.category, r.scope||SCOPES[0], r.title, r.description,
+        r.phase, r.discipline, r.category, r.scheme||'', scopeOfRow(r), r.title, r.description,
         r.revision, r.status, num(r.no_of_sheets), num(r.approved_sheets),
         Math.round(pctApproved(r)*100)+'%',
         latestSub(r,'planned')||'', latestSub(r,'actual')||'',

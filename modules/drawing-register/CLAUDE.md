@@ -1,5 +1,99 @@
 # Module: drawing-register
 
+## Schemes: the Technical Officer can add them, and they are NOT level 1 (2026-08-20) — fmlozano
+The ask was *"double check there should be an option for the technical officer to add schemes at the
+level-1 level — the register has Schematic Design Schemes 1 and 2"*. **Half of it is right and is now
+built; the other half is refused, with the reason recorded here.**
+
+### ⚠️ A SCHEME IS NOT A LEVEL. It sits ABOVE level 1, as a lens.
+The SLN101 workbook's own `Dwg Registry` sheet writes exactly three Schematic Design blocks —
+`SCHEMATIC DESIGN 1 (Scheme 1)` (row 9), `SCHEMATIC DESIGN 2 (Scheme 1)` (row 236),
+`SCHEMATIC DESIGN 2 (Scheme 2)` (row 651). The scheme is a **parenthetical qualifier ON a drawing
+type**, not a sibling of one. Three things break if it becomes a level-1 node:
+1. **`TOP_LEVELS` stops being a closed set of five.** `phaseIdx()`, the Overview's five-lane Gantt,
+   `groupAgg('phase')`, `TRACK_MODE` and migrations 0017/0018's classifier all key off that closure.
+2. **A scheme CUTS ACROSS drawing types.** SLN101's Scheme 2 touches only Schematic Design today, but
+   a change-order redesign produces FCD, TWD and ISD in Scheme 2 as well. Scheme-as-level-1 duplicates
+   the whole five-type tree per scheme, and "Schematic Design progress" stops being one number.
+3. ⚠️ **`openImport()` dedupes level nodes BY PATH KEY.** Putting the scheme in that key re-splits the
+   three Schematic Design blocks into three level-1 rows — *the exact regression that dedupe exists to
+   prevent* (two of them permanently empty). Verified: the path key still contains no scheme text.
+
+### What WAS missing, and is what got built
+**There was no way to create a scheme at all.** Schemes only ever arrived from an import, which read
+`(Scheme 2)` into the two-valued `scope` column — so a **Scheme 3 had nowhere to go**: it collapsed
+into the same `Change Order` bucket as Scheme 2 and became indistinguishable from it.
+- **`drawing_scheme_defs`** (migration `../../migrations/0019-drawing-schemes.sql`, **USER RUNS IT**)
+  — per project: `name`, `scope`, `superseded`, `sort_order`, `notes`. Mirrors `drawing_level_defs`
+  deliberately: same shape, same RLS, same **deploy-order tolerance** (a missing table means "no
+  schemes", never a failure to render).
+- **`drawing_register.scheme`** text, denormalised like `phase`. **Schemes… in the `+ Level` menu** is
+  the editor: add / rename / set commercial scope / mark superseded / remove.
+- The importer parses the **number** now (`/scheme\s*(\d+)/`) and derives the scope from it — scheme 1
+  is the main contract, every later one a change order — then **creates any missing defs itself**,
+  insert-only, so a Scheme 3 imported next year is not left as text nothing defines. 0019 only ever
+  runs once; the import path is what keeps this true afterwards.
+- Registry: a **Scheme filter** (hidden until the project has one — most registers have a single
+  design and the bar already carries four controls), the Scope column **renders the scheme** and its
+  header reads `Scheme` when there is one, and a **scheme `<select>`** per row.
+- The transmittal top sheet names the scheme it covers — it is the difference between submitting the
+  main-contract set and submitting a change order. Excel export gets **Scheme *and* Scope as separate
+  columns** (a spreadsheet is where you pivot one against the other); neither header matches an
+  importer probe, so the export stays round-trippable.
+
+### ⚠️ `scope` IS NOT REPLACED, and a scheme write always writes both
+Scheme (*which variant*) and scope (*Main Contract / Change Order*) are two facts that are merely 1:1
+in SLN101. The export and the printed transmittal read the **stored `scope`**, so leaving it to be
+derived at read time would have the register and the paper it produces disagree about which drawings
+are change-order work. Picking a scheme therefore writes `scope` through with it, and renaming a
+scheme **carries the drawings' denormalised text along** — same reasoning as `renameGroup()`.
+
+### ⚠️ STRUCTURAL NODES CARRY NO SCHEME
+Enforced in `nodeRec()` *and* in 0019's section 3c. A level belongs to every scheme; only a drawing
+belongs to one. The three SD blocks fold to **one** level node and first-occurrence wins the dedupe,
+so a scheme on a node would label the merged Schematic Design level "Scheme 1" and be wrong for two
+thirds of what hangs under it. Correspondingly the filter matches a row's **own** scheme and never
+inherits one down the tree — inheriting would make every drawing under a level match every scheme.
+
+### ⚠️ REAL BUG FOUND WHILE VERIFYING: `(Scheme n)` on a non-SD block imported as Schematic Design
+`foldTopLevel()`'s Schematic test matches the bare word **`scheme`**, so **any** block carrying a
+`(Scheme n)` suffix classified as Schematic Design before it ever reached a top-level check of its
+own — `FOR CONSTRUCTION DRAWINGS (Scheme 3)` imported as SD, silently. SLN101 only puts the suffix on
+its SD blocks, which is the only reason this never bit; a change-order redesign puts it on FCD/TWD/ISD
+too, which is precisely what this feature makes possible. The **parenthesised** qualifier is now
+stripped before classifying. ⚠️ Only the parenthesised form — a header that is nothing but `Scheme 1`
+must still reach the `scheme` alternative and land in Schematic Design.
+
+### Also fixed in passing
+- **Saved views never stored `scope`** although `applyFilterValues()` has always restored it, so a
+  view saved under a scope filter reopened showing every scope — silently wider than the view its
+  author named. It now saves `scheme` and `scope` both.
+- Five user-facing strings still said **"the four drawing types"**; it has been five since 0018.
+
+### Verification
+**49 checks** (`scheme_test.js`) against functions **sliced by name out of the shipped `module.js`**,
+never reimplemented — plus the **real SLN101 workbook run end-to-end through `_parseWorkbook()` and
+diffed against `HEAD`**:
+
+| | before | after |
+|---|---|---|
+| records | 1492 = 1075 drawings + 417 levels | **identical** |
+| per top level | FCD 184 · ISD 283 · SD 600 · TWD 8 | **identical** |
+| per scope | Change Order 178 · Main Contract 897 | **identical** |
+| level-1 rows pre-dedupe | SD ×3, others ×1 | **identical** |
+| per scheme | — | Scheme 1 **422** · Scheme 2 **178** · none 475 |
+
+422 + 178 = 600 = the whole Schematic Design set, so the schemes land exactly where the workbook puts
+them; 178 matches the Change Order count exactly; **0 level nodes carry a scheme** and **0 drawings
+have a scheme that disagrees with their scope**. The change is purely additive on the real workbook.
+The unit checks cover the three real block headers, the Scheme-3 bug above, Scheme 10 parsing as ten
+rather than one, TWD still being a top level with an empty fold, Combined Services / As-Built still
+folding, the path-key regression guard, both `scopeOfRow` fallbacks, a `<select>` that still offers a
+value no def matches (the same data-loss guard `phaseOptions()` exists for), a hostile scheme name
+escaped, and a scheme-less row correctly excluded by a scheme filter.
+⚠️ **Not verified signed-in** — no live login here. **Migration 0019 is NOT run; the user runs it.**
+- Assets `module.css/js?v=20260820c`.
+
 ## Temporary Works is a top level again; the Overview is now one level-1 Gantt (2026-08-20) — fmlozano
 Two asks in one prompt: **undo the Temporary Works fold**, and **strip the Overview back to a Gantt**.
 
