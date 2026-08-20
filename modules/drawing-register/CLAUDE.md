@@ -1,5 +1,92 @@
 # Module: drawing-register
 
+## Temporary Works is a top level again; the Overview is now one level-1 Gantt (2026-08-20) — fmlozano
+Two asks in one prompt: **undo the Temporary Works fold**, and **strip the Overview back to a Gantt**.
+
+### The top level is a closed set of FIVE, not four
+`Concept Design · Schematic Design · For Construction Drawings · Temporary Works Drawings ·
+Individual Services Drawings`. 0017 folded Temporary Works in as a level-2 child of For Construction
+on the reasoning that it is "produced FOR construction"; that is reversed — temporary works are a
+distinct deliverable with their own designer, review cycle and programme, and burying them a rung
+down hid that on every roll-up.
+- ⚠️ **Combined Services and As-Built STAY folded** under For Construction. They are coordination and
+  record artefacts *of* the FCD set, which temporary works are not. **Only Temporary Works was
+  promoted** — do not generalise 0018 into "unfold everything 0017 folded".
+- ⚠️ **Two places had to change together, and they must stay in agreement:** the importer's
+  `foldTopLevel()` (which now returns `Temporary Works Drawings` with an **empty** `fold`) and
+  **migration `../../migrations/0018-temporary-works-top-level.sql` (USER RUNS IT)**. If only one
+  moves, a backfill shapes the register one way and the next import of the same workbook the other.
+- **0018 promotes the fold node IN PLACE**, never recreates it — 0017's 3f converted the original
+  Temporary Works *phase* node into the level-2 node, so that one row still carries the whole
+  sub-tree; a fresh node plus re-parenting would orphan everything under it.
+- ⚠️ **`phase` is denormalised onto every descendant and is rewritten with the promotion.** The client
+  walks `parent_id`, but `groupAgg()`, the filter bar, the importer's dedupe and the export all still
+  read the text column — leaving the sub-tree saying "For Construction Drawings" would file those
+  drawings in the FCD bucket on all four surfaces while the tree drew them under Temporary Works.
+- 0018 also **clears the `discipline = 'Temporary Works'`** that 0017's 3f wrote onto fold-member
+  drawings; with the fold node now the top level itself, that text would render as a phantom trade.
+- Level depth is re-derived by the same recursive CTE 0017 uses, so `level` cannot disagree with
+  `parent_id`. `track_mode` is re-asserted by 0017's rule: **TWD is binary**, only ISD is sheets.
+
+### The Overview is one thing now: a Gantt of the level-1s
+Removed from the page: the KPI card strip, **Drawings by Status**, **Open Items by Aging**, **Drawings
+by Period — Planned vs Actual Approval**, **Progress by Drawing Type**, **Progress by Trade**, and the
+**Design Progress / Individual Services tabs**. What remains is the eyebrow
+`DESIGN PROGRESS — CONCEPT / SD / FCD / TWD / ISD` over `overviewGanttHTML()`.
+- ⚠️ **The tabs are gone, and that is why this no longer splits the register.** `dashScope` existed
+  because one HEADLINE NUMBER cannot describe two counting bases — summing 6 design units and 83 ISD
+  sheets into one "Total sheets" figure described neither. That constraint **died with the KPI
+  cards**: a Gantt gives each top level its own lane, bar and percentage, so the bases sit side by
+  side and are never added together. Each lane's percent still comes from `rollupFor(node, list)`,
+  which reads that level's own `track_mode`. **Do not reintroduce a cross-level total here.**
+  Each lane labels its basis (`N / M units` vs `N / M sheets`) so the mix is stated, not hidden.
+- ⚠️ **LEVEL 1 ONLY, deliberately.** The Registry already carries the full drilled-down Gantt beside
+  its grid; this answers a different question and sublevels would turn a five-lane summary back into
+  the thing you go to the Registry for.
+- ⚠️ **Geometry is PERCENT, not pixels** — which is what makes it responsive with no resize observer,
+  no zoom control and no scroll sync, unlike the Registry's px-per-day Gantt (that one needs pixels
+  only because its lanes must align with grid rows scrolling beside it). Do not give the track a
+  fixed width. The tick unit (month / quarter / year) is chosen from the span so the ruler never
+  degenerates into unreadable repetition.
+- Roots are **merged by name** exactly as `buildModel()` merges them, so a register imported before
+  the importer deduped its blocks (SLN101 writes three "Schematic Design" blocks) shows one lane per
+  type rather than three, two of them empty.
+- A level with no dates still renders a lane **and says why** ("No planned or actual dates yet" /
+  "No drawings yet") — a blank track reads as a rendering failure, where a dateless level is a real,
+  actionable state. Lane labels drill into the Registry filtered to that drawing type.
+
+### ⚠️ `OV_LEGACY_CARDS` is a switch, not dead code
+The five removed cards live in `legacyOverviewCardsHTML()` / `wireLegacyOverviewCards()` behind
+`var OV_LEGACY_CARDS = false`. The **period chart** is the one the user specifically asked to keep
+available "in case management wants it back"; the other four ride the same flag because restoring any
+one of them is then a one-line change, where deleting them outright would make it a rewrite. Every
+helper involved (`donutSVG` / `agingBarSVG` / `progTable` / `renderPeriodChart`) is still defined and
+the **Backlog uses three of them regardless**, so they cannot silently rot.
+
+### ⚠️ REAL BUG FOUND AND FIXED WHILE VERIFYING: `gDate()` had no inverse
+`gDate()` deliberately builds **local** midnight (UTC midnight is the previous evening in UTC+8 and
+shifts every bar a day west). The Registry's Gantt then reads spans back with
+`sp.s.toISOString().slice(0,10)` for its tooltips — **a local constructor paired with a UTC getter**,
+the exact trap this module's importer notes already document twice, so every Gantt tooltip in Manila
+names a date one day early. New `gIso(d)` formats local Y-M-D and the Overview Gantt uses it.
+⚠️ **`registryGanttHTML()` still has the original `toISOString()` call and is still off by one** —
+left alone deliberately (out of scope for this pass), one-line fix, `gIso` is right there.
+
+### Verification
+**28 checks** (`ovg_test.js`) against functions **sliced by name out of the shipped `module.js`**,
+never reimplemented: the five-value vocabulary and that the eyebrow renders exactly
+`Concept / SD / FCD / TWD / ISD`; one lane per top level in TOP_LEVELS order; **the regression this
+change exists to prevent — no TWD drawing files under FCD**; a TWD lane collecting a directly-held
+drawing as well as its sub-tree; ISD staying sheet-weighted while TWD is unit-weighted; three
+same-named roots merging to one lane; span start/finish; every `left`/`width` inside 0–100 with no bar
+overflowing its track and no pixel geometry; dateless and empty levels explaining themselves; an
+empty register rendering nothing rather than throwing; a hostile level name escaped; and
+`gIso(gDate(d)) === d` for four dates, pinning the bug above.
+⚠️ **Not verified signed-in** — no live login here. The migration is **not run**; the user runs it.
+⚠️ Two harness assertions failed at first and **the harness was wrong, not the code** — they compared
+`gDate()` output with `toISOString()`. That is what surfaced the real tooltip bug.
+- Assets `module.css/js?v=20260820a`.
+
 ## SLN101 import was structurally wrong — read the tree from the workbook, not from names (2026-08-19) — fmlozano
 User imported the real SLN101 register and reported: three "Schematic Design" rows, **no ISD at all**,
 and wrong levelling under For Construction. All three reproduced against the real workbook (still

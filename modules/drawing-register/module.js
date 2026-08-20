@@ -140,13 +140,18 @@ window.DrawingRegister = (function () {
   // This list supplies the DISPLAY ORDER and the default dropdown options; a value
   // migration 0017 could not classify still appears (ranked last) rather than being
   // dropped, so nothing is ever hidden by not being in the vocabulary.
-  // ⚠️ CLOSED SET OF FOUR (2026-08-18, migration 0017). Was seven, which mixed
-  // design stages with document types. What changed and why it must not drift back:
+  // ⚠️ CLOSED SET OF FIVE (2026-08-20, migration 0018). Was four under 0017, and
+  // seven before that. What changed and why it must not drift back:
   //   • Schematic Design 1 and 2 (LOD 100 / LOD 200) MERGE COMPLETELY — one level.
   //     The workbook's own registry carries both; the merge is deliberate.
-  //   • Temporary Works, Combined Services and As-Built are NO LONGER top levels.
-  //     They are level-2 children of For Construction Drawings, because they are
-  //     produced FOR construction rather than being stages of their own.
+  //   • ⚠️ TEMPORARY WORKS DRAWINGS IS A TOP LEVEL AGAIN. 0017 folded it in as a
+  //     level-2 child of For Construction Drawings; migration 0018 UNDOES that by
+  //     explicit instruction (2026-08-20). Temporary works are a distinct
+  //     engineering deliverable with their own designer, review cycle and
+  //     programme — burying them one rung down hid that. Do not re-fold them.
+  //   • Combined Services and As-Built REMAIN folded as level-2 children of For
+  //     Construction Drawings — they are coordination/record artefacts of the FCD
+  //     set, which temporary works are not. Only Temporary Works was promoted.
   //   • "(Scheme 1)" / "(Scheme 2)" were never stages either — they are `scope`
   //     (Main Contract / Change Order). Scheme 1 is RETAINED even when superseded,
   //     because it is the baseline a change order's cost and time impact is
@@ -155,7 +160,12 @@ window.DrawingRegister = (function () {
   // every register for no functional gain), but every user-facing label reads
   // "drawing type", and TOP_LEVELS is the display order.
   var TOP_LEVELS = ['Concept Design','Schematic Design',
-                    'For Construction Drawings','Individual Services Drawings'];
+                    'For Construction Drawings','Temporary Works Drawings',
+                    'Individual Services Drawings'];
+  // Short labels for the Overview's section eyebrow, in TOP_LEVELS order.
+  var TOP_LEVEL_ABBR = { 'Concept Design':'Concept', 'Schematic Design':'SD',
+    'For Construction Drawings':'FCD', 'Temporary Works Drawings':'TWD',
+    'Individual Services Drawings':'ISD' };
   // Progress semantics per top level, and they cannot share a percentage:
   //   'sheets' → a leaf carries many sheets with PARTIAL credit (ISD: the real
   //              workbook has "Rebar Cutting List" at 83 sheets / 50 approved).
@@ -452,7 +462,11 @@ window.DrawingRegister = (function () {
   function saveUI(){
     try {
       localStorage.setItem(uiKey('view'), view);
-      localStorage.setItem(uiKey('dashscope'), dashScope);
+      // ⚠️ `dashscope` is deliberately no longer written or read (2026-08-20). It chose
+      // between the Design and Individual Services Overview tabs, and those tabs are
+      // gone. A stale key from before is simply ignored — persistence fails SILENTLY, so
+      // a leftover read of a variable that no longer exists is the kind of thing that
+      // only surfaces as "my settings stopped saving" months later.
       localStorage.setItem(uiKey('regsplit'), regSplit ? '1' : '0');
       localStorage.setItem(uiKey('regsplitw'), String(REG_SPLIT_W));
       localStorage.setItem(uiKey('gunit'), ganttUnit);
@@ -472,8 +486,6 @@ window.DrawingRegister = (function () {
       else if (v==='gantt'){ view='registry'; regSplit=true; }
       else if (v==='register') view='registry';   // legacy value migration
       else if (v==='progress') view='overview';    // legacy value migration
-      var ds = localStorage.getItem(uiKey('dashscope'));
-      if (ds==='design'||ds==='isd') dashScope=ds;
       var rs = localStorage.getItem(uiKey('regsplit'));
       if (rs==='0'||rs==='1') regSplit = rs==='1';
       var rw = parseFloat(localStorage.getItem(uiKey('regsplitw')));
@@ -2079,6 +2091,17 @@ window.DrawingRegister = (function () {
   }
   function gDays(a, b){ return Math.round((b - a) / 86400000); }
   function gAddDays(d, n){ var x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; }
+  // ⚠️ The INVERSE of gDate(), and it must be — `gDate` deliberately builds LOCAL
+  // midnight, so reading it back with `toISOString().slice(0,10)` returns the previous
+  // day everywhere east of Greenwich (Manila is UTC+8). That is the same class of bug
+  // this module's importer notes document twice; never mix a local constructor with a
+  // UTC getter. Used for tooltip text, which is the only place a span's Date is
+  // rendered back as a date string.
+  function gIso(d){
+    return d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0');
+  }
 
   // The bar for one row: a level uses its subtree roll-up, a drawing its own dates.
   function ganttSpan(item){
@@ -3204,34 +3227,158 @@ window.DrawingRegister = (function () {
   }
 
   // ----------------------------------------------------- progress dashboard --
-  // ⚠️ TWO DASHBOARDS, because one number cannot describe both halves of this
-  // register. Concept / Schematic / For Construction are counted in 0-or-100 UNITS;
-  // Individual Services Drawings are counted in SHEETS with partial credit. Summing
-  // 6 design units and 83 ISD sheets into one "Total sheets" headline produced a
-  // figure that described neither — it was the register's most prominent KPI and it
-  // was meaningless. `dashScope` picks which half is on screen.
-  var dashScope = 'design';                    // design | isd
-  function isIsdRow(r){ return modeOf(r) === 'sheets'; }
-  function dashRows(){
-    var all = drawingRows();
-    return dashScope === 'isd' ? all.filter(isIsdRow) : all.filter(function (r){ return !isIsdRow(r); });
-  }
-  function dashSwitch(){
-    var nD = drawingRows().filter(function (r){ return !isIsdRow(r); }).length;
-    var nI = drawingRows().filter(isIsdRow).length;
-    return '<div class="dr-dashtabs">' +
-      '<button class="dr-dashtab' + (dashScope==='design'?' active':'') + '" data-dash="design">' +
-        'Design Progress <span class="dr-dashn">' + nD + '</span></button>' +
-      '<button class="dr-dashtab' + (dashScope==='isd'?' active':'') + '" data-dash="isd">' +
-        'Individual Services <span class="dr-dashn">' + nI + '</span></button>' +
-      '<span class="dr-dashnote dr-mut">' + (dashScope==='isd'
-        ? 'Counted in sheets — a drawing here carries many, with partial credit.'
-        : 'Counted in 0-or-100 units — a drawing here is approved or it is not.') + '</span></div>';
-  }
-  function wireDashTabs(host){
-    host.querySelectorAll('[data-dash]').forEach(function (b){
-      b.onclick = function (){ dashScope = b.dataset.dash; saveUI(); render(); };
+  // ⚠️ REBUILT 2026-08-20. The Overview was a KPI strip plus five cards (status donut,
+  // aging bar, period chart, Progress by Drawing Type, Progress by Trade) split across
+  // two tabs. Every one of those is gone from the page by explicit instruction, and the
+  // Overview is now ONE THING: a Gantt of the level-1 drawing types.
+  //
+  // ⚠️ THE TABS ARE GONE, AND THAT IS WHY THIS NO LONGER SPLITS THE REGISTER.
+  // `dashScope` used to show Design (Concept/Schematic/FCD, counted in 0-or-100 units)
+  // and Individual Services (counted in sheets with partial credit) on separate tabs,
+  // because one HEADLINE NUMBER cannot describe both — summing 6 design units and 83 ISD
+  // sheets into one "Total sheets" figure described neither. That constraint died with
+  // the KPI cards: a Gantt shows ONE LANE PER TOP LEVEL, each with its own bar and its
+  // own percentage, so the two bases sit side by side without ever being added together.
+  // ⚠️ Each lane's percent still comes from `rollupFor(node, list)`, which reads that
+  // level's own `track_mode` — so an ISD lane is sheet-weighted and an FCD lane is
+  // unit-weighted, exactly as before. Do NOT reintroduce a cross-level total here.
+  var OV_LEGACY_CARDS = false;   // see legacyOverviewCardsHTML() — a switch, not dead code
+
+  // ---- The Overview's level-1 Gantt ----------------------------------------
+  // ⚠️ LEVEL 1 ONLY, deliberately. The Registry already carries the full drilled-down
+  // Gantt beside its grid; this one answers a different question — "where does each
+  // drawing type stand against its programme" — and adding sublevels would turn a
+  // five-lane summary back into the thing you go to the Registry for.
+  //
+  // Roots are merged BY NAME the same way buildModel() merges them, so a register
+  // imported before the importer deduped its blocks (SLN101 writes three "Schematic
+  // Design" blocks) shows ONE lane per type rather than three, two of them empty.
+  function overviewTopGroups(){
+    var roots = structuralNodes().filter(function (n){ return !n.parent_id; });
+    roots.sort(function (a, b){
+      var ra = topRank(nodeName(a)), rb = topRank(nodeName(b));
+      return ra - rb || (a.sort_order || 0) - (b.sort_order || 0)
+             || nodeName(a).localeCompare(nodeName(b));
     });
+    var out = [], byName = {};
+    roots.forEach(function (n){
+      var nm = nodeName(n);
+      if (!byName[nm]) { byName[nm] = { name: nm, nodes: [] }; out.push(byName[nm]); }
+      byName[nm].nodes.push(n);
+    });
+    // Every drawing at or below each node — UNFILTERED, because the Overview is an
+    // aggregate for the whole project and never reads the Registry's filter bar.
+    return out.map(function (grp){
+      var list = [];
+      grp.nodes.forEach(function (n){ list = list.concat(allDrawsUnder(n)); });
+      return { name: grp.name, node: grp.nodes[0], list: list };
+    });
+  }
+  // The same walk buildModel's collect() does, minus the filter predicate.
+  function allDrawsUnder(node){
+    var out = (drawsOf[node.id] || []).slice();
+    (nodeKidsOf[node.id] || []).forEach(function (c){ out = out.concat(allDrawsUnder(c)); });
+    return out;
+  }
+
+  // ⚠️ PERCENTAGE GEOMETRY, not pixels. The Registry's Gantt is px-per-day because it
+  // has to line its lanes up with grid rows scrolling beside it; this one stands alone
+  // in a card, so positioning by percent makes it responsive for free and removes the
+  // scroll-sync, zoom and resize machinery entirely.
+  function overviewGanttHTML(){
+    var groups = overviewTopGroups();
+    if (!groups.length) return '';
+
+    var spans = groups.map(function (g){
+      return ganttSpan({ type:'group', node:g.node, list:g.list });
+    });
+    var min = null, max = null;
+    spans.forEach(function (sp){
+      if (!sp) return;
+      if (!min || sp.s < min) min = sp.s;
+      if (!max || sp.f > max) max = sp.f;
+    });
+    // A register with no dates yet still draws a REAL ruler around today rather than an
+    // empty-state card — same stance as the Registry's Gantt. The lanes are furniture
+    // the user is about to fill, not a result that failed to arrive.
+    var today = new Date(); today.setHours(0,0,0,0);
+    if (!min || !max) { min = gAddDays(today, -60); max = gAddDays(today, 120); }
+    else {
+      var pad = Math.max(7, Math.round(gDays(min, max) * 0.04));
+      min = gAddDays(min, -pad); max = gAddDays(max, pad);
+    }
+    var total = Math.max(1, gDays(min, max));
+    var pctOf = function (d){ return Math.max(0, Math.min(100, gDays(min, d) / total * 100)); };
+
+    // Tick unit chosen from the span so the ruler never degenerates into unreadable
+    // repetition — the same reason the Registry's date header is two tiers.
+    var months = total / 30.4;
+    var step = months <= 20 ? 1 : (months <= 72 ? 3 : 12);
+    var ticks = '', c = new Date(min.getFullYear(), Math.floor(min.getMonth()/step)*step, 1);
+    while (c <= max) {
+      var next = new Date(c.getFullYear(), c.getMonth() + step, 1);
+      var from = c < min ? min : c, to = next > max ? max : next;
+      var w = (gDays(from, to) / total) * 100;
+      if (w > 0) {
+        var lbl = step === 12 ? String(c.getFullYear())
+                : step === 3  ? ('Q' + (Math.floor(c.getMonth()/3)+1) + ' ' + String(c.getFullYear()).slice(2))
+                : (c.toLocaleString('en', { month:'short' }) +
+                   ((c.getMonth() === 0 || from.getTime() === min.getTime())
+                      ? ' ' + String(c.getFullYear()).slice(2) : ''));
+        ticks += '<div class="dr-ovg-tick" style="left:' + pctOf(from) + '%;width:' + w + '%">' +
+                 (w > 3.5 ? Fmt.esc(lbl) : '') + '</div>';
+      }
+      c = next;
+    }
+    var todayLine = (today >= min && today <= max)
+      ? '<div class="dr-ovg-today" style="left:' + pctOf(today) + '%" title="Today"></div>' : '';
+
+    var lanes = groups.map(function (g, i){
+      var sp = spans[i];
+      var roll = rollupFor(g.node, g.list);
+      // ⚠️ Label the basis, never hide it. A lane counted in sheets and a lane counted in
+      // 0-or-100 units sit in the same chart; saying which is which is what makes that
+      // honest instead of a silent apples-to-oranges comparison.
+      var unitTxt = roll.ap + ' / ' + roll.tot + (roll.unitMode ? ' units' : ' sheets');
+      var bar = '';
+      if (sp) {
+        var x = pctOf(sp.s), w = Math.max(pctOf(sp.f) - x, 0.6);
+        bar = '<div class="dr-ovg-bar' + (sp.pct >= 100 ? ' dr-ovg-done' : '') +
+          '" style="left:' + x + '%;width:' + w + '%" title="' +
+          Fmt.esc(g.name + ' · ' + Fmt.date(gIso(sp.s)) + ' → ' +
+                  Fmt.date(gIso(sp.f)) + ' · ' + sp.pct + '% · ' + unitTxt +
+                  (sp.actual ? ' · approved ' + Fmt.date(sp.actual) : '')) + '">' +
+          '<div class="dr-ovg-fill" style="width:' + sp.pct + '%"></div>' +
+          '<span class="dr-ovg-pct">' + sp.pct + '%</span></div>';
+      } else {
+        // ⚠️ Say WHY the lane is empty. A blank track reads as a rendering failure; a
+        // level that holds drawings but no dates is a real, actionable state.
+        bar = '<div class="dr-ovg-nodate">' +
+          (g.list.length ? 'No planned or actual dates yet' : 'No drawings yet') + '</div>';
+      }
+      // The label drills into the Registry filtered to this drawing type, so the Overview
+      // is a way in rather than a dead end.
+      return '<div class="dr-ovg-row">' +
+        '<div class="dr-ovg-lbl dr-kpi-drill"' +
+          drillAttr('registry', { phase: g.name }) +
+          ' title="' + Fmt.esc('Show ' + g.name + ' in the Registry') + '">' +
+          '<span class="dr-ovg-name">' + Fmt.esc(g.name) + '</span>' +
+          '<span class="dr-ovg-sub">' + g.list.length + ' dwg · ' + Fmt.esc(unitTxt) + '</span>' +
+        '</div>' +
+        '<div class="dr-ovg-track">' + bar + '</div>' +
+      '</div>';
+    }).join('');
+
+    return '<div class="pd-card dr-ovg">' +
+      '<h3 class="dr-h3">Design Progress by Drawing Type</h3>' +
+      '<div class="dr-ovg-grid">' +
+        '<div class="dr-ovg-row dr-ovg-head">' +
+          '<div class="dr-ovg-lbl"></div>' +
+          '<div class="dr-ovg-track dr-ovg-ruler">' + ticks + todayLine + '</div>' +
+        '</div>' +
+        lanes +
+      '</div>' +
+    '</div>';
   }
 
   function renderProgress() {
@@ -3239,73 +3386,39 @@ window.DrawingRegister = (function () {
     // The dashboard has nothing to plot with no drawings, so here the guidance card IS
     // the right answer — unlike the Registry, where the grid itself is the thing to show.
     if (!drawingRows().length) { host.innerHTML = emptyHTML(); wireEmpty(); return; }
-    var draws = dashRows();
-    var isIsd = dashScope === 'isd';
+    var draws = drawingRows();
 
-    // ⚠️ `approvedOf()`, not the raw approved_sheets column — the same
-    // two-definitions-of-one-number bug fixed in groupAgg(). Approving a sheet through
-    // the full editor leaves the parent's stored counter stale.
-    var totSheets=0, subSheets=0, apSheets=0;
-    draws.forEach(function (r){
-      var t=num(r.no_of_sheets)||0, a=approvedOf(r);
-      totSheets+=t; apSheets+=a;
-      if (latestSub(r,'actual')) subSheets+=t;
-    });
-    // The design half is measured in units, so its headline counts DRAWINGS approved,
-    // not sheets — otherwise it silently reintroduces partial credit.
-    var apUnits = draws.filter(function (r){ return isApprovedStatus(statusOf(r.status)); }).length;
-    var balance = isIsd ? (totSheets - apSheets) : (draws.length - apUnits);
-    var pct = isIsd ? (totSheets ? Math.round(apSheets/totSheets*100) : 0)
-                    : (draws.length ? Math.round(apUnits/draws.length*100) : 0);
+    // The eyebrow names the top levels in TOP_LEVELS order, BUILT FROM THE LIST rather
+    // than typed out — adding or renaming a top level must not leave this heading lying.
+    var eyebrow = 'Design Progress — ' + TOP_LEVELS.map(function (t){
+      return TOP_LEVEL_ABBR[t] || t;
+    }).join(' / ');
 
-    if (!draws.length) {
-      host.innerHTML = dashSwitch() +
-        '<div class="pd-card dr-gantt-empty">' + ico('info', 22) +
-        '<div><strong>Nothing in this half of the register yet.</strong><div class="dr-mut">' +
-        (isIsd ? 'Individual Services Drawings appear here once that drawing type has drawings.'
-               : 'Concept, Schematic and For Construction drawings appear here.') +
-        '</div></div></div>';
-      wireDashTabs(host);
-      return;
-    }
+    host.innerHTML =
+      '<div class="dr-kpi-section"><div class="dr-kpi-seclabel">' + Fmt.esc(eyebrow) + '</div></div>' +
+      overviewGanttHTML() +
+      legacyOverviewCardsHTML(draws);
 
-    // Only "Drawings" is a row set — the rest count sheets or units, so drilling them
-    // would land on a list whose row count doesn't match the number clicked.
-    // ⚠️ SIX CARDS ON BOTH HALVES, deliberately. The two halves measure different things
-    // (units vs sheets), and they used to show five cards and six — so an auto-fit grid
-    // wrapped them differently, the last row stretched to fill, and the cards came out
-    // visibly different widths. Switching halves also reflowed the whole row. Equal counts
-    // plus an explicit column count (see kpiSection) means one uniform row either way.
-    var kpis = dashSwitch() + kpiSection(isIsd ? 'Individual Services Drawings' : 'Design Progress — Concept / Schematic / For Construction',
-      kpi(draws.length, 'Drawings', '', { view:'registry', patch:{}, tip:'Show these in the Registry' }) +
-      (isIsd
-        ? kpi(totSheets, 'Total sheets') + kpi(subSheets, 'Submitted') + kpi(apSheets, 'Approved sheets')
-        // The design half's denominator is the drawing count, so it is shown rather than
-        // left implicit — a bare "Approved 12" invites the question "of what?".
-        : kpi(draws.length, 'Tracked') + kpi(subSheets ? subSheets : 0, 'Submitted') + kpi(apUnits, 'Approved')) +
-      kpi(pct+'%', isIsd ? 'Approved % (sheets)' : 'Approved % (drawings)', 'ok') +
-      kpi(balance, isIsd ? 'Balance (sheets)' : 'Balance (drawings)', balance>0?'warn':''), 6);
+    wireDrills(host);            // the Gantt's lane labels (and the legacy cards, if on)
+    if (OV_LEGACY_CARDS) wireLegacyOverviewCards(draws);
+  }
 
-    // by phase
-    // Both tables are scoped to the half on screen, so their totals reconcile with the
-    // KPI row above them. "By Drawing Type" is only meaningful on the design half —
-    // the ISD half is a single type by definition, so it shows its levels instead.
+  // ---- RETIRED OVERVIEW CARDS ----------------------------------------------
+  // ⚠️ OFF BY DEFAULT AND THAT IS THE POINT — this is not dead code, it is a switch.
+  // Removed from the Overview on 2026-08-20: Drawings by Status, Open Items by Aging,
+  // the "Drawings by Period — Planned vs Actual Approval" chart, Progress by Drawing
+  // Type and Progress by Trade. The period chart is the one specifically asked to be
+  // KEPT AVAILABLE in case management wants it back; the other four ride the same flag
+  // because restoring any one of them is then the same one-line change, where leaving
+  // them deleted would make it a rewrite.
+  //
+  // To restore: set OV_LEGACY_CARDS = true. Nothing else needs touching — every helper
+  // below (donutSVG / agingBarSVG / progTable / renderPeriodChart) is still defined, and
+  // the Backlog uses three of them regardless, so they cannot silently rot.
+  function legacyOverviewCardsHTML(draws){
+    if (!OV_LEGACY_CARDS) return '';
     var byDisc = groupAgg('discipline', draws);
-    var host2 = '<div class="dr-dash-grid">' +
-      (isIsd
-        ? progTable('Progress by Level', groupAgg('category', draws),
-                    Object.keys(groupAgg('category', draws)).sort(), 'category')
-        : progTable('Progress by Drawing Type', groupAgg('phase', draws), TOP_LEVELS, 'phase')) +
-      progTable('Progress by Trade', byDisc, Object.keys(DISCIPLINES).map(disciplineName), 'discipline') +
-    '</div>';
-
-    var drawPeriod = function () {
-      renderPeriodChart(document.getElementById('dr-period-chart'),
-        periodScaled(periodBuckets(periodMode, draws), periodValueMode, draws.length), periodValueMode);
-    };
-
-    host.innerHTML = kpis +
-      '<div class="dr-dash-grid">' +
+    return '<div class="dr-dash-grid">' +
         '<div class="pd-card"><h3 class="dr-h3">Drawings by Status</h3>' + donutSVG(statusCounts(draws)) + '</div>' +
         '<div class="pd-card"><h3 class="dr-h3">Open Items by Aging</h3>' + agingBarSVG(agingBuckets(draws)) + '</div>' +
       '</div>' +
@@ -3314,18 +3427,22 @@ window.DrawingRegister = (function () {
           '<button class="dr-seg-btn active" data-mode="month">Monthly</button>' +
           '<button class="dr-seg-btn" data-mode="quarter">Quarterly</button>' +
         '</span>' +
-        // ONE button that switches, not two mutually-exclusive buttons — it
-        // shows the mode you'd switch TO, matching the user's "switchable toggle".
         '<button class="dr-seg dr-segswitch" id="dr-pervalmode" type="button" ' +
           'title="Switch between counts and % of all drawings">#</button>' +
         '</h3>' +
         '<div id="dr-period-chart" class="dr-pc-wrap"></div>' +
       '</div>' +
-      host2;
-
+      '<div class="dr-dash-grid">' +
+        progTable('Progress by Drawing Type', groupAgg('phase', draws), TOP_LEVELS, 'phase') +
+        progTable('Progress by Trade', byDisc, Object.keys(DISCIPLINES).map(disciplineName), 'discipline') +
+      '</div>';
+  }
+  function wireLegacyOverviewCards(draws){
+    var drawPeriod = function () {
+      renderPeriodChart(document.getElementById('dr-period-chart'),
+        periodScaled(periodBuckets(periodMode, draws), periodValueMode, draws.length), periodValueMode);
+    };
     drawPeriod();
-    wireDashTabs(host);
-    wireDrills(host);   // KPI card, donut legend, aging bar + legend, prog tables
     var pm = document.getElementById('dr-permode');
     if (pm) pm.querySelectorAll('.dr-seg-btn').forEach(function (b){
       b.onclick = function (){
@@ -4663,12 +4780,12 @@ window.DrawingRegister = (function () {
         if (indentCol < leafCol) {
           if (off <= 0) {
             // A top-level header. Anything in this column that does NOT fold to one of the
-            // four is left to the heuristics rather than invented as a fifth top level.
+            // five is left to the heuristics rather than invented as a sixth top level.
             if (foldTopLevel(indentText).top) {
               setTopLevel(indentText);
               recs.push(nodeRec('phase', noCode, cur.phase));
-              // Temporary Works / Combined Services / As-Built are level-2 nodes under For
-              // Construction now, not top levels of their own.
+              // Combined Services / As-Built are level-2 nodes under For Construction;
+              // Temporary Works is a top level of its own again (0018).
               if (cur.fold) recs.push(nodeRec('discipline', '', cur.fold));
               continue;
             }
@@ -4684,9 +4801,9 @@ window.DrawingRegister = (function () {
               var rpC = String(cell(row, ci.resp)).trim(); if (rpC) cur.responsible = rpC;
               recs.push(nodeRec('discipline', noCode, indentText)); continue;
             }
-            // ⚠️ Inside a FOLDED block the fold already occupies level 2 (Temporary Works
-            // under For Construction), so TEMFACIL / SAFETY / EQUIPMENT are its children —
-            // level 3 — not siblings. Treating them as buildings would overwrite the fold
+            // ⚠️ Inside a FOLDED block the fold already occupies level 2 (Combined Services
+            // or As-Built under For Construction), so that block's own trades are its children
+            // — level 3 — not siblings. Treating them as buildings would overwrite the fold
             // and lose the very level the fold exists to create.
             if (cur.fold) {
               cur.discipline = indentText; cur.category = '';
@@ -4730,8 +4847,8 @@ window.DrawingRegister = (function () {
       if (!lvl && indentText && PHASE_RE.test(indentText) && !desc && !dwgno) {
         setTopLevel(indentText);
         recs.push(nodeRec('phase', noCode, cur.phase));
-        // Temporary Works / Combined Services / As-Built are no longer top levels —
-        // they arrive as a level-2 node under For Construction Drawings.
+        // Combined Services / As-Built are not top levels — they arrive as a level-2 node
+        // under For Construction Drawings. Temporary Works is a top level again (0018).
         if (cur.fold) recs.push(nodeRec('discipline', '', cur.fold));
         continue;
       }
@@ -4883,7 +5000,7 @@ window.DrawingRegister = (function () {
     }
 
     // A structural node (phase/discipline/category) carrying its code + rollup.
-    // Fold a top-level header onto `cur`. Keeps the four-value vocabulary and the
+    // Fold a top-level header onto `cur`. Keeps the five-value vocabulary and the
     // Main Contract / Change Order split in ONE place, shared with the heuristic and
     // the explicit "Row Level" paths so they cannot disagree.
     function setTopLevel(text){
@@ -5003,10 +5120,14 @@ window.DrawingRegister = (function () {
   // next import of the same workbook.
   //
   // Returns { top, scope, fold }:
-  //   top   — one of the four fixed top levels
+  //   top   — one of the five fixed top levels
   //   scope — 'Change Order' when the sheet said "(Scheme 2)", else 'Main Contract'
-  //   fold  — a level-2 name when the block is one of the three that fold under For
-  //           Construction (Temporary Works / Combined Services / As-Built), else ''
+  //   fold  — a level-2 name when the block is one of the two that fold under For
+  //           Construction (Combined Services / As-Built), else ''
+  // ⚠️ TEMPORARY WORKS NO LONGER FOLDS (2026-08-20, migration 0018). It returns a top
+  // level with an EMPTY fold, so the importer emits it as a level-1 block and its
+  // disciplines land at level 2 like any other top level's. Re-adding it to the fold
+  // list would silently re-bury it on the next import of the same workbook.
   // A block we cannot classify keeps its own name and is reported, never guessed at.
   function foldTopLevel(s){
     var t = norm(s);
@@ -5016,7 +5137,7 @@ window.DrawingRegister = (function () {
     var top = '', fold = '';
     if (/concept|\becd\b/.test(t)) top = 'Concept Design';
     else if (/individual\s*service|\bisd\b/.test(t)) top = 'Individual Services Drawings';
-    else if (/temporary\s*works|\btw[dg]\b/.test(t)) { top = 'For Construction Drawings'; fold = 'Temporary Works'; }
+    else if (/temporary\s*works|\btw[dg]\b/.test(t)) top = 'Temporary Works Drawings';
     else if (/combined\s*service|\bcsd\b/.test(t))   { top = 'For Construction Drawings'; fold = 'Combined Services'; }
     else if (/as[- ]?built|\babd\b/.test(t))          { top = 'For Construction Drawings'; fold = 'As-Built'; }
     // SD1 and SD2 merge completely — the LOD distinction is deliberately dropped.

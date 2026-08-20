@@ -801,21 +801,62 @@ html.pd-dark td.dr-cell-rng { box-shadow: inset 0 0 0 9999px rgba(255,122,110,.2
 .dr-g-sum .dr-g-pct { line-height:12px; }
 .dr-gantt-empty { display:flex; gap:14px; align-items:flex-start; padding:26px; color:var(--pd-mut); }
 
-/* ---- Split dashboards (Design vs Individual Services) --------------------
-   The two halves are counted differently (0-or-100 units vs sheets with partial
-   credit), so they get their own dashboard rather than one blended headline. */
-.dr-dashtabs { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
-.dr-dashtab { display:inline-flex; align-items:center; gap:7px; padding:7px 13px;
-  border:1px solid var(--pd-line); border-radius:999px; background:var(--pd-card);
-  color:var(--pd-ink); font-size:var(--dr-fs-sm); font-weight:600; cursor:pointer; }
-.dr-dashtab:hover { border-color:var(--pd-red-mid); background:var(--pd-red-light); }
-.dr-dashtab.active { background:var(--pd-red); border-color:var(--pd-red); color:#fff; }
-.dr-dashn { display:inline-block; min-width:20px; padding:0 5px; border-radius:9px;
-  background:var(--pd-bg); color:var(--pd-mut); font-size:var(--dr-fs-micro); font-weight:700;
-  text-align:center; }
-.dr-dashtab.active .dr-dashn { background:rgba(255,255,255,.22); color:#fff; }
-.dr-dashnote { flex:1 1 240px; min-width:0; font-size:var(--dr-fs-micro); font-style:italic; }
-@media (max-width:700px){ .dr-dashnote { flex-basis:100%; } }
+/* ---- Overview: the level-1 Gantt ----------------------------------------
+   ⚠️ REPLACED the split Design / Individual Services dashboard tabs (.dr-dashtabs
+   et al, removed 2026-08-20) along with the KPI strip they sat above. Those tabs
+   existed because ONE HEADLINE NUMBER cannot describe two counting bases; a Gantt
+   gives each top level its own lane, bar and percentage, so the bases never merge
+   and the tabs had nothing left to separate.
+
+   ⚠️ GEOMETRY IS PERCENT, NOT PIXELS — the JS emits left/width as % of the whole
+   timeline. That is what makes this responsive with no resize observer, no zoom
+   control and no scroll sync, unlike the Registry's px-per-day Gantt (which needs
+   pixels only because its lanes must align with grid rows scrolling beside it).
+   Do not introduce a fixed track width here. */
+/* ⚠️ Clips the today line, which is drawn 2000px tall on purpose (see below). Without
+   this it paints straight through every card beneath it. */
+.dr-ovg-grid { display:flex; flex-direction:column; overflow:hidden; }
+.dr-ovg-row { display:grid; grid-template-columns:var(--dr-ovg-lbl,230px) minmax(0,1fr);
+  align-items:stretch; gap:14px; }
+.dr-ovg-row + .dr-ovg-row { border-top:1px solid var(--pd-line); }
+.dr-ovg-lbl { display:flex; flex-direction:column; justify-content:center; gap:2px;
+  padding:11px 0; min-width:0; }
+.dr-ovg-name { font-size:var(--dr-fs-base); font-weight:700; color:var(--pd-ink);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dr-ovg-sub { font-size:var(--dr-fs-micro); color:var(--pd-muted); white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+/* The track is the positioning context every bar, tick and the today line measure
+   against, so it must stay `relative` and full-height for the row. */
+.dr-ovg-track { position:relative; min-width:0; }
+/* Faint vertical grid, so a bar can be read against the ruler without a straightedge. */
+.dr-ovg-row:not(.dr-ovg-head) .dr-ovg-track { border-left:1px solid var(--pd-line); }
+.dr-ovg-head { border-bottom:1px solid var(--pd-line); }
+.dr-ovg-ruler { height:26px; }
+.dr-ovg-tick { position:absolute; top:0; bottom:0; border-left:1px solid var(--pd-line);
+  padding:7px 0 0 5px; font-size:var(--dr-fs-micro); color:var(--pd-muted);
+  white-space:nowrap; overflow:hidden; }
+/* ⚠️ The today line spans the WHOLE chart, not just the ruler — it is drawn inside the
+   ruler track and bleeds down with a tall negative bottom, because the alternative
+   (repeating it in every lane) makes it 6 separate dashes that never quite line up. */
+.dr-ovg-today { position:absolute; top:0; bottom:-2000px; width:0;
+  border-left:2px dashed var(--pd-red); z-index:2; pointer-events:none; }
+.dr-ovg-bar { position:absolute; top:50%; transform:translateY(-50%); height:20px;
+  border-radius:4px; background:var(--pd-line); overflow:hidden; }
+.dr-ovg-fill { position:absolute; left:0; top:0; bottom:0; background:var(--pd-red);
+  border-radius:4px 0 0 4px; }
+.dr-ovg-done .dr-ovg-fill { background:#2E7D32; }
+.dr-ovg-pct { position:absolute; right:5px; top:0; line-height:20px;
+  font-size:var(--dr-fs-micro); font-weight:700; color:var(--pd-ink); }
+.dr-ovg-nodate { position:absolute; top:50%; transform:translateY(-50%); left:8px;
+  font-size:var(--dr-fs-micro); font-style:italic; color:var(--pd-muted); }
+.dr-ovg-row:not(.dr-ovg-head) { min-height:46px; }
+/* The lane label drills into the Registry, so it carries the same affordance the KPI
+   cards use (.dr-kpi-drill supplies cursor/role styling). */
+.dr-ovg-lbl.dr-kpi-drill:hover .dr-ovg-name { color:var(--pd-red); }
+@media (max-width:700px){
+  .dr-ovg-row { --dr-ovg-lbl:130px; gap:8px; }
+  .dr-ovg-sub { display:none; }
+}
 
 /* ============================================================================
    REGISTRY SPLIT — grid pane | divider | Gantt pane

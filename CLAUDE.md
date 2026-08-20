@@ -71,11 +71,15 @@ Planners schema changed and the projection needs looking at.
 
 ## Modules
 
-- `modules/drawing-register/` — live. ⚠️ **Four FIXED top levels; levels 2..N are
-  generic and named per project** (`drawing_level_defs`, migration `0017`), with two
-  incompatible progress bases — 0-or-100 tracking units for CD/SD/FCD, partial sheet
-  credit for ISD. Read `modules/drawing-register/CLAUDE.md` before touching its tree
-  or its percentages.
+- `modules/drawing-register/` — live. ⚠️ **FIVE fixed top levels; levels 2..N are
+  generic and named per project** (`drawing_level_defs`, migrations `0017` + `0018`),
+  with two incompatible progress bases — 0-or-100 tracking units for CD/SD/FCD/TWD,
+  partial sheet credit for ISD. Read `modules/drawing-register/CLAUDE.md` before
+  touching its tree or its percentages.
+  ⚠️ **`Temporary Works Drawings` is a TOP LEVEL, not a child of For Construction.**
+  0017 folded it under FCD; **0018 undid that by explicit instruction** (2026-08-20).
+  Combined Services and As-Built remain folded. The importer's `foldTopLevel()` and
+  0018 must agree, or a re-import reshapes the register the other way.
   ⚠️ **planning-app has a TWIN `drawing_register` table and a twin module** (the
   pre-cutover original). Engineering App is authoritative; planning-app's Design
   Development roll-up still reads its own local copy, so the two disagree until the
