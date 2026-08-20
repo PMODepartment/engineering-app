@@ -1,5 +1,62 @@
 # Module: drawing-register
 
+## The Registry grid pane could not scroll in split mode (2026-08-20) — fmlozano
+Reported as *"the grid pane is not scrollable, which makes the other drawings not seen when the level
+1s or level 2s are expanded"*. Real, and it was the **default** Registry view (`regSplit = true`).
+
+### The cause was a specificity collision, not a missing `overflow`
+Two rules set the grid card's height cap, and the wrong one won:
+
+| rule | specificity | |
+|---|---|---|
+| `.dr-tablecard { max-height:calc(100vh - 205px) }` | (0,1,0) | the pre-`dr-fit` fallback |
+| `.dr-split-grid .dr-tablecard { max-height:var(--dr-split-h) }` | (0,2,0) | the split's own cap |
+| `body.dr-fit .dr-tablecard { … max-height:none }` | **(0,2,1)** | **wins** |
+
+⚠️ **A media query adds no specificity**, so being inside `@media (min-width:701px)` did not stop the
+`dr-fit` rule beating the split's. The card therefore had **no cap in split mode** — and nothing in
+its ancestor chain bounded it either: `.dr-split` was `flex:0 1 auto` with `align-items:flex-start`,
+so both it and `.dr-split-grid` sized to **content**. The card grew to the full height of the
+register, `.pd-main { overflow:hidden }` clipped everything past the viewport, and **no scrollbar
+existed anywhere to reach it**. Measured at 1280×720 with 400 rows: card 12054px tall, bottom edge at
+12209px against a 720px window, `scrollTop = 500` → stays 0.
+
+- ⚠️ **The Gantt pane hid the symptom instead of sharing it.** `.dr-rg-scroll`'s cap is `(0,1,0)` and
+  `body.dr-fit` never touched it, so the Gantt scrolled while the grid could not. That also silently
+  broke the two-pane coupling: `wireRegSplit()` makes the **grid the master**, and a master that
+  cannot scroll drives nothing.
+- ⚠️ **Fixed by giving the chain a bounded flex context, not a third `max-height`.** A second guessed
+  cap is what created the collision in the first place; `body.dr-fit` exists precisely to stop
+  guessing the chrome height. `.dr-split` becomes `flex:1 1 auto; min-height:0`, `.dr-split-grid` a
+  `min-height:0` flex column, and the card `flex:1 1 auto; min-height:0` at **(0,3,1)** — above both
+  older rules, so neither can come back and clip it.
+- ⚠️ **`align-items:stretch` and `--dr-split-h:none` are scoped to `@media (min-width:901px)`, NOT
+  merged into the 701px block.** Below 901px the split stacks, where zeroing `.dr-split-gantt`'s
+  `min-height` would collapse the 260px floor that keeps it readable. Stretch also makes the two panes
+  equal-height *always*; `flex-start` only did so while both happened to overflow.
+- ⚠️ **The print block had to undo these too**, by the convention its own comment already states
+  (`body.dr-fit`'s `height:100dvh; overflow:hidden` is still live during print, because a page box is
+  usually over 701px wide). The undo restores the split's print layout *exactly* as it was —
+  `display:block` on the pane, `flex-start` on the split — rather than improving it unverified.
+
+### Verification
+**17 checks** (`scroll_test.js`) in headless Chromium against the **shipped `module.css` and
+`dashboard.css`**, on the real DOM shape `renderRegister()` emits, at three viewports:
+
+| | before | after |
+|---|---|---|
+| 1440×900 grid card | 12054 / 12054 — **no scroll** | 721 / 12054 — **scrolls** |
+| 1280×720 grid card | 12054 / 12054, bottom at 12209px | 542 / 12054, bottom at 697px |
+| 820×900 stacked | 6054 / 6054 — **no scroll** | 470 / 6054 — **scrolls** |
+| pane scroll ranges | grid **0** vs Gantt 11530 | grid 11512 vs Gantt **11512** |
+
+The harness **fails 14 of 17 on the pre-fix CSS**, which is what makes it a regression test rather
+than a description of the fix. It also checks the page itself never scrolls (the shell stays fixed),
+the card's bottom edge stays inside the window, and that driving the master to `scrollTop = 500`
+actually moves it and the follower with it.
+⚠️ **Not verified signed-in** — measured on the real stylesheets, not a live session.
+- Assets `module.css/js?v=20260820d`.
+
 ## Schemes: the Technical Officer can add them, and they are NOT level 1 (2026-08-20) — fmlozano
 The ask was *"double check there should be an option for the technical officer to add schemes at the
 level-1 level — the register has Schematic Design Schemes 1 and 2"*. **Half of it is right and is now

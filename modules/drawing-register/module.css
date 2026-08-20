@@ -505,6 +505,44 @@ html.pd-dark {
   body.dr-fit .pd-main { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
   body.dr-fit #dr-view { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
   body.dr-fit .dr-tablecard { flex:1 1 auto; min-height:0; max-height:none; }
+
+  /* ⚠️ THE SPLIT NEEDS ITS OWN BOUNDED BOX, and this is the bug that proves it.
+     The rule above is `body.dr-fit .dr-tablecard` (0,2,1); the split's own cap is
+     `.dr-split-grid .dr-tablecard` (0,2,0) — so in SPLIT MODE, which is the
+     Registry's DEFAULT (`regSplit = true`), the higher-specificity `max-height:
+     none` won and the grid card lost its cap. Nothing else bounded it either:
+     `.dr-split` was `flex:0 1 auto` with `align-items:flex-start`, so both it and
+     the pane inside it sized to CONTENT. The card grew to the full height of the
+     register, `.pd-main { overflow:hidden }` clipped whatever ran past the
+     viewport, and there was no scrollbar anywhere to reach it — so expanding a
+     level 1 or level 2 put its drawings somewhere unreachable.
+     ⚠️ The Gantt pane HID the symptom rather than sharing it: `.dr-rg-scroll`'s
+     cap is (0,1,0) and `body.dr-fit` never touched it, so the Gantt scrolled
+     while the grid could not — which also broke the two-pane scroll coupling,
+     because wireRegSplit() makes the grid the master and a master that cannot
+     scroll drives nothing.
+     The fix is the same one `body.dr-fit` already makes everywhere else: give the
+     chain a real bounded flex context instead of a second guessed max-height. */
+  body.dr-fit .dr-split { flex:1 1 auto; min-height:0; }
+  body.dr-fit .dr-split-grid { min-height:0; display:flex; flex-direction:column; }
+  /* (0,3,1) — deliberately above BOTH rules above, so neither the fallback cap
+     nor the split's own `--dr-split-h` guess can come back and clip it. */
+  body.dr-fit .dr-split-grid .dr-tablecard { flex:1 1 auto; min-height:0; max-height:none; }
+}
+/* Side-by-side only. ⚠️ NOT merged into the block above: below 901px the split
+   stacks (`flex-direction:column` further down), where `align-items:stretch` is
+   already the effective behaviour and where zeroing the Gantt pane's min-height
+   would collapse the 260px floor that keeps it readable when stacked. */
+@media (min-width: 901px) {
+  /* Both panes the full height of the split, so their tops AND bottoms line up —
+     `align-items:flex-start` only ever made them equal while both overflowed. */
+  body.dr-fit .dr-split { align-items:stretch; }
+  body.dr-fit .dr-split-gantt { min-height:0; }
+  /* The panes now share the MEASURED height, so the `calc(100vh - 250px)` guess
+     has to go here too — it is the same hardcoded-chrome assumption `body.dr-fit`
+     exists to replace, and leaving it would cap the Gantt a few rows short of the
+     grid it is meant to line up with. */
+  body.dr-fit .dr-rg-scroll { max-height:none; }
 }
 .dr-grid { font-size:var(--dr-fs-sm); min-width:1080px; }   /* so narrow viewports scroll (and the frozen Code+Title stay put) */
 .dr-grid thead th { padding:7px 8px; font-size:var(--dr-fs-micro); }
@@ -713,6 +751,15 @@ td.dr-editing { padding:2px 4px; }
   body.dr-fit .pd-app, body.dr-fit .pd-content, body.dr-fit .pd-main, body.dr-fit #dr-view {
     height:auto !important; min-height:0 !important; overflow:visible !important; display:block !important; }
   .dr-tablecard { max-height:none; overflow:visible; }
+  /* ⚠️ And the same undo for the rules that bound the SPLIT's grid pane (added
+     with the scroll fix in the "min-width:701px" block). A bounded flex box is
+     precisely what must not survive into print, and `.dr-tablecard` alone cannot
+     escape it — `.dr-split-grid` is the flex container doing the bounding.
+     These restore the split's print layout EXACTLY as it was before that fix:
+     `display:block` on the pane and `flex-start` on the split are what it had. */
+  body.dr-fit .dr-split { align-items:flex-start !important; }
+  body.dr-fit .dr-split-grid { display:block !important; min-height:0 !important; }
+  body.dr-fit .dr-split-grid .dr-tablecard { max-height:none !important; overflow:visible !important; }
   .dr-grid { min-width:0; font-size:var(--dr-fs-micro); }
   .dr-grid td.dr-freeze, .dr-grid th.dr-freeze { position:static; }
 
