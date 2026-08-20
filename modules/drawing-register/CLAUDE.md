@@ -1,5 +1,87 @@
 # Module: drawing-register
 
+## The S-curve is back on the Overview, under the Gantt (2026-08-20) — fmlozano
+Asked for directly: *"I also want to see planned vs actual progress in the gantt overview. Let's bring
+back the s curve with bar graphs."* The period chart was parked behind `OV_LEGACY_CARDS` when the
+Overview was stripped to a single Gantt — the one card whose comment says it was kept available "in
+case management wants it back". It is now a **first-class card again and no longer behind that flag**;
+the other four retired cards still are.
+
+### ⚠️ IT COUNTS DRAWINGS, ONE EACH — a THIRD basis, and the card says so on its face
+The Gantt lanes directly above it are weighted per top level by `track_mode`: CD/SD/FCD/TWD count
+0-or-100 tracking units, ISD counts sheets with partial credit. Neither is a drawing count, so **this
+card and the lane above it will report different percentages for the same work** — and a reader who is
+not told why concludes one of them is broken. Hence the standing note above the chart, and hence
+`.dr-pc-note` sits *above* the canvas: the caveat has to arrive before the numbers do.
+- ⚠️ **This is NOT the cross-level total the Overview forbids.** That rule exists because adding 6
+  design units to 83 ISD sheets describes neither basis. One drawing = one drawing is a *single*
+  consistent basis across all five top levels — a different QUESTION (how is the submission programme
+  tracking against plan), not a blend of two answers. **Do not "improve" it by weighting it**: that is
+  the forbidden total arrived at by the back door.
+
+### Two axes, because one made the bars meaningless
+Bars are a **period** figure, the curves a **cumulative** one. Sharing an axis, the curve tops out near
+1,075 on SLN101 while a busy month is ~40 — every bar collapsed into the baseline and the "bar graph"
+half of the chart carried no information. Bars now own the left axis, the S-curve the right, and **the
+right axis is always 0–100%** whichever way the bars are counted. `yCum.grid.drawOnChartArea:false`
+keeps one set of gridlines on the plot; two grids at different intervals is the usual way a dual-axis
+chart becomes unreadable.
+
+### ⚠️ THE ACTUAL CURVE STOPS AT TODAY
+`periodBuckets()` writes `null` for `cumActual`/`cumActualPct` in every period after the current one,
+and the dataset sets `spanGaps:false`. Carrying the value forward drew a **flat line to the end of the
+programme, which reads as "the job has stalled"** when it means "that work is not due yet" — the
+opposite conclusion. The planned curve deliberately does *not* stop: it is the programme.
+- ⚠️ `periodScaled()` had to be made **null-safe** for exactly this: `null/total*100` is `0`, which
+  would silently redraw the flat tail the null exists to remove.
+- "Future" is a **string compare against the same keys the buckets are made of** (`periodKeyNow()`),
+  not a second date calculation that could round differently at a period boundary. Every mode's key is
+  built so lexicographic order *is* chronological order — `2026-01` / `2026-Q1` / `2026`.
+
+### ⚠️ The denominator is the whole scope, not the dated subset
+Measured on SLN101: 1,075 drawings, **991 with a planned approval date**, so the programme curve tops
+out at **92%** and stays there. That is correct and load-bearing — dividing by the dated subset would
+draw a curve reaching 100% while 84 drawings nobody has scheduled are still outstanding.
+
+### Also
+- **Yearly** joins Monthly / Quarterly; granularity and the `#`/`%` bar unit now **persist**
+  (`uiKey('permode')` / `uiKey('pervalmode')`), both **validated against their vocabularies** on
+  restore — a stale `'week'` would fall through `periodKeyOf()`'s month branch and label monthly
+  buckets as weeks.
+- The legend is **sorted by dataset index**. Chart.js orders it by `order`, which is set to control
+  draw stacking, so it came out `approved, planned, planned, actual` — the two pairs interleaved.
+- ⚠️ **The period chart was REMOVED from `legacyOverviewCardsHTML()`.** Leaving it there would put a
+  second `#dr-period-chart` / `#dr-permode` / `#dr-pervalmode` in one document the moment
+  `OV_LEGACY_CARDS` is switched on, and every `getElementById` would bind to whichever came first
+  while the other card sat dead. `wireLegacyOverviewCards()` is now a named no-op — the four remaining
+  cards are static SVG/tables whose drills `wireDrills()` already binds.
+- **The Backlog shares this chart** and gained the same two axes and the same stops-at-today curve. Its
+  heading said "planned approval" while it has always drawn actual too; corrected. ⚠️ Its denominator
+  is the **open items on screen** (it follows the Backlog's filters), where the Overview's is
+  project-wide.
+
+### Verification
+**40 data checks** (`scurve_test.js`, functions sliced by name out of the shipped `module.js`) and
+**15 render checks** (`chart_render_test.js`) driving the **real Chart.js** in headless Chromium
+against the **real SLN101 dates**, screenshotted:
+
+| | |
+|---|---|
+| periods plotted | 17 (May '25 – Oct '26) |
+| axes | `x`, `y` (bars), `yCum` (curves, capped 100%) |
+| planned curve ends | **92%** = 991 scheduled / 1075 total |
+| actual curve ends | 76%, with **2 future periods left undrawn** |
+
+The data checks cover lexicographic-is-chronological in all three modes, the null tail and that the
+planned curve does *not* stop, the whole-scope denominator, cumulative arithmetic, an actual with no
+planned date still making a bucket, `periodScaled` passing the pct fields through untouched and
+surviving a null, and an empty register not throwing.
+⚠️ Two harness assertions failed first and **the harness was wrong, not the code** — one compared
+deduped year keys against a list with duplicates, the other expected the planned curve to reach 100%
+when 84 unscheduled drawings correctly hold it at 92%.
+⚠️ **Not verified signed-in.** Chart.js and the datalabels plugin come from CDNs here as in the app.
+- Assets `module.css/js?v=20260820e`.
+
 ## The Registry grid pane could not scroll in split mode (2026-08-20) — fmlozano
 Reported as *"the grid pane is not scrollable, which makes the other drawings not seen when the level
 1s or level 2s are expanded"*. Real, and it was the **default** Registry view (`regSplit = true`).

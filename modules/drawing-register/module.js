@@ -683,6 +683,11 @@ window.DrawingRegister = (function () {
       localStorage.setItem(uiKey('gscale'), String(ganttScale));
       localStorage.setItem(uiKey('collapsed'), JSON.stringify(collapsed));
       localStorage.setItem(uiKey('regsort'), JSON.stringify(regSort));
+      // The S-curve's granularity and bar unit. Persisted for the same reason the
+      // Gantt's scale is: a chart you have to re-aim every time you open the tab is a
+      // chart you stop using.
+      localStorage.setItem(uiKey('permode'), periodMode);
+      localStorage.setItem(uiKey('pervalmode'), periodValueMode);
     } catch (e) {}
   }
   function restoreUI(){
@@ -704,6 +709,13 @@ window.DrawingRegister = (function () {
       var gs = parseFloat(localStorage.getItem(uiKey('gscale')));
       if (GDAYW[gu]) ganttUnit = gu;
       if (!isNaN(gs) && gs >= GSCALE_MIN && gs <= GSCALE_MAX) ganttScale = gs;
+      // ⚠️ Both VALIDATED against their vocabularies, for the same reason the sort
+      // below is: a stale 'week' from some future build would reach periodKeyOf(),
+      // fall through to the month branch, and label monthly buckets as weeks.
+      var pm = localStorage.getItem(uiKey('permode'));
+      if (pm==='month'||pm==='quarter'||pm==='year') periodMode = pm;
+      var pvm = localStorage.getItem(uiKey('pervalmode'));
+      if (pvm==='count'||pvm==='pct') periodValueMode = pvm;
       var c = localStorage.getItem(uiKey('collapsed'));
       if (c){ var o=JSON.parse(c); if (o && typeof o==='object'){ collapsed=o; ok=true; } }
       // Restore the column sort, but VALIDATE the column against REG_SORTABLE —
@@ -1593,7 +1605,12 @@ window.DrawingRegister = (function () {
         '<div class="pd-card"><h3 class="dr-h3">Open items by status</h3>' + donutSVG(statusCounts(list)) + '</div>' +
         '<div class="pd-card"><h3 class="dr-h3">Open items by aging</h3>' + agingBarSVG(agingBuckets(list)) + '</div>' +
       '</div>' +
-      '<div class="pd-card"><h3 class="dr-h3">Open items by period — planned approval</h3>' +
+      // Shares renderPeriodChart with the Overview's S-curve, so it gained the same
+      // two axes and the same stops-at-today actual curve. The heading said "planned
+      // approval" while the chart has always drawn actual alongside it.
+      // ⚠️ The denominator here is the OPEN items on screen, not the whole register —
+      // this card follows the Backlog's filters, where the Overview's is project-wide.
+      '<div class="pd-card"><h3 class="dr-h3">Open items by period — planned vs actual approval</h3>' +
         '<div class="dr-pc-wrap" id="dr-bk-period"></div></div>';
 
     // One Chart.js instance is shared across the module (renderPeriodChart destroys the
@@ -3712,10 +3729,76 @@ window.DrawingRegister = (function () {
     host.innerHTML =
       '<div class="dr-kpi-section"><div class="dr-kpi-seclabel">' + Fmt.esc(eyebrow) + '</div></div>' +
       overviewGanttHTML() +
+      periodChartCardHTML() +
       legacyOverviewCardsHTML(draws);
 
     wireDrills(host);            // the Gantt's lane labels (and the legacy cards, if on)
-    if (OV_LEGACY_CARDS) wireLegacyOverviewCards(draws);
+    wirePeriodChartCard(draws);
+    if (OV_LEGACY_CARDS) wireLegacyOverviewCards();
+  }
+
+  // ---- The S-curve, under the Gantt ----------------------------------------
+  // Restored to the Overview on 2026-08-20 by request ("bring back the s curve with
+  // bar graphs"). It was parked behind OV_LEGACY_CARDS when the Overview was stripped
+  // to a single Gantt; it is a first-class card again, so it is NO LONGER behind that
+  // flag — the other four retired cards still are.
+  //
+  // ⚠️ IT COUNTS DRAWINGS, ONE EACH — a THIRD basis, and it has to say so. The Gantt
+  // lanes directly above it are weighted per top level by `track_mode`: CD/SD/FCD/TWD
+  // count 0-or-100 tracking units, ISD counts sheets with partial credit. Neither of
+  // those is a drawing count, so this card and the lane above it WILL report different
+  // percentages for the same work, and a reader who is not told why will conclude one
+  // of them is broken.
+  // ⚠️ This is NOT the cross-level total the Overview forbids. That rule exists because
+  // adding 6 design units to 83 ISD sheets produces a number describing neither basis.
+  // One drawing = one drawing is a single consistent basis across all five top levels;
+  // it is a different QUESTION (how is the submission programme tracking against plan),
+  // not a blend of two answers. Do not "improve" it by weighting it — that is the
+  // forbidden total, arrived at by the back door.
+  function periodChartCardHTML(){
+    return '<div class="pd-card"><h3 class="dr-h3">Progress S-Curve — Planned vs Actual Approval' +
+        '<span class="dr-seg" id="dr-permode">' +
+          ['month','quarter','year'].map(function (m){
+            return '<button class="dr-seg-btn' + (periodMode===m ? ' active' : '') + '" data-mode="'+m+'">' +
+              ({month:'Monthly',quarter:'Quarterly',year:'Yearly'})[m] + '</button>';
+          }).join('') +
+        '</span>' +
+        '<button class="dr-seg dr-segswitch" id="dr-pervalmode" type="button" ' +
+          'title="Count the bars in drawings, or as a % of the whole register">' +
+          (periodValueMode === 'pct' ? '%' : '#') + '</button>' +
+      '</h3>' +
+      '<p class="dr-mut dr-pc-note">Bars are the drawings falling due and approved in each period ' +
+        '(left axis); the curves are the cumulative share of the register (right axis). The actual ' +
+        'curve stops at today — it is not flat, it has not got there yet. ' +
+        '<strong>Counted one per drawing</strong>, so it will not match the Gantt lanes above, which ' +
+        'weight each drawing type by its own basis (0-or-100 units, or sheets for ISD).</p>' +
+      '<div id="dr-period-chart" class="dr-pc-wrap"></div>' +
+    '</div>';
+  }
+  function wirePeriodChartCard(draws){
+    var host = document.getElementById('dr-period-chart');
+    if (!host) return;
+    var drawPeriod = function () {
+      renderPeriodChart(host,
+        periodScaled(periodBuckets(periodMode, draws), periodValueMode, draws.length), periodValueMode);
+    };
+    drawPeriod();
+    var pm = document.getElementById('dr-permode');
+    if (pm) pm.querySelectorAll('.dr-seg-btn').forEach(function (b){
+      b.onclick = function (){
+        periodMode = b.dataset.mode;
+        pm.querySelectorAll('.dr-seg-btn').forEach(function (x){ x.classList.toggle('active', x===b); });
+        saveUI();
+        drawPeriod();
+      };
+    });
+    var pvm = document.getElementById('dr-pervalmode');
+    if (pvm) pvm.onclick = function (){
+      periodValueMode = (periodValueMode === 'count') ? 'pct' : 'count';
+      pvm.textContent = periodValueMode === 'pct' ? '%' : '#';
+      saveUI();
+      drawPeriod();
+    };
   }
 
   // ---- RETIRED OVERVIEW CARDS ----------------------------------------------
@@ -3737,45 +3820,23 @@ window.DrawingRegister = (function () {
         '<div class="pd-card"><h3 class="dr-h3">Drawings by Status</h3>' + donutSVG(statusCounts(draws)) + '</div>' +
         '<div class="pd-card"><h3 class="dr-h3">Open Items by Aging</h3>' + agingBarSVG(agingBuckets(draws)) + '</div>' +
       '</div>' +
-      '<div class="pd-card"><h3 class="dr-h3">Drawings by Period — Planned vs Actual Approval' +
-        '<span class="dr-seg" id="dr-permode">' +
-          '<button class="dr-seg-btn active" data-mode="month">Monthly</button>' +
-          '<button class="dr-seg-btn" data-mode="quarter">Quarterly</button>' +
-        '</span>' +
-        '<button class="dr-seg dr-segswitch" id="dr-pervalmode" type="button" ' +
-          'title="Switch between counts and % of all drawings">#</button>' +
-        '</h3>' +
-        '<div id="dr-period-chart" class="dr-pc-wrap"></div>' +
-      '</div>' +
+      // ⚠️ The period chart is NOT here any more — it is a first-class Overview card
+      // again (periodChartCardHTML, rendered unconditionally just above). Re-adding it
+      // here would put a SECOND `#dr-period-chart` / `#dr-permode` / `#dr-pervalmode`
+      // in the same document the moment this flag is switched on, and every
+      // getElementById in wirePeriodChartCard would bind to whichever came first while
+      // the other card sat dead.
       '<div class="dr-dash-grid">' +
         progTable('Progress by Drawing Type', groupAgg('phase', draws), TOP_LEVELS, 'phase') +
         progTable('Progress by Trade', byDisc, Object.keys(DISCIPLINES).map(disciplineName), 'discipline') +
       '</div>';
   }
-  function wireLegacyOverviewCards(draws){
-    var drawPeriod = function () {
-      renderPeriodChart(document.getElementById('dr-period-chart'),
-        periodScaled(periodBuckets(periodMode, draws), periodValueMode, draws.length), periodValueMode);
-    };
-    drawPeriod();
-    var pm = document.getElementById('dr-permode');
-    if (pm) pm.querySelectorAll('.dr-seg-btn').forEach(function (b){
-      b.onclick = function (){
-        periodMode = b.dataset.mode;
-        pm.querySelectorAll('.dr-seg-btn').forEach(function (x){ x.classList.toggle('active', x===b); });
-        drawPeriod();
-      };
-    });
-    var pvm = document.getElementById('dr-pervalmode');
-    if (pvm) {
-      pvm.textContent = periodValueMode === 'pct' ? '%' : '#';
-      pvm.onclick = function (){
-        periodValueMode = (periodValueMode === 'count') ? 'pct' : 'count';
-        pvm.textContent = periodValueMode === 'pct' ? '%' : '#';
-        drawPeriod();
-      };
-    }
-  }
+  // The period chart moved out of this block (see the note above), so the four cards
+  // that remain behind the flag are all static SVG/tables and need no wiring beyond the
+  // drill-throughs wireDrills() already binds for the whole Overview. Kept as a named
+  // no-op rather than deleted, so restoring a card that DOES need wiring has an obvious
+  // place to put it.
+  function wireLegacyOverviewCards(){ }
 
   // ---- Open Items by Aging (WPM "Work Package by Aging" pattern) -----------
   // Unfiltered — this is an aggregate for the whole project, independent of
@@ -3846,28 +3907,60 @@ window.DrawingRegister = (function () {
   // rather than leaving the field blank. A single such row would otherwise blow
   // the whole chart's x-axis out to a 25-year range. Treat anything outside a
   // sane project-planning window as "no date" instead of plotting it.
+  // ⚠️ Every mode's key must sort LEXICOGRAPHICALLY into chronological order, because
+  // that is the only ordering periodBuckets() applies and it is also how "is this
+  // period in the future" is decided below. `2026-01` / `2026-Q1` / `2026` all do.
   function periodKeyOf(dateStr, mode) {
     var d = new Date(dateStr + 'T00:00:00'); if (isNaN(d)) return null;
     var y = d.getFullYear(), m = d.getMonth();
     if (y < 2015 || y > 2100) return null;
+    if (mode === 'year')    return String(y);
     if (mode === 'quarter') return y + '-Q' + (Math.floor(m/3)+1);
     return y + '-' + String(m+1).padStart(2,'0');
   }
   function periodLabelOf(key, mode) {
+    if (mode === 'year')    return key;
     if (mode === 'quarter') { var p = key.split('-Q'); return 'Q'+p[1]+" '"+p[0].slice(2); }
     var p = key.split('-'); return MNAME3[+p[1]-1] + " '" + p[0].slice(2);
   }
+  // Today's key in the same vocabulary, so "future" is a string compare against the
+  // very keys the buckets are made of rather than a second date calculation that
+  // could round differently at a period boundary.
+  function periodKeyNow(mode) {
+    var t = new Date();
+    return periodKeyOf(t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' +
+                       String(t.getDate()).padStart(2,'0'), mode);
+  }
+  // ⚠️ `total` is EVERY drawing in `list`, not just the dated ones. The S-curve's
+  // denominator is the scope of work; dividing by the dated subset would draw a curve
+  // that reaches 100% while drawings nobody has scheduled yet are still outstanding.
   function periodBuckets(mode, list) {
+    var rowsIn = list || drawingRows();
     var pMap = {}, aMap = {};
-    (list || drawingRows()).forEach(function (r) {
+    rowsIn.forEach(function (r) {
       if (r.planned_approval) { var k = periodKeyOf(r.planned_approval, mode); if (k) pMap[k] = (pMap[k]||0)+1; }
       if (r.actual_approval)  { var k2 = periodKeyOf(r.actual_approval, mode); if (k2) aMap[k2] = (aMap[k2]||0)+1; }
     });
     var keys = Object.keys(pMap).concat(Object.keys(aMap)).filter(function (v,i,a){ return a.indexOf(v)===i; }).sort();
+    var nowKey = periodKeyNow(mode);
+    var tot = rowsIn.length;
     var cumP = 0, cumA = 0;
     return keys.map(function (k) {
       cumP += pMap[k]||0; cumA += aMap[k]||0;
-      return { key:k, label:periodLabelOf(k, mode), planned:pMap[k]||0, actual:aMap[k]||0, cumPlanned:cumP, cumActual:cumA };
+      // ⚠️ THE ACTUAL CURVE STOPS AT TODAY. Carrying it across future periods draws a
+      // flat line all the way to the end of the programme, which reads as "the job has
+      // stalled" when it actually means "that work is not due yet" — the opposite
+      // conclusion. `null` makes Chart.js end the line at the last real period, which
+      // is what every construction S-curve does.
+      var future = nowKey && k > nowKey;
+      return { key:k, label:periodLabelOf(k, mode),
+        planned:pMap[k]||0, actual:aMap[k]||0,
+        cumPlanned:cumP, cumActual: future ? null : cumA,
+        // Cumulative as a share of the whole scope. Held separately from the counts
+        // above because the chart plots the two on DIFFERENT AXES — see
+        // renderPeriodChart — so the bars stay readable at any register size.
+        cumPlannedPct: tot ? cumP/tot*100 : 0,
+        cumActualPct: future ? null : (tot ? cumA/tot*100 : 0) };
     });
   }
   function niceCeil(v) {
@@ -3878,11 +3971,18 @@ window.DrawingRegister = (function () {
   // '#' shows raw counts; '%' shows every value as a % of all drawings in the
   // project — the conventional S-curve reading (curves climb toward 100%).
   var periodValueMode = 'count';   // 'count' | 'pct'
+  // ⚠️ Scales the BARS only. `cumPlannedPct`/`cumActualPct` are already percentages and
+  // are passed through untouched — they are the S-curve, which is always read against
+  // 100% whichever way the bars are counted. Null-safe, because cumActual stops at
+  // today and `null/total` would silently become 0 and redraw the flat tail this exists
+  // to remove.
   function periodScaled(data, mode, total) {
     if (mode !== 'pct' || !total) return data;
     return data.map(function (d) {
       return { key:d.key, label:d.label, planned:d.planned/total*100, actual:d.actual/total*100,
-        cumPlanned:d.cumPlanned/total*100, cumActual:d.cumActual/total*100 };
+        cumPlanned:d.cumPlanned/total*100,
+        cumActual: d.cumActual == null ? null : d.cumActual/total*100,
+        cumPlannedPct:d.cumPlannedPct, cumActualPct:d.cumActualPct };
     });
   }
   function periodFmt(v, mode) { return mode==='pct' ? (Math.round(v*10)/10)+'%' : Math.round(v); }
@@ -3891,10 +3991,17 @@ window.DrawingRegister = (function () {
   // hover tooltips and data labels behave identically there and here. Replaces an
   // earlier hand-rolled SVG whose fixed viewBox had to be stretched to fill the
   // card, which distorted text and point markers.
+  // ⚠️ TWO AXES, and that is the whole shape of this chart. Bars are a PERIOD figure
+  // (how many drawings fell due / were approved in that month) and the curves are a
+  // CUMULATIVE one that climbs to 100%. Sharing one axis made the bars unreadable the
+  // moment the register got big: on SLN101 the curve tops out around 1,075 while a busy
+  // month is ~40, so every bar collapsed into the baseline and the "bar graph" half of
+  // the chart carried no information. Bars now own the left axis, the S-curve owns the
+  // right, and the right axis is ALWAYS 0–100% whichever way the bars are counted.
   var _periodChart = null;
   function renderPeriodChart(container, data, mode) {
     if (_periodChart) { _periodChart.destroy(); _periodChart = null; }
-    if (!data.length) { container.innerHTML = '<p class="dr-mut">No planned/actual approval dates recorded yet.</p>'; return; }
+    if (!data.length) { container.innerHTML = '<p class="dr-mut">No planned or actual approval dates recorded yet — the S-curve is drawn from them.</p>'; return; }
     container.innerHTML = '<canvas id="dr-pc-canvas"></canvas>';
     var pct = mode === 'pct';
     var dark = document.documentElement.classList.contains('pd-dark');
@@ -3902,31 +4009,54 @@ window.DrawingRegister = (function () {
     var gridC = dark ? 'rgba(255,255,255,.09)' : 'rgba(0,0,0,.06)';
     var plannedBar = dark ? '#8A8F98' : '#282C28';
     var fmt = function (v) { return v == null ? '' : (pct ? (Math.round(v*10)/10)+'%' : Math.round(v)); };
+    var fmtPct = function (v) { return v == null ? '—' : (Math.round(v*10)/10)+'%'; };
     _periodChart = new Chart(container.querySelector('canvas').getContext('2d'), {
       type: 'bar',
       data: {
         labels: data.map(function (d){ return d.label; }),
         datasets: [
-          { label:'Planned this period', data:data.map(function(d){return d.planned;}), backgroundColor:plannedBar, borderRadius:3, order:2 },
-          { label:'Actual this period',  data:data.map(function(d){return d.actual;}),  backgroundColor:'#EE3124', borderRadius:3, order:2 },
-          { label:'Cumulative planned',  data:data.map(function(d){return d.cumPlanned;}), type:'line', borderColor:plannedBar, borderWidth:2, pointRadius:2, fill:false, tension:.15, order:1 },
-          { label:'Cumulative approved', data:data.map(function(d){return d.cumActual;}),  type:'line', borderColor:'#EE3124', borderWidth:2, pointRadius:2, fill:false, tension:.15, order:1 }
+          { label:'Planned this period', yAxisID:'y', data:data.map(function(d){return d.planned;}), backgroundColor:plannedBar, borderRadius:3, order:3 },
+          { label:'Actual this period',  yAxisID:'y', data:data.map(function(d){return d.actual;}),  backgroundColor:'#EE3124', borderRadius:3, order:3 },
+          { label:'Cumulative planned %', yAxisID:'yCum', data:data.map(function(d){return d.cumPlannedPct;}),
+            type:'line', borderColor:plannedBar, borderWidth:2, pointRadius:2, fill:false, tension:.15, order:1 },
+          // ⚠️ `spanGaps:false` is what makes the actual curve STOP at today rather than
+          // leaping the nulls periodBuckets() writes for future periods. With it true
+          // (Chart.js's behaviour when the points are simply absent) the line would join
+          // the last real point straight to the end of the programme — a flat tail that
+          // reads as a stall instead of as work not yet due.
+          { label:'Cumulative approved %', yAxisID:'yCum', data:data.map(function(d){return d.cumActualPct;}),
+            type:'line', borderColor:'#EE3124', borderWidth:2.5, pointRadius:2, fill:false, tension:.15,
+            spanGaps:false, order:0 }
         ]
       },
       options: {
         responsive:true, maintainAspectRatio:false,
         interaction:{ mode:'index', intersect:false },
         plugins:{
-          legend:{ position:'bottom', labels:{ usePointStyle:true, boxWidth:12, padding:10, color:ink, font:{size:11} } },
-          tooltip:{ callbacks:{ label:function(c){ return c.dataset.label+': '+fmt(c.parsed.y); } } },
+          // ⚠️ Sorted by DATASET INDEX. Chart.js orders the legend by `order`, which is
+          // set here to control what draws on top of what — so without this the legend
+          // came out "approved, planned, planned, actual": the two pairs interleaved,
+          // and the eye has to work out which "planned" is the bar and which the curve.
+          // Declaration order is bars then curves, which is how the chart reads.
+          legend:{ position:'bottom', labels:{ usePointStyle:true, boxWidth:12, padding:10, color:ink, font:{size:11},
+            sort:function(a, b){ return a.datasetIndex - b.datasetIndex; } } },
+          tooltip:{ callbacks:{ label:function(c){
+            return c.dataset.label + ': ' + (c.dataset.yAxisID === 'yCum' ? fmtPct(c.parsed.y) : fmt(c.parsed.y));
+          } } },
           datalabels:{ display:function(c){ return c.dataset.type!=='line' && data.length<=20 && c.dataset.data[c.dataIndex]>0; },
             anchor:'end', align:'end', offset:2, font:{size:9}, color:ink, formatter:fmt }
         },
         scales:{
           x:{ grid:{display:false}, ticks:{ color:ink, font:{size:9}, maxRotation:45, autoSkip:true, maxTicksLimit:24 } },
-          y:{ beginAtZero:true, max: pct ? 100 : undefined, grid:{color:gridC},
+          y:{ position:'left', beginAtZero:true, max: pct ? 100 : undefined, grid:{color:gridC},
               ticks:{ color:ink, font:{size:9}, callback:function(v){ return fmt(v); } },
-              title:{ display:true, text: pct ? '% of drawings' : 'No. of drawings', color:ink, font:{size:10} } }
+              title:{ display:true, text: (pct ? '% of drawings' : 'Drawings') + ' this period', color:ink, font:{size:10} } },
+          // The curve's own axis. `grid.drawOnChartArea:false` keeps one set of
+          // gridlines on the plot — two overlapping grids at different intervals is the
+          // usual way a dual-axis chart becomes unreadable.
+          yCum:{ position:'right', beginAtZero:true, max:100, grid:{ drawOnChartArea:false },
+              ticks:{ color:ink, font:{size:9}, callback:function(v){ return v+'%'; } },
+              title:{ display:true, text:'Cumulative % of register', color:ink, font:{size:10} } }
         }
       }
     });

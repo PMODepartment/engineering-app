@@ -417,8 +417,14 @@ html.pd-dark {
 /* Period chart — Chart.js needs an explicitly-sized, position:relative parent
    because the canvas is responsive with maintainAspectRatio:false. Without a
    fixed height here the canvas collapses to 0 or grows unbounded. */
-.dr-pc-wrap { position:relative; height:320px; width:100%; }
+.dr-pc-wrap { position:relative; height:360px; width:100%; }
 .dr-pc-wrap canvas { display:block; }
+/* The basis caveat under the S-curve's heading. It sits ABOVE the chart on purpose:
+   the card reports drawings counted one each while the Gantt lanes directly above it
+   are weighted per drawing type, so the two disagree by design — and a reader who
+   meets the numbers before the explanation concludes one of them is broken. */
+.dr-pc-note { margin:-4px 0 12px; max-width:88ch; line-height:1.45; }
+@media (max-width:700px){ .dr-pc-wrap { height:300px; } }
 
 /* ---- Form (modal) ------------------------------------------------------- */
 .pd-modal-overlay:has(.dr-form-sec) .pd-modal { max-width:780px; width:96%; }
