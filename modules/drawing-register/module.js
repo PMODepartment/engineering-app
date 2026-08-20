@@ -1943,8 +1943,8 @@ window.DrawingRegister = (function () {
         var label = isGrp ? item.label : (item.row.drawing_code || item.row.drawing_no || item.row.title || '');
         bar = '<div class="dr-g-bar'+(isGrp?' dr-g-sum':'')+(sp.pct>=100?' dr-g-done':'')+
           '" style="left:'+x+'px;width:'+w+'px" title="'+
-          Fmt.esc(label+' · '+Fmt.date(sp.s.toISOString().slice(0,10))+' → '+
-                  Fmt.date(sp.f.toISOString().slice(0,10))+' · '+sp.pct+'%'+
+          Fmt.esc(label+' · '+Fmt.date(gIso(sp.s))+' → '+
+                  Fmt.date(gIso(sp.f))+' · '+sp.pct+'%'+
                   (sp.actual?' · approved '+Fmt.date(sp.actual):''))+'">' +
           '<div class="dr-g-fill" style="width:'+sp.pct+'%"></div>' +
           (w > 34 ? '<span class="dr-g-pct">'+sp.pct+'%</span>' : '') + '</div>';

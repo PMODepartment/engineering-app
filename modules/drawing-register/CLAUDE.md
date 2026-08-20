@@ -69,8 +69,13 @@ shifts every bar a day west). The Registry's Gantt then reads spans back with
 `sp.s.toISOString().slice(0,10)` for its tooltips — **a local constructor paired with a UTC getter**,
 the exact trap this module's importer notes already document twice, so every Gantt tooltip in Manila
 names a date one day early. New `gIso(d)` formats local Y-M-D and the Overview Gantt uses it.
-⚠️ **`registryGanttHTML()` still has the original `toISOString()` call and is still off by one** —
-left alone deliberately (out of scope for this pass), one-line fix, `gIso` is right there.
+~~⚠️ `registryGanttHTML()` still has the original `toISOString()` call and is still off by one.~~
+**CLOSED (2026-08-20, same day):** both tooltip calls in `registryGanttHTML()` now use `gIso(...)`,
+so the Registry Gantt matches the Overview. Display-only — no stored data was ever affected.
+⚠️ The remaining `toISOString()` calls in the module are **correct and must stay**: they are
+either `new Date().toISOString()` timestamps for the database, or reads of values built with
+`Date.UTC(...)` in the importer's serial-date path. The rule is only **never pair `gDate()` (local)
+with `toISOString()` (UTC)**.
 
 ### Verification
 **28 checks** (`ovg_test.js`) against functions **sliced by name out of the shipped `module.js`**,
