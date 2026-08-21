@@ -305,11 +305,50 @@ html.pd-dark {
   font:inherit; font-size:var(--dr-fs-sm); font-weight:600; padding:4px 9px; border-radius:999px; flex:none; }
 .dr-sortchip:hover { background:var(--pd-red-mid, var(--pd-red)); }
 .dr-sortchip svg { display:block; }
-.dr-aging-late { color:var(--pd-red); font-weight:700; }
+/* ⚠️ Aging severity — the SAME six buckets agingBucketOf() defines, so the table's
+   Aging column and the "Open items by aging" chart below it cannot disagree about
+   how late something is. Replaces a lone `dr-aging-late` that was on/off at d>0 and
+   said nothing about how far past due, while the chart had its own separate hex map.
+   Hues match AGING_COLOR in module.js; keep the two in step. */
+.dr-ag-late3 { color:#EE3124; font-weight:700; }
+.dr-ag-late2 { color:#c2680a; font-weight:700; }
+.dr-ag-late1 { color:#b07a12; font-weight:600; }
+.dr-ag-soon  { color:var(--pd-ink); font-weight:600; }
+.dr-ag-ok    { color:var(--pd-muted); font-weight:400; }
+.dr-ag-none  { color:var(--pd-muted); font-weight:400; }
+html.pd-dark .dr-ag-late2 { color:#f0a83c; }
+html.pd-dark .dr-ag-late1 { color:#e0be6a; }
+
+/* The drawing type as a compact tag (ISD / FCD / SD / CD / TWD). Full name on hover —
+   spelling "Individual Services Drawings" out wrapped every single row to two lines. */
+.dr-typetag { display:inline-block; padding:1px 7px; border-radius:999px; cursor:help;
+  font-size:var(--dr-fs-micro); font-weight:700; letter-spacing:.02em;
+  background:var(--pd-line); color:var(--pd-ink); }
+
+/* One line per row is the point of the density pass, so a long sheet title
+   ellipsises rather than wrapping. The full text is in the editor one click away. */
+.dr-bk-title { max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (max-width:1200px){ .dr-bk-title { max-width:260px; } }
+
+/* Actions cell — replaced the "Doc" column, which on open items was a column of
+   em-dashes (an approved file is exactly what an OPEN item does not have yet). */
+.dr-bk-act { width:64px; text-align:right; white-space:nowrap; }
+.dr-bk-act .dr-iconbtn { cursor:pointer; }
+/* The pencil is the affordance for the row click the Backlog has always had. Kept
+   quiet until the row is hovered so 200 of them do not read as 200 buttons. */
+.dr-bk-edit { opacity:.28; transition:opacity .12s ease; }
+.dr-bk-row:hover .dr-bk-edit, .dr-bk-edit:focus-visible { opacity:1; color:var(--pd-red); }
 /* A large backlog scrolls inside its own card instead of stretching the whole
    page — the KPI row + card header stay put; only the table body scrolls. */
 .dr-bk-scroll { max-height:min(62vh, 640px); overflow-y:auto; border:1px solid var(--pd-line); border-radius:var(--pd-radius); }
 .dr-bk-scroll .dr-bk-table { border:none; }
+/* ⚠️ STICKY HEADER. The list scrolls inside a 640px box and can run to 200 rows, so
+   the header left the top almost immediately and everything below it became six
+   unlabelled columns — and the header is also the sort control, so it was scrolling
+   the only way to re-sort out of reach. z-index keeps it over the status pills. */
+.dr-bk-scroll thead th { position:sticky; top:0; z-index:2; background:var(--pd-card); }
+.dr-bk-scroll thead th::after { content:''; position:absolute; left:0; right:0; bottom:0;
+  height:1px; background:var(--pd-line); }
 .dr-bk-more { margin-top:10px; font-size:var(--dr-fs-sm); color:var(--pd-muted); text-align:center; }
 
 /* ---- Backlog: Doc column + bulk actions [UI review #8] ------------------- */
@@ -317,10 +356,9 @@ html.pd-dark {
    sits at the end of the flex .dr-listbar. Here it is a standalone block inside
    the card, where auto margin would shove it to the right edge. */
 .dr-bk-selbar { margin-left:0; margin-bottom:10px; }
-.dr-bk-doc { width:46px; text-align:center; }
-/* The Doc button and the checkbox both live inside a row whose click opens the
+/* The action buttons and the checkbox all live inside a row whose click opens the
    editor; the JS stops propagation, this just keeps them from looking like text. */
-.dr-bk-table .dr-bk-doc button, .dr-bk-table .dr-cb input { cursor:pointer; }
+.dr-bk-table .dr-bk-act button, .dr-bk-table .dr-cb input { cursor:pointer; }
 .dr-bk-table tbody tr.dr-selrow > td { background:var(--pd-red-light, rgba(238,49,36,.07)); }
 .dr-linklike { background:none; border:none; padding:0; color:var(--pd-red); font-weight:600; font-size:inherit;
   font-family:inherit; cursor:pointer; text-decoration:underline; }
@@ -359,6 +397,13 @@ html.pd-dark {
 .dr-kpi-drill { cursor:pointer; }
 .dr-kpi-drill:hover { border-color:var(--pd-red); }
 .dr-kpi-drill:hover .dr-kpi-val { color:var(--pd-red); }
+/* ⚠️ The ACTIVE card. Once the strip became a filter control it had to say where you
+   ARE, not only where you could go — four identical cards with one of them silently
+   applied is how you end up re-clicking the filter you are already inside. The left
+   rule is the same 4px slot .dr-kpi::before already owns, turned solid. */
+.dr-kpi-on { border-color:var(--pd-red); background:var(--pd-red-light, rgba(238,49,36,.05)); }
+.dr-kpi-on::before { background:var(--pd-red); opacity:1; }
+.dr-kpi-on .dr-kpi-label { color:var(--pd-red); font-weight:700; }
 .dr-kpi-drill:focus-visible { outline:2px solid var(--pd-red); outline-offset:2px; }
 
 /* Donut legend swatch — the same --dr-<key>-arc variable the arc uses, so a

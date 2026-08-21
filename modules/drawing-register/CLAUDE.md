@@ -1,5 +1,88 @@
 # Module: drawing-register
 
+## Backlog UI pass: dense, honest, actionable (2026-08-20) — fmlozano
+Asked for as *"improve the user interface for the backlog tab"*. Rendered the real tab against the
+real SLN101 register first (257 open items) rather than working from memory, which is how the first
+item below turned up.
+
+### ⚠️ THE AGING CHART WAS CALLING OVERDUE ITEMS "CURRENT"
+`agingBucketOf()`'s middle band was `a >= 0` and labelled **`0-30d (current)`**, painted neutral grey
+next to `Future` — so a drawing **one to thirty days late** read as calm, on the one screen whose job
+is chasing late work. Measured: **14 of the 19** the Overdue KPI counts sat in that grey bucket, so the
+chart said *5 overdue* while the card directly above it said *19*.
+Overdue is now three explicit bands — `>60d` · `31–60d` · `1–30d` — and the genuinely-not-late rows are
+the ones that read calm (`Due ≤7 days` · `Not due yet` · `No due date`).
+- ⚠️ **THE INVARIANT, and it is asserted:** the three overdue bands must sum to the Overdue KPI (both
+  derive from `agingDays > 0`). If a boundary moves, that stays true or the card and the chart start
+  contradicting each other again.
+- ⚠️ **A SECOND HARDCODED COPY of the bucket names nearly shipped this broken.** `AGING_DATED`
+  restated the list, so renaming the buckets silently emptied the **whole chart** — every bucket summed
+  to zero and the bar fell through to its "nothing is dated" empty state while the table beside it
+  showed 179 dated rows. It is **derived** now: `AGING_ORDER` minus the undated bucket. That
+  duplication is exactly what let the label and the KPI drift apart in the first place.
+- The table's Aging column now uses **the same six buckets** (`AGING_CLS` → `.dr-ag-*`), so severity is
+  graded instead of a single on/off `dr-aging-late`, and the chart and the column can't disagree.
+
+### ⚠️ THE KPI STRIP WAS A DEAD END once the cards became clickable
+Overdue and Due ≤3 days were inert — a card reading "19" you could not click to see the 19. Making them
+drill exposed the real problem: the counts were taken **after** the due filter, so drilling into Overdue
+recomputed "Due ≤3 days" to **0** (an overdue drawing is not due in three days), which read as zero and
+went inert. The only way to the other card was to reset first.
+- **Two lists now.** `base` = the whole backlog under the *shared* filter bar; `list` = that narrowed by
+  the Backlog's own aging chip and due mode. **The strip counts `base`, the table counts `list`.** Every
+  card stays a live destination and the numbers hold steady while you move between them.
+- The narrowed count moved to the table heading — **"Showing 19 of 257"**, so the two numbers on screen
+  explain each other instead of looking like a disagreement.
+- Each card drills to the `bkDue` mode built from **the same `bkDueFilter()` call that produced its
+  number**, so the card cannot lie about what clicking it will show. The active card is marked
+  (`.dr-kpi-on`) — four identical cards with one silently applied is how you re-click the filter you are
+  already inside.
+- New `soon` due-mode (`d <= 0 && d >= -3`) mirrors the "Due ≤3 days" card exactly; it joins the due
+  select as its own option.
+- ⚠️ The table can now be **empty while the strip is not**, so the empty row names the narrowing and
+  offers the way out rather than leaving a bare header over nothing.
+
+### Density and affordance
+- **Drawing type abbreviated** to the existing `TOP_LEVEL_ABBR` (ISD/FCD/SD/CD/TWD), full name on hover.
+  "Individual Services Drawings" wrapped **every single row** to two lines — the single biggest reason a
+  200-row worklist ran to twice the height it needed. Rows are one line now: **41.5px, 14 visible where
+  10 fitted before**.
+- **Sticky table header.** The list scrolls inside a 640px box for up to 200 rows, so the header left
+  the top almost immediately — and it is also the sort control, so scrolling put the only way to re-sort
+  out of reach.
+- **The "Doc" column became an actions column.** It held an eye button only when the row had an uploaded
+  file, which on an *open* item is close to never — it rendered a column of em-dashes. Every row now
+  carries a **pencil**, the affordance for the row click the Backlog has always had but never showed.
+- The Aging cell's `title` names **the date it is measured against** — "+169d" says how late but never
+  when, and the date is what you quote in a chase-up email.
+
+### ⚠️ Stale copy fixed
+The aging card told the user their items were *"not yet linked to a schedule activity — link one from
+its edit form"*. **The per-document → activity link was removed** (see `backlogUrgency`'s note), so it
+was sending them after a control that no longer exists. Aging is measured against the drawing's own
+planned approval date; that is what the copy names now.
+
+### Verification
+**36 checks** (`backlog_test.js`) driving the **shipped `renderBacklog()`** in headless Chromium on the
+**real SLN101 rows** — the module is evaluated unmodified except for one added test export on its
+return object, so nothing about the render path is stubbed. The harness **fails 20 of 36 on the pre-fix
+code**, which is what makes it a regression test rather than a description of the change.
+
+| | before | after |
+|---|---|---|
+| aging chart overdue | **5** (14 hidden in grey "current") | **19** = 2 + 3 + 14 |
+| Overdue KPI | 19 | 19 — *now equal* |
+| row height | two lines | **41.5px, one line** |
+| drilling Overdue → Due ≤3 days | card collapses to **0**, inert | stays **15**, live |
+
+Also asserted: no bucket named "current" survives, every bucket accounted for (179 dated + 78 undated =
+257), `AGING_DATED` is derived not restated, the aging bar is populated rather than its empty state, no
+"schedule activity" copy remains, six graded severity classes in use, the sticky header actually stays
+put when the list is scrolled 600px, and each drill lists exactly the number its card showed.
+⚠️ **Not verified signed-in** — rendered against the real stylesheets and the real module, not a live
+session.
+- Assets `module.css/js?v=20260820f`.
+
 ## The S-curve is back on the Overview, under the Gantt (2026-08-20) — fmlozano
 Asked for directly: *"I also want to see planned vs actual progress in the gantt overview. Let's bring
 back the s curve with bar graphs."* The period chart was parked behind `OV_LEGACY_CARDS` when the

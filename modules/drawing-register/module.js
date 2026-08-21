@@ -1425,12 +1425,30 @@ window.DrawingRegister = (function () {
   // it is a question you ask while working a list, not a preference — and a filter silently
   // restored on a later visit reads as "the backlog is empty".
   var bkDue = '';
-  function backlogRows(){
+  // ⚠️ `skipLocal` skips the Backlog's OWN two narrowings (the aging chip and the due
+  // mode) while keeping the shared filter bar. That is what the KPI strip counts —
+  // see renderBacklog: the strip is navigation between those narrowings, so it must
+  // not be narrowed BY them.
+  function backlogRows(opts){
+    var skipLocal = opts && opts.skipLocal;
     return drawingRows().filter(function (r){
       if (!matchesFilters(r, { skipDups:true })) return false;
       if (!(!isApprovedStatus(r.status) || r.status === 'Resubmit')) return false;
-      if (bkAging && agingBucketOf(r) !== bkAging) return false;
+      if (!skipLocal && bkAging && agingBucketOf(r) !== bkAging) return false;
       return true;
+    });
+  }
+  // The Backlog's own due-mode narrowing, applied to whichever list it is given.
+  // ⚠️ 'due' MUST stay `d > 0` — it is the same test the Overdue KPI uses, so the card
+  // and the list it drills to cannot report different counts. 'soon' likewise mirrors
+  // the "Due ≤3 days" card exactly.
+  function bkDueFilter(list, mode){
+    if (!mode) return list;
+    return list.filter(function (r){
+      var d = agingDays(r);
+      if (mode === 'due')  return d != null && d > 0;
+      if (mode === 'soon') return d != null && d <= 0 && d >= -3;
+      return !(d != null && d > 0);
     });
   }
   // ⚠️ Ranked on the drawing's own PLANNED APPROVAL date, not a schedule-derived
@@ -1454,7 +1472,7 @@ window.DrawingRegister = (function () {
     { col:'phase',      label:'Drawing Type' },
     { col:'discipline', label:'Discipline' },
     { col:'status',     label:'Status' },
-    { col:'aging',      label:'Aging (d)' }
+    { col:'aging',      label:'Aging', tip:'Days past the planned approval date. +N is late, −N is still to go.' }
   ];
   function bkSortVal(r, col){
     switch (col){
@@ -1484,8 +1502,13 @@ window.DrawingRegister = (function () {
 
   function renderBacklog(){
     var host = document.getElementById('dr-view');
+    // ⚠️ TWO LISTS, deliberately. `base` is the whole backlog under the SHARED filter
+    // bar; `list` is that narrowed further by the Backlog's own aging chip and due
+    // mode. The KPI strip counts `base` and the table counts `list` — see the note on
+    // the strip below for why they must not be the same number.
+    var base = backlogRows({ skipLocal:true });
     var list = backlogRows();
-    if (!list.length) {
+    if (!base.length) {
       host.innerHTML = emptyMsg(anyFilter() ? 'No open items match these filters.' : 'No open items — every drawing is approved.');
       return;
     }
@@ -1494,12 +1517,7 @@ window.DrawingRegister = (function () {
     // already passed — the same test the Overdue KPI uses, reused so the filter and the
     // count cannot disagree. A drawing with no planned date cannot be judged either way,
     // so it is excluded from "Due only" and included in "Not due yet".
-    if (bkDue) {
-      list = list.filter(function (r){
-        var d = agingDays(r);
-        return bkDue === 'due' ? (d != null && d > 0) : !(d != null && d > 0);
-      });
-    }
+    list = bkDueFilter(list, bkDue);
     list = list.slice().sort(function (a,b){
       var va=bkSortVal(a,bkSort.col), vb=bkSortVal(b,bkSort.col);
       var cmp = va<vb ? -1 : (va>vb ? 1 : 0);
@@ -1508,18 +1526,36 @@ window.DrawingRegister = (function () {
 
     // Overdue / due-soon against the drawing's OWN planned approval date — the
     // register tracks planned vs actual approval and nothing else now.
-    var late = list.filter(function (r){ var d=agingDays(r); return d!=null && d>0; }).length;
-    var tight = list.filter(function (r){ var d=agingDays(r); return d!=null && d<=0 && d>=-3; }).length;
-    var revise = list.filter(function (r){ return r.status==='Resubmit'; }).length;
+    // ⚠️ COUNTED ON `base`, NOT `list`, AND THAT IS THE WHOLE POINT. These used to be
+    // counted after the due filter, so the strip described the narrowed list — which
+    // turned it into a DEAD END the moment it became clickable: drill into Overdue and
+    // "Due ≤3 days" recomputes to 0 (an overdue drawing is not due in three days),
+    // reads as zero, and goes inert, so the only way to the other card was to reset
+    // first. Counting the whole backlog keeps every card a live destination and keeps
+    // the numbers steady while you move between them. The table's own heading reports
+    // the filtered count, so nothing on screen claims the list is longer than it is.
+    var late   = bkDueFilter(base, 'due').length;
+    var tight  = bkDueFilter(base, 'soon').length;
+    var revise = base.filter(function (r){ return r.status==='Resubmit'; }).length;
 
-    // "Revise & Resubmit" is a status → a real filter. Open items / late / tight
-    // are already what this view shows, so they only clear back to the full
-    // backlog rather than pretending to be their own filters.
+    // ⚠️ EVERY CARD HERE IS NOW A REAL FILTER. Overdue and Due ≤3 days used to be
+    // inert: a card reading "19" that you could not click to see the 19, on the one
+    // screen built for chasing them. They each drill to the `bkDue` mode built from
+    // the SAME bkDueFilter() call that produced the number, so the card and the list
+    // it opens agree by construction. "Open items" clears back to everything, and the
+    // card matching the active filter is marked so the strip says where you are.
     var kpis = kpiSection('Backlog Overview',
-      kpi(list.length, 'Open items', '', bkAging ? { view:'backlog', patch:{}, tip:'Clear the aging filter and show every open item' } : null) +
-      kpi(late, 'Overdue', late>0?'warn':'') +
-      kpi(tight, 'Due ≤3 days', tight>0?'warn':'') +
-      kpi(revise, 'Resubmit', '', { view:'backlog', patch:{ status:'Resubmit' }, tip:'Filter the Backlog to Resubmit' }), 4);
+      kpi(base.length, 'Open items', '',
+        (bkAging || bkDue) ? { view:'backlog', patch:{}, tip:'Clear the aging and due filters and show every open item' } : null,
+        !bkDue && !bkAging) +
+      kpi(late, 'Overdue', late>0?'warn':'',
+        late>0 ? { view:'backlog', patch:{ due:'due' }, tip:'Show only the '+late+' past their planned approval date' } : null,
+        bkDue === 'due') +
+      kpi(tight, 'Due ≤3 days', tight>0?'warn':'',
+        tight>0 ? { view:'backlog', patch:{ due:'soon' }, tip:'Show only the '+tight+' due within three days' } : null,
+        bkDue === 'soon') +
+      kpi(revise, 'Resubmit', '', { view:'backlog', patch:{ status:'Resubmit' }, tip:'Filter the Backlog to Resubmit' },
+        filters.status === 'Resubmit'), 4);
 
     var shown = (bkShowAll || list.length<=BK_PAGE) ? list : list.slice(0, BK_PAGE);
     // Bulk actions operate on `selected` filtered by `visibleIds` (shared with
@@ -1533,29 +1569,57 @@ window.DrawingRegister = (function () {
     var CB = canWrite;
     var body = shown.map(function (r){
       var a = agingDays(r);
+      var bucket = agingBucketOf(r);
+      var due = inh(r, 'planned_approval');
+      // ⚠️ THE DRAWING TYPE IS ABBREVIATED, using the same TOP_LEVEL_ABBR the
+      // Overview's eyebrow uses. "Individual Services Drawings" wrapped to two lines
+      // in a column whose value is one of five, and it did that on EVERY row — the
+      // single biggest reason a 200-row worklist ran to twice the height it needed.
+      // The full name stays one hover away, and the cell keeps the sort value.
+      var ph = r.phase || '';
+      var phShort = TOP_LEVEL_ABBR[ph] || ph;
+      // "+169d" says how late but never WHEN. The date it is measured against is
+      // what you quote in a chase-up email, so it rides along as the cell's title.
+      var agTip = a == null
+        ? 'No planned approval date — this drawing cannot be judged late or early'
+        : (due ? 'Planned approval ' + Fmt.date(due) + ' · ' + bucket : bucket);
       return '<tr class="dr-bk-row'+(selected[r.id]?' dr-selrow':'')+'" data-id="'+r.id+'">' +
         (CB ? '<td class="dr-cb"><input type="checkbox" data-sel="'+r.id+'"'+(selected[r.id]?' checked':'')+'></td>' : '') +
-        '<td class="dr-code">'+Fmt.esc(drawCode(r))+'</td>' +
-        '<td>'+Fmt.esc(r.title||'')+'</td>' +
-        '<td>'+Fmt.esc(r.phase||'')+'</td>' +
-        '<td>'+Fmt.esc(disciplineName(r.discipline))+'</td>' +
+        '<td class="dr-code dr-nowrap">'+Fmt.esc(drawCode(r))+'</td>' +
+        '<td class="dr-bk-title">'+Fmt.esc(r.title||'')+'</td>' +
+        '<td class="dr-nowrap"><span class="dr-typetag" title="'+Fmt.esc(ph)+'">'+Fmt.esc(phShort)+'</span></td>' +
+        '<td class="dr-nowrap">'+Fmt.esc(disciplineName(r.discipline))+'</td>' +
         '<td><span class="dr-pill '+statusCls(r.status)+'">'+Fmt.esc(statusLabel(r.status))+'</span></td>' +
-        '<td class="dr-r dr-nowrap'+(a!=null&&a>0?' dr-aging-late':'')+'">'+(a==null?'<span class="dr-mut">—</span>':(a>0?'+':'')+a+'d')+'</td>' +
-        // Doc column — the Backlog is where you chase an open submission, so the
-        // approved file needs to be reachable without opening the full editor.
-        '<td class="dr-bk-doc">'+(r.file_url
-          ? '<button class="dr-iconbtn" data-view="'+Fmt.esc(r.file_url)+'" title="View approved file">'+ico('eye',15)+'</button>'
-          : '<span class="dr-mut dr-mini">—</span>')+'</td>' +
+        '<td class="dr-r dr-nowrap '+(AGING_CLS[bucket]||'')+'" title="'+Fmt.esc(agTip)+'">'+
+          (a==null?'<span class="dr-mut">—</span>':(a>0?'+':'')+a+'d')+'</td>' +
+        // Actions. ⚠️ This column used to be "Doc" and held an eye button ONLY when
+        // the row had an uploaded file — which on an OPEN item is close to never, so
+        // it rendered a column of em-dashes. Every row now carries the edit affordance
+        // that the row click has always had but never showed: on a static screen there
+        // was nothing to say the list was actionable at all.
+        '<td class="dr-bk-act dr-nowrap">'+(r.file_url
+          ? '<button class="dr-iconbtn" data-view="'+Fmt.esc(r.file_url)+'" title="View approved file">'+ico('eye',15)+'</button>' : '')+
+          '<button class="dr-iconbtn dr-bk-edit" data-edit="'+r.id+'" title="Open '+Fmt.esc(drawCode(r)||'this drawing')+'">'+ico('pencil',15)+'</button></td>' +
       '</tr>';
     }).join('');
 
     var head = (CB ? '<th class="dr-cb"><input type="checkbox" id="dr-selall" title="Select all shown"></th>' : '') +
       BK_COLS.map(function (c){
         var active = bkSort.col===c.col;
-        return '<th class="dr-sortable" data-col="'+c.col+'">'+c.label+
+        return '<th class="dr-sortable" data-col="'+c.col+'"'+(c.tip?' title="'+Fmt.esc(c.tip)+'"':'')+'>'+c.label+
           (active ? ' <span class="dr-sortind">'+(bkSort.dir===1?'▲':'▼')+'</span>' : '')+'</th>';
       }).join('') +
-      '<th class="dr-bk-doc">Doc</th>';
+      '<th class="dr-bk-act"></th>';
+
+    // ⚠️ The table can be empty while the strip is not, now that the strip counts the
+    // WHOLE backlog: drill to "Due ≤3 days" on a register with none and the list is
+    // empty but 257 open items still exist. A bare header over no rows reads as a
+    // failure, so the empty state names the narrowing and offers the way out.
+    if (!body) {
+      body = '<tr class="dr-emptyrow"><td colspan="'+(CB ? BK_COLS.length + 2 : BK_COLS.length + 1)+'">' +
+        'None of the ' + base.length + ' open items match this filter. ' +
+        '<button class="dr-linklike" id="dr-bk-clearlocal">Show all open items</button></td></tr>';
+    }
 
     // Same selection bar as the Registry (same ids, so wireBacklogSel reuses the
     // shared handlers) — bulk status is the whole point on a backlog screen.
@@ -1584,7 +1648,7 @@ window.DrawingRegister = (function () {
 
     var dueSel = '<select class="pd-select pd-btn-sm dr-bk-due" id="dr-bk-due" ' +
       'title="Filter by whether the planned approval date has passed">' +
-      [['','All (due + not due)'],['due','Due only'],['notdue','Not due yet']].map(function (o){
+      [['','All (due + not due)'],['due','Overdue only'],['soon','Due ≤3 days'],['notdue','Not due yet']].map(function (o){
         return '<option value="'+o[0]+'"'+(bkDue===o[0]?' selected':'')+'>'+o[1]+'</option>';
       }).join('') + '</select>';
 
@@ -1597,7 +1661,12 @@ window.DrawingRegister = (function () {
     host.innerHTML = kpis +
       '<div class="pd-card"><h3 class="dr-h3">Open items' +
       '<span class="dr-mut" style="font-weight:400;font-size:12.5px;margin-left:8px;">'+
-      (anyFilter() || bkAging || bkDue ? 'Showing '+list.length+' filtered' : list.length+' total')+'</span>' +
+      // ⚠️ THIS is where the narrowed count belongs, now that the KPI strip counts the
+      // whole backlog. Says "N of M" rather than a bare "N filtered", so the two
+      // numbers on screen explain each other instead of looking like a disagreement.
+      ((bkAging || bkDue) ? 'Showing '+list.length+' of '+base.length
+        : anyFilter() ? 'Showing '+list.length+' filtered'
+        : list.length+' total')+'</span>' +
       agChip + '<span class="dr-bk-tools">' + dueSel + '</span></h3>' + selbar +
       '<div class="dr-bk-scroll"><table class="pd-table dr-table dr-bk-table"><thead><tr>'+head+'</tr></thead>' +
       '<tbody>'+body+'</tbody></table></div>' + moreBar + '</div>' +
@@ -1636,10 +1705,18 @@ window.DrawingRegister = (function () {
         if (r) openForm(r);
       };
     });
-    // ⚠️ The Doc button lives inside a row whose click opens the editor, so it
-    // MUST stopPropagation — otherwise viewing a file also pops the modal.
-    host.querySelectorAll('.dr-bk-doc button[data-view]').forEach(function (b){
+    // ⚠️ Both action buttons live inside a row whose click opens the editor, so they
+    // MUST stopPropagation — otherwise viewing a file also pops the modal, and the
+    // pencil would open it twice.
+    host.querySelectorAll('.dr-bk-act button[data-view]').forEach(function (b){
       b.onclick = function (e){ e.stopPropagation(); viewFile(b.dataset.view); };
+    });
+    host.querySelectorAll('.dr-bk-act button[data-edit]').forEach(function (b){
+      b.onclick = function (e){
+        e.stopPropagation();
+        var r = rows.find(function (x){ return String(x.id) === b.dataset.edit; });
+        if (r) openForm(r);
+      };
     });
     // Bulk selection — reuses the Registry's shared handlers/ids verbatim.
     host.querySelectorAll('input[data-sel]').forEach(function (cb){
@@ -1664,6 +1741,8 @@ window.DrawingRegister = (function () {
 
     var agc = document.getElementById('dr-agclear');
     if (agc) agc.onclick = function (){ bkAging = ''; render(); };
+    var clrLocal = document.getElementById('dr-bk-clearlocal');
+    if (clrLocal) clrLocal.onclick = function (){ bkAging = ''; bkDue = ''; bkShowAll = false; renderBacklog(); };
     wireDrills(host);   // the Backlog KPI cards
   }
 
@@ -3841,20 +3920,39 @@ window.DrawingRegister = (function () {
   // ---- Open Items by Aging (WPM "Work Package by Aging" pattern) -----------
   // Unfiltered — this is an aggregate for the whole project, independent of
   // whatever the Registry/Backlog filter bar currently has selected.
-  var AGING_ORDER = ['>60d overdue', '30-60d overdue', '0-30d (current)', 'Future', 'No due date'];
-  var AGING_COLOR = { '>60d overdue':'#EE3124', '30-60d overdue':'#d97706',
-    '0-30d (current)':'#8a8f98', 'Future':'#DCDBDB', 'No due date':'#c8c8c8' };
-  // Single source of truth for which bucket a row falls in — used both to build
-  // the chart and to filter the Backlog when a segment is clicked (UI review #7),
-  // so the drill-through can never disagree with the bar it came from.
+  // ⚠️ THE MIDDLE BUCKET USED TO BE CALLED "0-30d (current)" AND IT WAS A LIE.
+  // Its test was `a >= 0`, so a drawing ONE TO THIRTY DAYS LATE was labelled
+  // "current" and painted neutral grey next to "Future" — on a screen whose entire
+  // job is chasing late work. Measured on SLN101: 14 of the 19 the Overdue KPI
+  // counts sat in that grey bucket, so the chart said 5 overdue and the card above
+  // it said 19. Overdue is now three explicit bands that SUM TO THAT KPI, and the
+  // genuinely-not-late rows are the ones that read as calm.
+  // ⚠️ The three overdue labels must keep summing to `late` in renderBacklog()
+  // (both derive from agingDays > 0). If a boundary moves here, that stays true or
+  // the KPI and the chart start contradicting each other again.
+  var AGING_ORDER = ['>60d overdue', '31–60d overdue', '1–30d overdue',
+                     'Due ≤7 days', 'Not due yet', 'No due date'];
+  var AGING_COLOR = { '>60d overdue':'#EE3124', '31–60d overdue':'#d97706',
+    '1–30d overdue':'#f0a83c', 'Due ≤7 days':'#8a8f98',
+    'Not due yet':'#DCDBDB', 'No due date':'#c8c8c8' };
+  // Single source of truth for which bucket a row falls in — used to build the
+  // chart, to colour the Aging cell in the table, and to filter the Backlog when a
+  // segment is clicked, so the three can never disagree.
   function agingBucketOf(r) {
     var a = agingDays(r);
     if (a == null) return 'No due date';
     if (a > 60)    return '>60d overdue';
-    if (a > 30)    return '30-60d overdue';
-    if (a >= 0)    return '0-30d (current)';
-    return 'Future';
+    if (a > 30)    return '31–60d overdue';
+    if (a > 0)     return '1–30d overdue';
+    if (a >= -7)   return 'Due ≤7 days';
+    return 'Not due yet';
   }
+  // Severity class for the same six buckets, so the table's Aging column and the
+  // aging chart speak ONE colour language. Was a lone `dr-aging-late` on the table
+  // side and a hex map on the chart side, which is how the two drifted apart.
+  var AGING_CLS = { '>60d overdue':'dr-ag-late3', '31–60d overdue':'dr-ag-late2',
+    '1–30d overdue':'dr-ag-late1', 'Due ≤7 days':'dr-ag-soon',
+    'Not due yet':'dr-ag-ok', 'No due date':'dr-ag-none' };
   function agingBuckets(list) {
     var b = {}; AGING_ORDER.forEach(function (k){ b[k]=0; });
     (list || drawingRows()).forEach(function (r){
@@ -3868,13 +3966,24 @@ window.DrawingRegister = (function () {
   // date" compete for bar space let it swamp the whole chart into one giant
   // grey blob with the genuinely urgent buckets reduced to a sliver. The
   // undated count is still reported, just as a separate line, not a bar segment.
-  var AGING_DATED = ['>60d overdue', '30-60d overdue', '0-30d (current)', 'Future'];
+  // ⚠️ DERIVED, never restated. This was a second hardcoded copy of the bucket names,
+  // and renaming them in AGING_ORDER silently emptied the whole chart — every bucket
+  // summed to zero, so the bar fell through to its "nothing is dated" empty state
+  // while the table beside it showed 179 dated rows. Everything except the undated
+  // bucket is "dated", by definition; say that once.
+  var AGING_NODATE = 'No due date';
+  var AGING_DATED = AGING_ORDER.filter(function (k){ return k !== AGING_NODATE; });
   function agingBarSVG(buckets) {
-    var noDate = buckets['No due date'] || 0;
-    var datedTotal = AGING_DATED.reduce(function (s,k){ return s+buckets[k]; }, 0);
+    var noDate = buckets[AGING_NODATE] || 0;
+    var datedTotal = AGING_DATED.reduce(function (s,k){ return s+(buckets[k]||0); }, 0);
+    // ⚠️ STALE COPY, FIXED: this said "linked to a schedule activity yet — link one
+    // from its edit form", but the per-document → activity link was REMOVED (see
+    // backlogUrgency's note). It was telling the user to go and do something the app
+    // no longer offers. Aging is measured against the drawing's own planned approval
+    // date and nothing else, so that is what the empty state has to name.
     if (!datedTotal) {
       return '<p class="dr-mut">'+(noDate
-        ? 'None of the '+noDate+' open item'+(noDate===1?'':'s')+' are linked to a schedule activity yet — link one from its edit form to see aging here.'
+        ? 'None of the '+noDate+' open item'+(noDate===1?'':'s')+' has a planned approval date yet — set one to see how they are ageing.'
         : 'No open items.') + '</p>';
     }
     // Segments + legend drill into the Backlog filtered to that bucket (#7).
@@ -3894,9 +4003,9 @@ window.DrawingRegister = (function () {
     return '<div style="height:36px;border-radius:6px;overflow:hidden;display:flex;">'+bars+'</div>' +
       '<div style="margin-top:8px;">'+legend+'</div>' +
       (noDate ? '<p class="dr-mut" style="font-size:12px;margin:8px 0 0;">+ ' +
-        '<button class="dr-linklike"'+drillAttr('backlog', { aging:'No due date' })+
-        ' title="List the unlinked open items in the Backlog">'+noDate+' open item'+(noDate===1?'':'s')+'</button>' +
-        ' not yet linked to a schedule activity (excluded above, no due date to measure against).</p>' : '');
+        '<button class="dr-linklike"'+drillAttr('backlog', { aging:AGING_NODATE })+
+        ' title="List these open items in the Backlog">'+noDate+' open item'+(noDate===1?'':'s')+'</button>' +
+        ' with no planned approval date (excluded above — there is nothing to measure them against).</p>' : '');
   }
 
   // ---- Drawings by Period — Planned vs Actual (WPM "Work Package by Period") ---
@@ -4181,6 +4290,11 @@ window.DrawingRegister = (function () {
     filters.search     = '';
     filters.dupsOnly   = !!patch.dupsOnly;
     bkAging            = patch.aging      || '';
+    // ⚠️ Cleared when absent, exactly like bkAging. A drill that left a previous
+    // due-mode standing would show a narrower list than the card you just clicked
+    // counted — the "Open items" card's empty patch is precisely the reset.
+    bkDue              = patch.due        || '';
+    bkShowAll          = false;
     // Reflect it in the actual controls, or the bar would lie about the view.
     // ⚠️ A <select> silently ignores a value with no matching <option> — and a
     // legacy status like "Approved w/o comments" can exist in the data (and so
@@ -4224,11 +4338,13 @@ window.DrawingRegister = (function () {
     });
   }
 
-  function kpi(val, label, cls, drill) {
+  // `active` marks the card whose filter is currently applied, so a strip that is also
+  // a filter control says WHERE YOU ARE rather than only where you could go.
+  function kpi(val, label, cls, drill, active) {
     // ⚠️ `dr-kpi-`+cls, not `dr-`+cls: a bare `dr-ok` collided with the Approved
     // STATUS class, so one KPI card was silently picking up the status colour
     // slots as well as its own tone.
-    return '<div class="dr-kpi '+(cls?'dr-kpi-'+cls:'')+(drill?' dr-kpi-drill':'')+'"' +
+    return '<div class="dr-kpi '+(cls?'dr-kpi-'+cls:'')+(drill?' dr-kpi-drill':'')+(active?' dr-kpi-on':'')+'"' +
            (drill ? drillAttr(drill.view, drill.patch) + ' title="'+Fmt.esc(drill.tip||('Show these in the '+drill.view))+'"' : '') +
            '><div class="dr-kpi-val">'+val+'</div>' +
            '<div class="dr-kpi-label">'+label+'</div></div>';
