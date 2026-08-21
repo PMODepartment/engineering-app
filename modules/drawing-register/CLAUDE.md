@@ -1,5 +1,69 @@
 # Module: drawing-register
 
+## Migration 0019 is RUN, and schemes are verified working (2026-08-21) — fmlozano
+`0019` was applied to the live Engineering App project by the user. Every "0019 is not run yet" note
+below is superseded by this entry.
+
+### ⚠️ The live database could NOT be queried from here, and was not
+The session's network policy **403s CONNECT to `zkxzaijznutmiueeurbb.supabase.co`** (confirmed in
+`$HTTPS_PROXY/__agentproxy/status` → `recentRelayFailures`). Nothing below is a reading of production —
+it is the migration re-run against the real data, plus the shipped module driven against the schema
+that produced. **Anyone claiming to have checked the live rows from a session like this is guessing.**
+
+### The migration was re-run for real, on a real Postgres, on the real data
+Postgres 16 locally, seeded with the **1,492 SLN101 rows the shipped importer produces** (1,075
+drawings + 417 level nodes, 178 Change Order / 897 Main Contract), against a pre-0019 schema stub
+carrying only what 0019 references — `projects`, `users`, `drawing_register`, the RLS helpers,
+`engineering_audit_trg`, the `authenticated` role and Supabase's `auth.uid()`.
+
+    NOTICE: 0019: 2 scheme defs created, 1075 drawings stamped, 0 level nodes cleared
+
+| check | result |
+|---|---|
+| defs created | `Scheme 1` / Main Contract / **superseded**, `Scheme 2` / Change Order |
+| drawings per scheme | Scheme 1 **897**, Scheme 2 **178** — matches the pre-migration scope split exactly |
+| level nodes carrying a scheme | **0** |
+| drawings with no scheme | **0** |
+| scheme ↔ scope conflicts | **0** |
+| drawings pointing at a missing def | **0** |
+| **idempotency** | run twice more → `0 / 0 / 0`, and a full snapshot diff is **byte-identical** |
+
+- ⚠️ **The narrow backfill was tested, not assumed.** A second project (`GPR101`) with drawings but
+  **no Change Order row** was added and 0019 re-run: it correctly received **no defs and no schemes**.
+  That is the whole point of the qualifying condition — a single-design register must not grow a
+  scheme dimension it does not have.
+- ⚠️ **One harness gap, and it was the harness:** the first attempt failed on `schema "auth" does not
+  exist`. Supabase provides `auth.uid()`; the local stub did not. Not a migration defect.
+
+### The app was driven end-to-end against that schema
+`schemes_e2e.js` — **34 checks**, the shipped `module.js` in headless Chromium against a fake
+PostgREST returning the defs the migration actually produced, and recording every write the module
+sends. This covers the WIRING that `scheme_test.js` (which stubs `schemeDefs` directly) cannot.
+
+| | |
+|---|---|
+| `loadSchemeDefs()` | reads both defs, in `sort_order`, scopes and `superseded` intact |
+| Registry header | reads **Scheme**, not Scope |
+| filter | un-hides, offers `All schemes / Scheme 1 (superseded) / Scheme 2` |
+| filtering | 1075 → **897** / **178** → 1075 restored |
+| per-row selects | **1,075**, pre-selected, change-order rows amber |
+| changing a row | sends `{scheme, scope}` — **both**, so the export and transmittal cannot drift |
+| Schemes dialog | lists both, Remove **disabled** while drawings reference them |
+| rename | def updated **and** the drawings carried, matched on the **old** name |
+
+- ⚠️ **The filter's `onchange` binding is not exercised here** — it is bound inside `init()`, which this
+  harness does not run. The filter is driven through `applyFilterValues()` (the real path) and the
+  binding is asserted **statically** against the source instead. Do not read this as a live-click test.
+- ⚠️ Two harness bugs surfaced and **both were the harness**: `sel.onchange` was null for the reason
+  above, and a `find()` picked the first def-update rather than the renamed one (the save loop writes
+  every def in display order, so Scheme 1 comes first).
+
+### Still not covered
+No signed-in session, so **RLS was never exercised** — the policies compiled and the grants applied,
+but "can a Technical Officer actually insert a scheme" is unproven from here. The stub helpers all
+return `true`. First real use of **+ Level → Schemes…** is the test that matters.
+- Assets unchanged (`module.css/js?v=20260820f`) — this entry records verification, not a code change.
+
 ## Backlog UI pass: dense, honest, actionable (2026-08-20) — fmlozano
 Asked for as *"improve the user interface for the backlog tab"*. Rendered the real tab against the
 real SLN101 register first (257 open items) rather than working from memory, which is how the first
@@ -245,10 +309,10 @@ type**, not a sibling of one. Three things break if it becomes a level-1 node:
 **There was no way to create a scheme at all.** Schemes only ever arrived from an import, which read
 `(Scheme 2)` into the two-valued `scope` column — so a **Scheme 3 had nowhere to go**: it collapsed
 into the same `Change Order` bucket as Scheme 2 and became indistinguishable from it.
-- **`drawing_scheme_defs`** (migration `../../migrations/0019-drawing-schemes.sql`, **USER RUNS IT**)
-  — per project: `name`, `scope`, `superseded`, `sort_order`, `notes`. Mirrors `drawing_level_defs`
-  deliberately: same shape, same RLS, same **deploy-order tolerance** (a missing table means "no
-  schemes", never a failure to render).
+- **`drawing_scheme_defs`** (migration `../../migrations/0019-drawing-schemes.sql`, **RUN on
+  2026-08-21** — see the verification entry at the top of this file) — per project: `name`, `scope`,
+  `superseded`, `sort_order`, `notes`. Mirrors `drawing_level_defs` deliberately: same shape, same RLS,
+  same **deploy-order tolerance** (a missing table means "no schemes", never a failure to render).
 - **`drawing_register.scheme`** text, denormalised like `phase`. **Schemes… in the `+ Level` menu** is
   the editor: add / rename / set commercial scope / mark superseded / remove.
 - The importer parses the **number** now (`/scheme\s*(\d+)/`) and derives the scope from it — scheme 1
@@ -313,7 +377,8 @@ rather than one, TWD still being a top level with an empty fold, Combined Servic
 folding, the path-key regression guard, both `scopeOfRow` fallbacks, a `<select>` that still offers a
 value no def matches (the same data-loss guard `phaseOptions()` exists for), a hostile scheme name
 escaped, and a scheme-less row correctly excluded by a scheme filter.
-⚠️ **Not verified signed-in** — no live login here. **Migration 0019 is NOT run; the user runs it.**
+⚠️ **Not verified signed-in** — no live login here. ~~**Migration 0019 is NOT run; the user runs it.**~~
+**RUN 2026-08-21 by fmlozano, and verified** — see the entry at the top of this file.
 - Assets `module.css/js?v=20260820c`.
 
 ## Temporary Works is a top level again; the Overview is now one level-1 Gantt (2026-08-20) — fmlozano
