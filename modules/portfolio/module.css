@@ -344,3 +344,12 @@ body.pf-fit .pf-tablecard { flex:1; min-height:0; }
   .pd-topbar, .pf-projfilter, .pf-topbar-tools, .pf-tabs { display:none !important; }
   .pf-note { break-inside:avoid; }
 }
+
+/* ⚠️ THE [hidden] GUARD IS LOAD-BEARING, NOT BOILERPLATE. `.pf-projpop` sets
+   `display:flex`, and a class selector OUTRANKS the user-agent's `[hidden]` rule —
+   so the popup stayed permanently open over the KPI cards even though the element's
+   `hidden` attribute was correctly set. Found only by looking at the live site.
+   Any element in this module toggled via `el.hidden` and given a `display` here
+   needs the same line. (The sibling registers already carry it for
+   `.rf-clearfilt` / `.ve-clearfilt`, which is where the pattern comes from.) */
+.pf-projpop[hidden] { display:none; }
