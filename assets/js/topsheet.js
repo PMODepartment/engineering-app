@@ -189,7 +189,16 @@ window.TopSheet = (function () {
       td({ cs: 2, cls: 'ts-10 ts-c bt br bb', v: 'Location / Use' }) + '</tr>';
     // description body
     h += '<tr>' +
-      td({ cs: 3, cls: 'ts-10 bt br bb bl', v: pre(d.productName), h: '62mm' }) +
+      // ⚠️ 54mm, NOT 62mm — the MAS sheet DID NOT FIT ON A4. Measured: at 62mm the sheet
+      // rendered 304.69mm tall against A4's 297mm, so it overflowed by 7.69mm and paged
+      // onto a near-blank second sheet. That was true of the Print path all along; it only
+      // became obvious once the PDF export made the page count checkable (RFA and RFI both
+      // measure exactly 297mm and were never affected — this is a MAS-only overflow, so
+      // the fix belongs here and not in `.ts-doc`'s shared padding).
+      // The 8mm comes out of this free-text box rather than any labelled row or signature
+      // band: it is the one block on the form that is deliberately empty space, and 54mm
+      // still leaves far more room than the four fields beside it need.
+      td({ cs: 3, cls: 'ts-10 bt br bb bl', v: pre(d.productName), h: '54mm' }) +
       td({ cs: 2, cls: 'ts-10 ts-c bt br bb bl ts-mid', v: pre(d.manufacturer) }) +
       td({ cs: 2, cls: 'ts-10 bt br bb bl ts-mid', v: pre(d.specRef) }) +
       td({ cs: 2, cls: 'ts-10 ts-c bt br bb ts-mid', v: pre(d.location) }) + '</tr>';
@@ -435,6 +444,23 @@ window.TopSheet = (function () {
     data.client = data.client || (opts.defaults && opts.defaults.client_name) || '';
     if (!data.types) data.types = [];
 
+    // Attachments the caller has offered to place UNDER the sheet. Named on the dialog
+    // before anything is generated, and the note says plainly which will be merged and
+    // which cannot be — an .xlsx cannot become pages in a browser, and finding that out
+    // only after downloading is worse than being told up front.
+    var atts = (opts.attachments || []).filter(Boolean);
+    var nAtt = atts.length;
+    var nMergeable = atts.filter(function (a) { return isPdf(a.name, a.type); }).length;
+    var attNote = '';
+    if (nAtt) {
+      attNote = nMergeable === nAtt
+        ? (nAtt === 1 ? 'The attached document will be placed under this sheet.'
+                      : 'All ' + nAtt + ' attached documents will be placed under this sheet.')
+        : (nMergeable
+            ? nMergeable + ' of ' + nAtt + ' documents merge under the sheet; the rest download separately (only PDFs can be merged).'
+            : 'The attached document is not a PDF, so it downloads separately rather than under the sheet.');
+    }
+
     var form = FIELDS[kind].map(function (f) {
       var key = f[0], label = f[1], type = f[2] || 'text';
       var v = data[key] == null ? '' : data[key];
@@ -473,7 +499,10 @@ window.TopSheet = (function () {
       '</div>' +
       '<div class="pd-modal-actions ts-noprint">' +
         '<button class="pd-btn" id="ts-cancel">Cancel</button>' +
-        '<button class="pd-btn pd-btn-primary" id="ts-print">Print / Save as PDF</button>' +
+        (nAtt ? '<span class="ts-attnote" id="ts-attnote">' + attNote + '</span>' : '') +
+        '<button class="pd-btn" id="ts-print">Print</button>' +
+        '<button class="pd-btn pd-btn-primary" id="ts-pdf">' +
+          (nAtt ? 'Download PDF + document' : 'Download PDF') + '</button>' +
       '</div>', { noBackdropClose: true });
 
     var prev = m.el.querySelector('#ts-prev');
@@ -502,7 +531,185 @@ window.TopSheet = (function () {
       setTimeout(function () { window.print(); }, 60);
       setTimeout(done, 4000);   // Safari/older Chrome do not always fire afterprint
     };
+
+    var pdfBtn = m.el.querySelector('#ts-pdf');
+    pdfBtn.onclick = async function () {
+      var orig = pdfBtn.textContent;
+      pdfBtn.disabled = true; pdfBtn.textContent = 'Generating…';
+      try {
+        var pkg = await buildPackage(kind, data, atts, packageName(kind, data));
+        saveBlob(pkg.file.name, pkg.file.blob);
+        // Non-PDF attachments are saved alongside, each as itself. Named in the toast so
+        // nobody has to guess whether the document made it out.
+        pkg.separate.forEach(function (s) { saveBlob(s.name, s.blob); });
+        var msg = pkg.merged
+          ? 'Top sheet downloaded with ' + pkg.merged + ' document' + (pkg.merged > 1 ? 's' : '') + ' merged under it'
+          : 'Top sheet downloaded';
+        if (pkg.separate.length) msg += ' · ' + pkg.separate.length + ' sent as a separate file';
+        // A document that was supposed to be under the sheet and is not MUST be said out
+        // loud — a top sheet with a missing attachment looks complete.
+        if (pkg.skipped.length) {
+          UI.toast('Could not read: ' + pkg.skipped.join(', ') + ' — the sheet downloaded without it.', 'warn');
+        } else {
+          UI.toast(msg, 'ok');
+        }
+      } catch (e) {
+        UI.toast('PDF error: ' + ((e && e.message) || e), 'error');
+      } finally {
+        pdfBtn.disabled = false; pdfBtn.textContent = orig;
+      }
+    };
     return m;
+  }
+
+  // ==========================================================================
+  // PDF OUTPUT — a real file, so the sheet can be merged and emailed
+  // --------------------------------------------------------------------------
+  // Printing (window.print) is still here and is still the best route to paper. But
+  // "generate and email the top sheet with the document under it" needs a FILE, and the
+  // browser's print dialog does not give you one — it writes wherever the user chooses
+  // and tells the page nothing. So there are two outputs now, deliberately:
+  //   Print          → paper / the browser's own Save-as-PDF, pixel-exact, no library
+  //   Download / Email → a Blob built here, which can be merged and attached
+  //
+  // Rasterised via html2canvas, the same engine the Planners Dashboard's Minutes-of-
+  // Meeting export uses (`momDownloadPDF`), and its two hard-won rules are reproduced
+  // below because they are not guessable. The sheet is a form someone signs, so losing
+  // selectable text costs nothing; the geometry is what matters and topsheet.css already
+  // states it in millimetres.
+  // ==========================================================================
+
+  function needLib(name, ok) {
+    if (ok) return;
+    throw new Error('The ' + name + ' library did not load — check the connection and reload.');
+  }
+
+  // Build a standalone .ts-doc for capture.
+  // ⚠️ NOT the preview node. `.ts-prev .ts-doc` carries `transform: scale(.62)` so the A4
+  // sheet fits beside the form, and html2canvas honours transforms — capturing the preview
+  // yields a sheet rendered at 62% inside a full-size page. A fresh node with no `.ts-prev`
+  // ancestor gets the unscaled rule.
+  function captureHolder(kind, data) {
+    var holder = document.createElement('div');
+    // ⚠️⚠️ THE HOLDER IS PARKED OFF-SCREEN; THE CAPTURED NODE STAYS IN NORMAL FLOW INSIDE
+    // IT. Do NOT put position:fixed/absolute on the .ts-doc itself. html2pdf clones the
+    // source into its own container and measures it there, and an out-of-flow element
+    // contributes NOTHING to that container's height — html2canvas then gets the right
+    // width and a height of ZERO and renders an empty page. An explicit height does not
+    // rescue it, because the clone is still out of flow. This is documented at length in
+    // planning-app's issues-lessons module, which produced a completely blank PDF this way.
+    holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:210mm;z-index:-1;';
+    holder.innerHTML = render(kind, data);
+    document.body.appendChild(holder);
+    return holder;
+  }
+
+  var A4_H_MM = 297;
+  var PX_PER_MM = 96 / 25.4;          // CSS px per mm, the ratio the browser laid the sheet out with
+
+  // The top sheet alone, as a PDF Blob.
+  async function toPdfBlob(kind, data) {
+    needLib('PDF', typeof window.html2pdf === 'function');
+    var holder = captureHolder(kind, data);
+    try {
+      var node = holder.firstElementChild;
+
+      // ⚠️ HOW MANY PAGES THIS SHEET ACTUALLY NEEDS, measured off the laid-out element.
+      // html2pdf decides pagination from the rasterised canvas height converted to mm,
+      // and that conversion rounds: a sheet measuring 296.999mm — comfortably inside A4 —
+      // still came out as TWO pages, the second one blank. On a merged package that blank
+      // sheet lands between the top sheet and the document being approved, which on a
+      // controlled form reads as a missing page. The element's own height is the ground
+      // truth, so it is what decides the page count; html2pdf's extra pages are trimmed
+      // below. The 1mm tolerance is the rounding slack, not a fudge for real overflow —
+      // a sheet that genuinely runs long still gets its second page.
+      var mmH = node.getBoundingClientRect().height / PX_PER_MM;
+      var expect = Math.max(1, Math.ceil((mmH - 1) / A4_H_MM));
+
+      var pdf = await window.html2pdf().set({
+        // ⚠️ margin 0. topsheet.css already lays the sheet out as a full 210x297mm page
+        // with its own internal padding; adding a PDF margin on top shrinks the form and
+        // pushes it off centre, which on a controlled document reads as the wrong revision.
+        margin: 0,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      }).from(node).toPdf().get('pdf');
+
+      var nPages = pdf.internal.getNumberOfPages();
+      while (nPages > expect) { pdf.deletePage(nPages); nPages--; }
+      return pdf.output('blob');
+    } finally {
+      // ⚠️ In `finally`: a throw mid-render would otherwise leave the off-screen node in
+      // the document and every later export would stack another one.
+      if (holder.parentNode) holder.parentNode.removeChild(holder);
+    }
+  }
+
+  function isPdf(name, type) {
+    return /pdf/i.test(String(type || '')) || /\.pdf$/i.test(String(name || ''));
+  }
+
+  // Concatenate PDFs, top sheet first.
+  // ⚠️ ONLY PDFs CAN BE MERGED. An .xlsx or .docx attachment is not a page stream and
+  // there is nothing in the browser that can turn one into pages; a converter would mean
+  // a server-side service. So a non-PDF attachment RIDES ALONG as its own file and the
+  // caller is told which is which, rather than being silently dropped or silently
+  // converted into something lossy. Chosen explicitly with the user.
+  async function mergePdfs(blobs) {
+    if (blobs.length === 1) return blobs[0];
+    needLib('PDF merge', !!(window.PDFLib && window.PDFLib.PDFDocument));
+    var out = await window.PDFLib.PDFDocument.create();
+    for (var i = 0; i < blobs.length; i++) {
+      var buf = await blobs[i].arrayBuffer();
+      // ignoreEncryption: consultants' drawing PDFs are very often print-protected. Those
+      // open fine and copy fine; refusing them would block the common case.
+      var src = await window.PDFLib.PDFDocument.load(buf, { ignoreEncryption: true });
+      var pages = await out.copyPages(src, src.getPageIndices());
+      pages.forEach(function (p) { out.addPage(p); });
+    }
+    return new Blob([await out.save()], { type: 'application/pdf' });
+  }
+
+  // Build the full package for a sheet.
+  //   attachments: [{ name, type, get: async () => Blob }]
+  // Returns { file:{name,blob}, separate:[{name,blob}], merged:n, skipped:[names] }
+  // ⚠️ A failed attachment fetch does NOT fail the whole package — the top sheet is the
+  // thing being generated and is useful on its own. The failure is reported back so the
+  // caller can say so, rather than producing a merged file that quietly lacks a document.
+  async function buildPackage(kind, data, attachments, baseName) {
+    var sheet = await toPdfBlob(kind, data);
+    var parts = [sheet], separate = [], skipped = [];
+    for (var i = 0; i < (attachments || []).length; i++) {
+      var a = attachments[i];
+      var blob = null;
+      try { blob = await a.get(); } catch (e) { blob = null; }
+      if (!blob) { skipped.push(a.name || 'attachment'); continue; }
+      if (isPdf(a.name, blob.type || a.type)) parts.push(blob);
+      else separate.push({ name: a.name || 'attachment', blob: blob });
+    }
+    var merged = await mergePdfs(parts);
+    return {
+      file: { name: (baseName || (kind + ' top sheet')) + '.pdf', blob: merged },
+      separate: separate, merged: parts.length - 1, skipped: skipped
+    };
+  }
+
+  function saveBlob(name, blob) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    // Revoked late: Firefox cancels an in-flight download if the URL dies immediately.
+    setTimeout(function () { URL.revokeObjectURL(url); }, 20000);
+  }
+
+  // A filename someone can find in a mail client six months later: the form, the id,
+  // the project. Never just "topsheet.pdf".
+  function packageName(kind, data) {
+    var id = data[kind.toLowerCase() + 'Id'] || data.masId || data.rfaId || data.rfiId || '';
+    return [kind, id, data.projectCode || data.projectName || '']
+      .filter(Boolean).join(' ').replace(/[\\/:*?"<>|]+/g, '-').trim();
   }
 
   // ---- per-project defaults (migration 0012) -------------------------------
@@ -517,6 +724,10 @@ window.TopSheet = (function () {
 
   return {
     open: open, render: render, loadDefaults: loadDefaults, FORMS: FORMS,
+    // The PDF surface is public because the register modules build packages without
+    // opening the dialog (bulk issue, and the email path).
+    toPdfBlob: toPdfBlob, mergePdfs: mergePdfs, buildPackage: buildPackage,
+    packageName: packageName, saveBlob: saveBlob, isPdf: isPdf,
     _internals: { FIELDS: FIELDS, RFA_TYPES: RFA_TYPES, REVIEW_STATUS: REVIEW_STATUS, fmtDate: fmtDate }
   };
 })();

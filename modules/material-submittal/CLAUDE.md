@@ -1,5 +1,79 @@
 # Module: material-submittal
 
+## Top sheets now produce a real PDF, with the submitted document merged under it (2026-08-24) — fmlozano
+User: *"Auto Generate and Email Top Sheet MAS & RFA & RFI through App… The RFA and MAS will have a
+document attached to it and the topsheet will be placed on top of the document for signature and
+approval."* This pass does the **generate + merge** half. Email is separate (Microsoft Graph).
+
+### Why a second output instead of reusing Print
+`window.print()` is still here and is still the best route to paper, but **it cannot give the page a
+file** — it writes wherever the user chooses and tells the app nothing. Merging a document underneath
+the sheet, and later attaching it to mail, both need a Blob. So there are two buttons now:
+**Print** (paper, pixel-exact, no library) and **Download PDF** (a Blob this code owns).
+- Rasterised with **html2pdf** (html2canvas + jsPDF), the same engine planning-app's Minutes-of-
+  Meeting export uses — which is what the user asked to pattern this on. The sheet is a form someone
+  signs, so losing selectable text costs nothing; the geometry is what matters and topsheet.css
+  already states it in millimetres.
+- **pdf-lib** does the page-level merge. Both load beside `topsheet.js` in this module's `index.html`.
+- ⚠️ **The capture node is a FRESH `.ts-doc`, never the preview.** `.ts-prev .ts-doc` carries
+  `transform: scale(.62)` so the A4 sheet fits beside the form, and html2canvas honours transforms —
+  capturing the preview gives you a sheet rendered at 62% inside a full-size page.
+- ⚠️ **The holder is parked off-screen; the captured node stays IN NORMAL FLOW inside it.** Putting
+  `position:fixed` on the captured element produces a **completely blank PDF** — html2pdf clones the
+  node into its own container and measures it there, and an out-of-flow element contributes nothing to
+  that container's height, so html2canvas gets a height of zero. Documented at length in
+  planning-app's issues-lessons module, which lost real time to exactly this.
+
+### ⚠️ REAL BUG FOUND: the MAS sheet did not fit on A4 — and never had
+Measured while checking page counts: the MAS sheet rendered **304.69mm tall against A4's 297mm**, so
+it overflowed by 7.69mm onto a near-blank second page. **This was true of the Print path all along**;
+it only became visible once the PDF made the page count checkable. RFA and RFI both measure exactly
+297mm and were never affected, so this is a **MAS-only overflow** and the fix belongs in `renderMAS`,
+not in `.ts-doc`'s shared padding.
+- The 8mm came out of the **product-detail free-text box (62mm → 54mm)** — the one block on the form
+  that is deliberately empty space, rather than any labelled row or signature band. Re-measured after:
+  **210.00 × 297.00mm, zero overflow, no clipped cells, every label and entered value still present.**
+
+### ⚠️ AND a second, separate cause of the blank page: html2pdf's rounding
+Even at 296.999mm the export still came out as **two pages**. html2pdf paginates from the rasterised
+canvas height converted to mm, and that conversion rounds up. So the page count is now decided by the
+**laid-out element's own height** — the ground truth — and html2pdf's surplus pages are deleted off
+the jsPDF instance (`.toPdf().get('pdf')` → `deletePage`).
+- ⚠️ The 1mm tolerance is rounding slack, **not** a fudge for real overflow: a sheet that genuinely
+  runs long still gets its second page. Do not widen it.
+- Why this matters more than it sounds: on a merged package that blank sheet lands **between the top
+  sheet and the document being approved**, which on a controlled form reads as a missing page.
+
+### Merging, and what cannot be merged
+`TopSheet.buildPackage(kind, data, attachments, baseName)` returns
+`{file:{name,blob}, separate:[], merged:n, skipped:[]}`.
+- ⚠️ **Only PDFs can be merged.** An .xlsx or .docx is not a page stream and nothing in the browser
+  can make it one. A non-PDF attachment therefore **rides along as its own file** and the dialog says
+  so *before* anything is generated — chosen explicitly with the user over blocking generation or
+  standing up a conversion service.
+- ⚠️ **A failed attachment fetch does not fail the package.** The sheet is still produced and the
+  failure is reported by name in a warning toast, because a top sheet whose document silently didn't
+  make it **looks complete**.
+- `ignoreEncryption: true` on load — consultants' drawing PDFs are very often print-protected, and
+  those copy fine; refusing them would block the common case.
+- The MAS sheet gets the row's own attachment (`file_url`, fetched through a 120s signed URL, since
+  the bucket is private). **RFA/RFI get none** — they are opened blank from the toolbar with no record
+  behind them, so there is nothing to put underneath. That changes when the RFA register lands.
+- Filenames are `MAS MAS-0042 SLN101.pdf` — form, id, project — so they are findable in a mail client
+  six months later.
+
+### Verification
+**16 checks in a real browser** (`ts.html`, `topsheet.js` `eval`'d and driven directly): the output
+carries the `%PDF` magic, is **exactly one A4 page** at 595.28×841.89pt, and is >40KB (a blank capture
+came out at ~1–2KB, so this pins the out-of-flow regression); a 3-page attachment merges to **4 pages
+total**; an .xlsx does **not** become pages while a PDF beside it still merges; an attachment whose
+fetch throws lands in `skipped[]` and the sheet is still produced alone; no off-screen holder is left
+in the document; and RFA and RFI both export with real content.
+- ⚠️ **Not verified signed-in**, and **no screenshot** — this environment's compositor is stalled
+  (a long-standing limit noted throughout these files), so the sheet is verified by measured geometry
+  and asserted content, not by looking at it.
+- Assets `topsheet.js/css?v=20260824a`, `module.js?v=20260824a`.
+
 ## Dedicated UI pass — shared type scale, heading drift fixed (2026-08-06) — fmlozano
 Part of the two-register UI pass; the Drawing Register's CLAUDE.md carries the full findings. This
 module came out of it well — **all 7 pills already passed WCAG AA** (5.52–7.37:1 light,

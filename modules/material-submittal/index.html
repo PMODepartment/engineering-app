@@ -8,7 +8,7 @@
   <script src="../../assets/js/theme.js?v=20260819a"></script>
   <title>Material Submittal Log · Engineering App</title>
   <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260819a" />
-  <link rel="stylesheet" href="../../assets/css/topsheet.css?v=20260819a" />
+  <link rel="stylesheet" href="../../assets/css/topsheet.css?v=20260824a" />
   <link rel="stylesheet" href="module.css?v=20260818a" />
 </head>
 <body>
@@ -83,8 +83,14 @@
   <script src="../../assets/js/offline.js?v=20260819a"></script>
   <script src="../../assets/js/collab.js?v=20260819a"></script>
   <script src="../../assets/js/autosave.js?v=20260819a"></script>
-  <script src="../../assets/js/topsheet.js?v=20260819a"></script>
-  <script src="module.js?v=20260818a"></script>
+  <!-- Top-sheet PDF output. html2pdf bundles html2canvas + jsPDF (the same engine the
+       Planners Dashboard uses for its Minutes-of-Meeting export); pdf-lib does the
+       page-level merge that puts the submitted document underneath the sheet.
+       Both are only needed by topsheet.js, so they load beside it. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="../../assets/js/topsheet.js?v=20260824a"></script>
+  <script src="module.js?v=20260824a"></script>
   <script>
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);

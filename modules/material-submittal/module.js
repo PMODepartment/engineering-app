@@ -1193,6 +1193,36 @@ window.MaterialSubmittal = (function () {
     };
   }
 
+  // Fetch a stored attachment as a Blob, for merging under the top sheet.
+  // ⚠️ The bucket is PRIVATE, so this signs a short-lived URL and fetches it — the same
+  // route viewFile() takes. A direct storage `download()` would also work, but signing
+  // keeps one code path for "get at this object" and one place where the TTL lives.
+  // Returns null rather than throwing: buildPackage() reports a missing document and
+  // still produces the sheet, which is more useful than failing the whole generate.
+  async function fetchAttachment(path) {
+    try {
+      var res = await sb().storage.from(BUCKET).createSignedUrl(path, 120);
+      if (res.error || !res.data) return null;
+      var r = await fetch(res.data.signedUrl);
+      if (!r.ok) return null;
+      return await r.blob();
+    } catch (e) { return null; }
+  }
+
+  // What the top sheet should carry underneath it. A MAS sheet is the cover for the
+  // submitted document, so the row's own attachment is exactly that document.
+  function topSheetAttachments(r) {
+    if (!r || !r.file_url) return [];
+    var name = fileLabel(r.file_url);
+    return [{
+      name: name,
+      // The stored path has no MIME type, so the extension in the label is all there is
+      // to go on — TopSheet.isPdf() reads the blob's own type as well once fetched.
+      type: /\.pdf$/i.test(name) ? 'application/pdf' : '',
+      get: function () { return fetchAttachment(r.file_url); }
+    }];
+  }
+
   async function openTopSheet(kind, r) {
     if (!pid) { UI.toast('Select a project first.', 'error'); return; }
     var defaults = await ensureTsDefaults();
@@ -1200,6 +1230,10 @@ window.MaterialSubmittal = (function () {
       kind: kind,
       project: { id: pid, name: projName() },
       defaults: defaults,
+      // ⚠️ Only the MAS sheet gets the row's document: it is generated FROM a submittal
+      // and covers it. RFA/RFI are opened blank from the toolbar with no record behind
+      // them, so there is nothing to place underneath.
+      attachments: kind === 'MAS' ? topSheetAttachments(r) : [],
       data: kind === 'MAS' && r ? masDataOf(r) : {
         date: todayISO(),
         from: (PROFILE && PROFILE.name) || '',

@@ -146,3 +146,11 @@
 /* The issued forms space the four Copies entries apart; HTML would collapse the
    runs of spaces, so this cell preserves them. */
 .ts-t td.ts-pre-sp { white-space: pre-wrap; }
+
+/* The attachment note in the dialog's action row. `margin-right:auto` pushes it left of
+   the buttons so it reads as a statement about what the buttons will do, not as a label
+   attached to one of them. */
+.ts-attnote {
+  margin-right: auto; font-size: 11.5px; color: var(--pd-muted);
+  max-width: 46ch; line-height: 1.35; text-align: left;
+}
