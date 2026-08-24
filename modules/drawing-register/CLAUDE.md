@@ -54,8 +54,33 @@ often opened into a background tab: the append never ran, the grid stopped at 20
 like a complete register**. A silently TRUNCATED register is far worse than a slow one, because
 nothing about it looks wrong. Caught because the verification harness runs with
 `document.hidden === true`. We are not animating; frame alignment buys nothing.
-- Background tabs throttle `setTimeout` to ~1 s, so a 1,764-row register takes ~8 s to fill while
-  hidden and ~1 s while focused. It **completes** either way, which is the requirement.
+- Background tabs throttle `setTimeout`, so a 1,764-row register takes ~8 s to fill while hidden and
+  ~1 s while focused. It **completes** either way, which is the requirement.
+
+### ⚠️ LIVE FINDING (2026-08-25): a hidden tab does not throttle timers, it FREEZES them
+Verified **signed in on the deployed site** against the real **GPR101** register (1,053 drawings /
+1,225 display rows). The first paint was correctly **exactly 200 rows and 200 lanes**, the drained
+grid matched its Gantt at **1,225 rows == 1,225 lanes with 0 mismatches across every position** and
+**1,053 unique drawing ids (no duplicates)**, and a foregrounded re-render measured **466 ms**
+against the 1,256 ms baseline.
+
+But with the tab **hidden**, the drain **sat at 1,200 of 1,225 rows indefinitely** — the footer read
+"Showing 1053 of 1053 drawings" while only **1,032 drawing rows** were painted.
+- It is **not** a logic bug. `document.visibilityState` was `hidden`, and a control `setInterval` of
+  120 ms **did not fire once in over a minute**: Chrome's intensive throttling freezes timer chains
+  in a hidden tab outright, far beyond the ~1 s throttle assumed above.
+- Nobody is reading a hidden tab, so stalling is acceptable. **Waiting for a frozen timer to thaw is
+  not**, because the user switches to the tab and watches a short register slowly fill.
+- Fix: the drain also listens for **`visibilitychange`** and resumes immediately on becoming
+  visible. That event fires even while timers are frozen, so it is the reliable kick. The listener is
+  removed on completion **and** on being superseded, or every re-render would leak one.
+- ⚠️ **This makes the rAF prohibition sharper, not softer.** rAF does not fire in a hidden tab at
+  all, so the drain would never resume and the register would stay **silently truncated** — and a
+  truncated register looks complete. Do not "simplify" either half of this.
+- ⚠️ **Measuring this over CDP is its own trap**, on top of the 45 s `Runtime.evaluate` limit these
+  notes already warn about: a polling loop inside one eval times out, and while `window` state set by
+  one eval IS visible to the next, page timers stay frozen regardless. Keep each eval short and read
+  counts; never poll from inside the page.
 
 ### Selection no longer re-renders
 `#dr-selall` and `#dr-selclear` called `render()` — ~1.2 s of layout to tick a checkbox, when the row
