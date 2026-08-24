@@ -2244,7 +2244,7 @@ window.DrawingRegister = (function () {
       // A newer render (or a view switch that threw this DOM away) makes the rest of this
       // run pointless — and appending into a detached tbody would silently build rows
       // nobody can see.
-      if (tok !== _regTok || !tbody.isConnected) return;
+      if (tok !== _regTok || !tbody.isConnected) { done(); return; }
       var to = Math.min(at + REG_CHUNK, disp.length);
       // ⚠️ WIRED IN A <template>, THEN MOVED IN — deliberately, and it must stay this
       // way. Inserting first and then calling wireRegisterRows(tbody, …) would re-bind
@@ -2266,9 +2266,31 @@ window.DrawingRegister = (function () {
       var lanes = host.querySelector('.dr-rg-body');
       if (lanes) lanes.insertAdjacentHTML('beforeend', regLanesHTML(disp, at, to));
       at = to;
-      if (at < disp.length) setTimeout(step, 0);
-      else refreshSel(host);   // select-all can only be right once every row exists
+      if (at < disp.length) { setTimeout(step, 0); return; }
+      done();
+      refreshSel(host);        // select-all can only be right once every row exists
     }
+
+    // ⚠️ RESUME THE MOMENT THE TAB IS LOOKED AT. Chrome does not merely throttle
+    // timers in a hidden tab, it FREEZES them: measured on the live site with the tab
+    // hidden, a 120ms interval did not fire once in over a minute, and this drain sat at
+    // 1,200 of 1,225 rows indefinitely. Nobody is reading a hidden tab, so stalling is
+    // fine — but waiting for a frozen timer to thaw is not, because the user would
+    // switch to the tab and watch a short register slowly fill. `visibilitychange` fires
+    // on becoming visible even while timers are frozen, so it is the reliable kick.
+    //
+    // This is also why the chain is setTimeout and NOT requestAnimationFrame: rAF does
+    // not fire in a hidden tab AT ALL, so the drain would never resume and the register
+    // would stay silently truncated — and a truncated register looks complete. See the
+    // banner above; do not "simplify" either half of this.
+    function onVis() {
+      if (document.visibilityState === 'visible' && tok === _regTok) step();
+    }
+    document.addEventListener('visibilitychange', onVis);
+    // Removed on completion AND on being superseded, or every re-render would leave
+    // another listener behind and a long session would accumulate hundreds.
+    function done() { document.removeEventListener('visibilitychange', onVis); }
+
     setTimeout(step, 0);
   }
 
