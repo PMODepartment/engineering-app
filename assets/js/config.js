@@ -51,8 +51,15 @@ window.APP_CONFIG = {
     // The RFA register (migration 0020). Project-scoped, so it IS gated when no
     // project is chosen — do not add `orgWide` here.
     { key: 'request-for-approval', name: 'Request for Approval', path: 'modules/request-for-approval/index.html', icon: 'fileText', enabled: true },
-    // ⚠️ The only org-wide module. See `orgWide` above before copying this line.
+    // ⚠️ ORG-WIDE. See `orgWide` above before copying either of these lines — a module
+    // marked org-wide must ALSO never redirect to projects.html from its own init(),
+    // or it becomes unreachable from a cold start (nav does not gate it, so nothing
+    // sets a project for it, so a redirect there is a dead end).
     { key: 'initiatives',        name: 'Initiatives',            path: 'modules/initiatives/index.html',        icon: 'bulb',      enabled: true, orgWide: true },
+    // Cross-project engineering rollup: high-level Gantt + ISD status, grouped by
+    // group head. Owns no table — it reads drawing_register with no project
+    // predicate and lets RLS scope it.
+    { key: 'portfolio',          name: 'Portfolio',              path: 'modules/portfolio/index.html',          icon: 'barChart',  enabled: true, orgWide: true },
   ],
 };
 

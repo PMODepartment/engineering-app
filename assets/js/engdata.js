@@ -210,6 +210,157 @@
     return out;
   }
 
+  // ==========================================================================
+  // PORTFOLIO — the same drawing model, read across EVERY accessible project
+  // --------------------------------------------------------------------------
+  // ⚠️ USES fetchAllOrgWide ON A PROJECT-SCOPED TABLE, AND THAT IS ITS INTENDED
+  // USE. `fetchAll` hardcodes `.eq('project_id', pid)`, which is exactly wrong for
+  // a portfolio: we want every project the signed-in user may read and no more.
+  // Applying no project predicate and letting RLS decide is what makes this
+  // correct — a `user` assigned to one project gets a one-project portfolio,
+  // with no code here deciding that.
+  //
+  // ⚠️ COMPUTED IN THE CLIENT FROM RAW ROWS, NOT BY A SQL RPC, DELIBERATELY.
+  // A `portfolio_engineering_summary()` RPC was the obvious move (planning-app has
+  // one for resources) and was rejected: the drawing register's roll-up rules are
+  // intricate — a sheet is a drawing whose parent is a drawing, a single-sheet
+  // row's STATUS is its approval, sentinel dates must be refused — and every one of
+  // those would have to be re-expressed in SQL. That is a SECOND DEFINITION of
+  // numbers the register already defines, and this repo's history is full of what
+  // that costs (`rollup()` vs `syncParent()` disagreeing about "approved" produced a
+  // row that stored 1/2 and displayed 0/2). The same rules are applied here, in one
+  // place, over the same vocabulary this file already shares with the modules.
+  //
+  // ⚠️ THE HONEST LIMIT, AND IT MUST STAY STATED IN THE UI: design progress here is
+  // counted in DRAWINGS, while the per-project Overview counts CD/SD/FCD/TWD in
+  // TRACKING UNITS (`is_tracking_unit`, a Technical Officer's designation). Those are
+  // two different bases and their percentages legitimately differ. Reproducing the
+  // tracking-unit basis needs the whole level tree and its nested-unit refusal rule,
+  // which is the register's own job. ISD is the one level whose basis is identical
+  // (partial sheet credit), so ISD figures here match the register exactly — which is
+  // precisely why ISD gets its own reporting on the portfolio.
+  var PORTFOLIO_WARN_ROWS = 40000;
+
+  function validApprovalDate(d) {
+    // Same guard, same range, as the register's validDate(): a legacy import
+    // sentinel like '2000-01-06' is not a date and must never win a min()/max().
+    if (!d) return false;
+    var y = +String(d).slice(0, 4);
+    return y >= 2015 && y <= 2100;
+  }
+
+  // The five fixed top levels, in the register's own order. A register that holds a
+  // name outside this set still reports — under its own name, at the end — rather
+  // than being dropped.
+  var TOP_LEVELS = ['Concept Design', 'Schematic Design', 'For Construction Drawings',
+    'Temporary Works Drawings', 'Individual Services Drawings'];
+  var ISD = 'Individual Services Drawings';
+
+  async function portfolio(opts) {
+    opts = opts || {};
+    var today = todayISO();
+    var rows = await fetchAllOrgWide('drawing_register',
+      'id,project_id,drawing_no,drawing_code,title,status,node_kind,parent_id,phase,' +
+      'no_of_sheets,approved_sheets,planned_approval,actual_approval,updated_at');
+
+    // Said out loud rather than silently truncated — the planning app's cross-project
+    // S-Curve warns the same way above 20,000 activities.
+    var warning = rows.length >= PORTFOLIO_WARN_ROWS
+      ? 'Read ' + rows.length.toLocaleString() + ' drawing rows across the portfolio. ' +
+        'This is a large read; consider narrowing the project filter.'
+      : null;
+
+    var byId = {};
+    rows.forEach(function (r) { byId[r.id] = r; });
+    function isNodeRow(r) { return !!r && !!r.node_kind && r.node_kind !== 'drawing'; }
+    // ⚠️ THE RULE, copied from the register rather than re-derived: a sheet is a
+    // drawing whose PARENT IS ITSELF A DRAWING. Since 0017 a drawing also carries a
+    // level node's parent_id, so "has a parent" would classify every drawing as a
+    // sheet — the exact bug that made the dashboard tile read zero.
+    function isSheetRow(r) {
+      if (!r.parent_id) return false;
+      var p = byId[r.parent_id];
+      return !!p && !isNodeRow(p);
+    }
+
+    var proj = {};                       // project_id -> aggregate
+    function bucketFor(pidKey, phase) {
+      var p = proj[pidKey] || (proj[pidKey] = {
+        project_id: pidKey, drawings: 0, approvedDrawings: 0, sheets: 0, approvedSheets: 0,
+        overdue: 0, minPlanned: null, maxPlanned: null, maxActual: null,
+        levels: {}, isd: null
+      });
+      var L = p.levels[phase] || (p.levels[phase] = {
+        phase: phase, drawings: 0, approvedDrawings: 0, sheets: 0, approvedSheets: 0,
+        overdue: 0, minPlanned: null, maxPlanned: null, maxActual: null
+      });
+      return { p: p, L: L };
+    }
+
+    rows.forEach(function (r) {
+      if (isNodeRow(r)) return;          // the level tree is structure, not work
+      if (isSheetRow(r)) return;         // a sheet's counters live inside its parent
+      var pidKey = r.project_id || '(none)';
+      var phase = (r.phase || '').trim() || '(unclassified)';
+      var b = bucketFor(pidKey, phase), p = b.p, L = b.L;
+
+      var tot = n(r.no_of_sheets) || 0;
+      // ⚠️ A SINGLE-SHEET ROW'S STATUS *IS* ITS APPROVAL — the register's approvedOf()
+      // rule. Trusting approved_sheets alone under-reports every row whose importer
+      // set a status but never filled the counter; the register measured 11 such rows
+      // on BAU101 alone.
+      var ap = tot <= 1 ? (drApproved(r.status) ? 1 : 0) : (n(r.approved_sheets) || 0);
+
+      p.drawings++; L.drawings++;
+      p.sheets += tot; L.sheets += tot;
+      p.approvedSheets += ap; L.approvedSheets += ap;
+      if (drApproved(r.status)) { p.approvedDrawings++; L.approvedDrawings++; }
+
+      var pl = r.planned_approval;
+      if (validApprovalDate(pl)) {
+        if (!p.minPlanned || pl < p.minPlanned) p.minPlanned = pl;
+        if (!p.maxPlanned || pl > p.maxPlanned) p.maxPlanned = pl;
+        if (!L.minPlanned || pl < L.minPlanned) L.minPlanned = pl;
+        if (!L.maxPlanned || pl > L.maxPlanned) L.maxPlanned = pl;
+        // Overdue = its own committed date has passed and it is not approved.
+        if (pl < today && !drApproved(r.status)) { p.overdue++; L.overdue++; }
+      }
+      var ac = r.actual_approval;
+      if (validApprovalDate(ac)) {
+        if (!p.maxActual || ac > p.maxActual) p.maxActual = ac;
+        if (!L.maxActual || ac > L.maxActual) L.maxActual = ac;
+      }
+    });
+
+    // Finish each project: percentages, the ordered level list, and ISD pulled out.
+    var list = Object.keys(proj).map(function (k) {
+      var p = proj[k];
+      p.levels = Object.keys(p.levels).sort(function (a, b) {
+        var ia = TOP_LEVELS.indexOf(a), ib = TOP_LEVELS.indexOf(b);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b);
+      }).map(function (nm) {
+        var L = p.levels[nm];
+        L.pctSheets = L.sheets ? Math.round((L.approvedSheets / L.sheets) * 100) : 0;
+        L.pctDrawings = L.drawings ? Math.round((L.approvedDrawings / L.drawings) * 100) : 0;
+        return L;
+      });
+      // ⚠️ ISD is reported on the SHEET basis and everything else on the DRAWING
+      // basis, and the two are never added together. That is the same decision the
+      // register's Overview Gantt made: one headline number cannot describe two
+      // counting bases, so each states its own.
+      p.isd = p.levels.filter(function (L) { return L.phase === ISD; })[0] || null;
+      p.design = p.levels.filter(function (L) { return L.phase !== ISD; });
+      p.designDrawings = p.design.reduce(function (a, L) { return a + L.drawings; }, 0);
+      p.designApproved = p.design.reduce(function (a, L) { return a + L.approvedDrawings; }, 0);
+      p.pctDesign = p.designDrawings ? Math.round((p.designApproved / p.designDrawings) * 100) : 0;
+      p.pctSheets = p.sheets ? Math.round((p.approvedSheets / p.sheets) * 100) : 0;
+      return p;
+    });
+
+    return { projects: list, rowsRead: rows.length, warning: warning, today: today,
+             TOP_LEVELS: TOP_LEVELS, ISD: ISD };
+  }
+
   function tally(rows, keyFn, order, clsFn) {
     var m = {};
     rows.forEach(function (r) { var k = keyFn(r); m[k] = (m[k] || 0) + 1; });
@@ -660,6 +811,25 @@
       if (out.ok) console.log('[EngData.selfTest] ✓ every status recognised and bucketed');
       return out;
     },
+  };
+
+  // The portfolio read model + the pure helpers a harness needs to drive it without
+  // a database. Exposed for the same reason every module exposes its internals: a
+  // verification harness must run the SHIPPED functions, not a copy of them.
+  EngData.portfolio = portfolio;
+  EngData._portfolio = {
+    validApprovalDate: validApprovalDate, TOP_LEVELS: TOP_LEVELS, ISD: ISD,
+    drApproved: drApproved, PORTFOLIO_WARN_ROWS: PORTFOLIO_WARN_ROWS,
+    // Runs the real aggregation over rows supplied by the caller, bypassing only the
+    // network. Keeps the maths under test while the fetch is not.
+    aggregate: function (rows, today) {
+      var _f = fetchAllOrgWide, _t = todayISO;
+      fetchAllOrgWide = function () { return Promise.resolve(rows); };
+      if (today) todayISO = function () { return today; };
+      return portfolio().then(function (out) {
+        fetchAllOrgWide = _f; todayISO = _t; return out;
+      }, function (e) { fetchAllOrgWide = _f; todayISO = _t; throw e; });
+    }
   };
 
   window.EngData = EngData;

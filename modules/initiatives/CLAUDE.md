@@ -4,9 +4,14 @@
 > 1. Read `../../docs/MODULE_GUIDE.md` (NOT auto-loaded).
 > 2. This module is **Initiatives**. DB table `initiatives`, migration
 >    `../../migrations/0015-initiatives.sql` — **USER MUST RUN IT**.
-> 3. ⚠️ **This is the only ORG-WIDE module in the app.** Almost every rule the
->    guide states about project scoping is deliberately different here. Read the
->    next section before changing anything.
+> 3. ⚠️ **This is an ORG-WIDE module.** Almost every rule the guide states about
+>    project scoping is deliberately different here. Read the next section before
+>    changing anything.
+>    ⚠️ **It is no longer the ONLY one** — `modules/portfolio/` is org-wide too
+>    (2026-08-25). The difference worth knowing: Initiatives OWNS a table with a
+>    nullable `project_id`, which is why its RLS cannot use a bare
+>    `can_access_project(project_id)`. Portfolio owns no table and only reads, so
+>    it needs none of that care. Do not copy this module's RLS reasoning there.
 > 4. Chrome (topbar / tabs / tools / filter bar) is copied **verbatim** from
 >    method-register — do not re-invent it.
 

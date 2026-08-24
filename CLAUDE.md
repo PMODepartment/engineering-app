@@ -147,9 +147,21 @@ over Resend/SMTP because it sends as the real person, keeps a copy in their Sent
 - `modules/value-engineering/` — live (Summary + Registry, migration `0014`);
   see `modules/value-engineering/CLAUDE.md`
 - `modules/initiatives/` — live (Overview + Registry, migration `0015`).
-  ⚠️ **The only ORG-WIDE module** — read `modules/initiatives/CLAUDE.md` before
-  touching it; most of the project-scoping rules below are deliberately inverted
-  there.
+  ⚠️ **ORG-WIDE** — read `modules/initiatives/CLAUDE.md` before touching it; most of
+  the project-scoping rules below are deliberately inverted there.
+- `modules/portfolio/` — live (Overview + Programme + ISD status, **no migration**);
+  see `modules/portfolio/CLAUDE.md`.
+  ⚠️ **ORG-WIDE, and the second one** — so "the only org-wide module" is no longer
+  true anywhere you read it. It owns no table: it reads `drawing_register` with **no
+  project predicate** and lets RLS scope it, and its maths lives in
+  `EngData.portfolio()` so there is one definition of "approved", not a second.
+  ⚠️ **TWO COUNTING BASES, NEVER ADDED.** ISD is counted in **sheets** and matches the
+  register exactly; design levels are counted in **drawings** here while the register
+  counts them in **tracking units**. There is deliberately no blended "overall %", and
+  the caveat is written into the Excel export as well as the page.
+  ⚠️ **GROUP HEAD IS THE ORGANISING DIMENSION**, ordered by `group_heads.sort_order` —
+  never alphabetically. Same for `projects.html`, where "Group by: Group Head" is now
+  the default (the grouping already existed; the dropdown option did not).
 
 See `docs/MODULE_GUIDE.md` before adding or building out a module.
 
@@ -176,7 +188,7 @@ to stay in agreement or the shell and the modules contradict each other:
    back, which reads as broken. Projects / Notifications / Administration are not
    project-scoped and are never gated.
    ⚠️ **Gating is per-module, not blanket.** A module carrying `orgWide: true` in
-   `config.js` (today only **Initiatives**) is meaningful with no project chosen,
+   `config.js` (**Initiatives** and **Portfolio**) is meaningful with no project chosen,
    so it is never gated — gating it would make it **unreachable from a cold
    start**, since the only way to clear the gate is to choose a project it does
    not need. Such a module must correspondingly **never redirect to

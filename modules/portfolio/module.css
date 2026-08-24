@@ -1,0 +1,346 @@
+/* Portfolio — module styles (all classes prefixed .pf-)
+   Type scale / topbar / tabs / tools / tables copied VERBATIM from the sibling
+   registers (value-engineering -> method-register -> material-submittal ->
+   drawing-register, after a computed-style diff across the suite). Do not
+   re-invent it. Register-specific rules (status pills, money, priority, the
+   single-project selector) were REMOVED rather than carried over: this page has
+   no statuses and no project selector, so they would be dead CSS.
+   Portfolio-specific rules are appended at the foot. */
+
+
+/* ------------------------------- TYPE SCALE -------------------------------
+   The SAME six steps as the three sibling registers — the modules sit in one
+   suite, so a heading here must be the size of a heading there. Never a raw px
+   font-size; `micro` is the readable floor. */
+:root {
+  --pf-fs-micro:11px;
+  --pf-fs-sm:12px;
+  --pf-fs-base:13px;
+  --pf-fs-lg:15px;
+  --pf-fs-xl:20px;
+  --pf-fs-kpi:32px;
+}
+/* ---- Shared topbar chrome (VERBATIM from drawing-register/module.css) -----
+   Without it the topbar inherits dashboard.css's `gap:14px` with no wrapping,
+   the avatar loses its left divider, and theme.js's injected toggle keeps its
+   default size instead of matching the 34x34 tool buttons — which reads as
+   "the buttons beside the profile icon are misplaced". */
+.pd-topbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; row-gap:8px; }
+.pd-topbar #user-bar { margin-left:10px; padding-left:10px; border-left:1px solid var(--pd-line); flex:none; }
+.pd-topbar #pd-theme-toggle { width:34px; height:34px; padding:0; display:inline-flex; align-items:center; justify-content:center; margin-left:4px; flex:none; }
+/* ---- Topbar: project selector + tabs + tools ----------------------------- */
+.pf-title-txt { white-space:nowrap; }
+@media (max-width:1150px){ .pf-title-txt { display:none; }
+}
+/* icon-only title when tight */
+.pf-title-ico { color:var(--pd-red); vertical-align:-3px; }
+.pf-modback { height:36px; width:36px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+.pf-projctx { display:flex; align-items:center; min-width:0; flex:0 1 auto; }
+.pf-tabs { display:inline-flex; border:1px solid var(--pd-line); border-radius:var(--pd-radius); overflow:hidden; flex:none; }
+.pf-tab { border:0; background:var(--pd-card); color:var(--pd-ink); padding:6px 14px; font-weight:600;
+  cursor:pointer; font-size:var(--pf-fs-base); transition:background .12s; white-space:nowrap; }
+.pf-tab + .pf-tab { border-left:1px solid var(--pd-line); }
+.pf-tab:hover:not(.active) { background:var(--pd-bg); }
+.pf-tab.active { background:var(--pd-red); color:#fff; }
+.pf-topbar-tools { display:flex; align-items:center; gap:4px; margin-left:auto; }
+.pf-topbar-tools .pd-btn { height:34px; width:34px; padding:0; display:inline-flex; align-items:center; justify-content:center;
+  background:transparent; border-color:transparent; font-size:var(--pf-fs-base); }
+.pf-topbar-tools .pd-btn:hover { background:var(--pd-bg); border-color:var(--pd-line); }
+.pf-topbar-tools .pd-btn.pf-tb-labeled { width:auto; padding:0 12px; gap:6px; }
+.pf-topbar-tools .pd-btn.pd-btn-primary { background:var(--pd-red); border-color:var(--pd-red); color:#fff; }
+.pf-topbar-tools .pd-btn.pd-btn-primary:hover { filter:brightness(.94); }
+.pf-tb-sep { width:1px; align-self:stretch; margin:5px 3px; background:var(--pd-line); }
+.pf-clearbtn { color:var(--pd-bad,#dc2626); }
+.pf-clearbtn:hover { background:var(--pd-bad,#dc2626) !important; border-color:var(--pd-bad,#dc2626) !important; color:#fff; }
+/* ---- Filter bar --------------------------------------------------------- */
+.pf-filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px;
+  background:var(--pd-card); border:1px solid var(--pd-line); border-radius:var(--pd-radius); padding:8px 12px; }
+.pf-filt-ico { color:var(--pd-muted); flex:none; }
+.pf-filters .pf-search { flex:1 1 280px; min-width:170px; }
+.pf-filters .pd-select { flex:0 0 auto; max-width:190px; }
+.pf-chk { display:inline-flex; align-items:center; gap:6px; font-size:var(--pf-fs-base); color:var(--pd-ink); cursor:pointer; white-space:nowrap; }
+.pf-chk input { width:15px; height:15px; accent-color:var(--pd-red); cursor:pointer; }
+/* Ghost clear — only rendered when a filter is actually set (Progress Photos
+   lesson: a margin-left:auto button orphans itself onto a second line when the
+   row wraps). */
+.pf-clearfilt { display:inline-flex; align-items:center; gap:5px; border:0; background:none; cursor:pointer;
+  color:var(--pd-muted); font-size:var(--pf-fs-sm); font-weight:600; padding:4px 6px; border-radius:var(--pd-radius); }
+.pf-clearfilt:hover { background:var(--pd-bg); color:var(--pd-red); }
+.pf-clearfilt[hidden] { display:none; }
+.pf-count { color:var(--pd-muted); font-size:var(--pf-fs-base); margin-left:auto; white-space:nowrap; }
+/* ---- KPI row ------------------------------------------------------------- */
+.pf-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:18px; margin-bottom:16px; }
+.pf-kpi { padding:20px 22px; position:relative; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.05); transition:transform .12s, box-shadow .12s; }
+.pf-kpi:hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,.09); }
+.pf-kpi::before { content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--pd-line); }
+.pf-kpi.good::before { background:#12693A; }
+.pf-kpi.warn::before { background:#B45309; }
+.pf-kpi.bad::before  { background:var(--pd-red); }
+.pf-kpi-val { font-size:var(--pf-fs-kpi); font-weight:800; line-height:1.05; }
+.pf-kpi-lbl { font-size:var(--pf-fs-base); font-weight:600; margin-top:4px; }
+.pf-kpi-sub { font-size:var(--pf-fs-micro); color:var(--pd-muted); margin-top:2px; }
+/* ---- Summary panels ------------------------------------------------------ */
+/* align-items:start so a short panel does not stretch to match a tall one —
+   the fix drawing-register's KPI pass had to make retroactively. */
+.pf-grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px;
+  align-items:start; margin-bottom:16px; }
+.pf-panel { padding:18px 20px; }
+.pf-panel h3 { margin:0 0 10px; font-size:var(--pf-fs-lg); }
+.pf-panel-note { margin:10px 0 0; font-size:var(--pf-fs-sm); color:var(--pd-muted); line-height:1.5; }
+.pf-mini { width:100%; border-collapse:collapse; font-size:var(--pf-fs-base); }
+.pf-mini td { padding:6px 4px; border-bottom:1px solid var(--pd-line); }
+.pf-mini tr:last-child td { border-bottom:0; }
+.pf-drill { cursor:pointer; }
+.pf-drill:hover { background:var(--pd-bg); }
+/* ---- Tables -------------------------------------------------------------- */
+.pf-tablecard { padding:0; overflow:auto; }
+.pf-sumtable, .pf-table { width:100%; border-collapse:collapse; font-size:var(--pf-fs-base); }
+.pf-sumtable th, .pf-sumtable td, .pf-table th, .pf-table td {
+  padding:7px 10px; border-bottom:1px solid var(--pd-line); text-align:left; white-space:nowrap; }
+.pf-sumtable thead th, .pf-table thead th {
+  position:sticky; top:0; z-index:2; background:var(--pd-card); font-size:var(--pf-fs-micro);
+  font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--pd-muted); }
+.pf-sumtable tbody tr:hover { background:var(--pd-bg); cursor:pointer; }
+.pf-r { text-align:right !important; font-variant-numeric:tabular-nums; }
+.pf-b { font-weight:700; }
+.pf-mut { color:var(--pd-muted); }
+.pf-nowrap { white-space:nowrap; }
+.pf-sumtotal td { font-weight:800; border-top:2px solid var(--pd-line); background:var(--pd-bg); }
+/* Direction, not decoration: a saving reads green, an overrun red. Both are
+   token-free deliberate hues that already pass in both themes at this weight. */
+.pf-pos { color:#12693A; }
+.pf-neg { color:var(--pd-red); }
+/* ---- Registry ------------------------------------------------------------ */
+.pf-table { min-width:1720px; }
+.pf-code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:var(--pf-fs-sm); font-weight:700; }
+.pf-item { font-weight:600; white-space:normal; }
+.pf-sub { font-size:var(--pf-fs-micro); color:var(--pd-muted); white-space:normal; margin-top:2px; line-height:1.4; }
+/* A rejected proposal stays visible but recedes — it is history, not backlog. */
+.pf-rejected td { opacity:.6; }
+/* Frozen identity columns, same treatment as the sibling registers. */
+.pf-table th.pf-fz1, .pf-table td.pf-fz1 { position:sticky; left:0;   z-index:1; background:var(--pd-card); min-width:110px; }
+.pf-table th.pf-fz2, .pf-table td.pf-fz2 { position:sticky; left:110px; z-index:1; background:var(--pd-card); min-width:300px; max-width:400px; }
+.pf-table tbody tr:hover td.pf-fz1, .pf-table tbody tr:hover td.pf-fz2 { background:var(--pd-bg); }
+.pf-actcol { width:76px; text-align:right !important; }
+.pf-iconbtn { padding:3px 6px; line-height:1; }
+.pf-iconbtn-del:hover { color:var(--pd-red); border-color:var(--pd-red); }
+/* ---- Empty + skeleton ---------------------------------------------------- */
+.pf-empty { padding:40px; text-align:center; }
+.pf-empty h3 { margin:0 0 6px; font-size:var(--pf-fs-lg); }
+.pf-empty p { color:var(--pd-muted); font-size:var(--pf-fs-base); margin:0 auto; max-width:520px; line-height:1.55; }
+.pf-skcard { padding:16px; }
+.pf-sk-head { display:flex; align-items:center; gap:8px; font-size:var(--pf-fs-base); color:var(--pd-muted); margin-bottom:12px; }
+.pf-spin { width:13px; height:13px; border:2px solid var(--pd-line); border-top-color:var(--pd-red);
+  border-radius:50%; animation:ve-spin .7s linear infinite; }
+@keyframes ve-spin { to { transform:rotate(360deg); }
+}
+.pf-sk-row { display:flex; gap:10px; margin-bottom:9px; }
+.pf-sk { height:11px; border-radius:4px; background:linear-gradient(90deg,var(--pd-line),var(--pd-bg),var(--pd-line));
+  background-size:200% 100%; animation:ve-sh 1.2s ease-in-out infinite; }
+@keyframes ve-sh { 0%{background-position:200% 0;}
+100%{background-position:-200% 0;}
+}
+/* ---- Add/Edit form ------------------------------------------------------- */
+.pf-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin:14px 0; }
+.pf-fld { display:flex; flex-direction:column; gap:4px; }
+.pf-fld > span { font-size:var(--pf-fs-sm); font-weight:600; color:var(--pd-muted); }
+.pf-fld > small { font-size:var(--pf-fs-micro); color:var(--pd-muted); line-height:1.4; }
+.pf-fld-wide { grid-column:1/-1; }
+.pf-fld textarea { resize:vertical; font-family:inherit; }
+.pf-sectlbl { font-size:var(--pf-fs-micro); font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--pd-muted); border-bottom:1px solid var(--pd-line); padding-bottom:5px; margin-top:6px; }
+.pf-calc { display:flex; flex-wrap:wrap; gap:22px; background:var(--pd-bg); border:1px solid var(--pd-line);
+  border-radius:var(--pd-radius); padding:10px 14px; }
+.pf-calc-item { display:flex; flex-direction:column; gap:1px; }
+.pf-calc-item small { font-size:var(--pf-fs-micro); color:var(--pd-muted); font-weight:600; }
+.pf-calc-item strong { font-size:var(--pf-fs-lg); font-weight:800; }
+/* ---- Import mapping preview ---------------------------------------------- */
+.pf-impmap { margin-top:12px; background:var(--pd-bg); border:1px solid var(--pd-line);
+  border-radius:var(--pd-radius); padding:10px 14px; font-size:var(--pf-fs-sm); }
+.pf-impmap ul { margin:6px 0 0; padding-left:20px; columns:2; column-gap:24px; }
+.pf-impmap li { margin-bottom:3px; break-inside:avoid; }
+.pf-impmap code { font-size:var(--pf-fs-micro); background:var(--pd-card); padding:1px 4px; border-radius:3px; }
+@media (max-width:560px) { .pf-impmap ul { columns:1; }
+}
+/* ---- Registry fills the viewport (desktop only) --------------------------
+   Gated above the phone breakpoint so mobile keeps normal page scrolling —
+   the same rule, and the same reason, as the sibling registers. */
+@media (min-width:701px) {
+  body.pf-fit .pd-app { height:100dvh; overflow:hidden; }
+body.pf-fit .pd-content { display:flex; flex-direction:column; min-height:0; }
+body.pf-fit .pd-main { flex:1; min-height:0; display:flex; flex-direction:column; }
+body.pf-fit .pf-tablecard { flex:1; min-height:0; }
+}
+@media print {
+  .pd-topbar, .pf-filters, .pf-actcol, .pf-doccol { display:none !important; }
+.pf-tablecard { max-height:none; overflow:visible; }
+.pf-table { min-width:0; font-size:var(--pf-fs-micro); }
+.pf-table th.pf-fz1, .pf-table td.pf-fz1, .pf-table th.pf-fz2, .pf-table td.pf-fz2 { position:static; }
+}
+/* ==========================================================================
+   PORTFOLIO-SPECIFIC — everything above this line is the shared suite chrome.
+   ========================================================================== */
+
+.pf-eyebrow { font-size:var(--pf-fs-micro); font-weight:700; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--pd-muted); margin:0 0 10px; }
+.pf-mut { color:var(--pd-muted); font-size:var(--pf-fs-sm); }
+.pf-r { text-align:right !important; }
+.pf-late { color:#C42127; font-weight:700; }
+
+/* ---- KPIs ---------------------------------------------------------------- */
+.pf-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:16px; margin-bottom:16px; }
+.pf-kpi { padding:20px 22px; position:relative; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+.pf-kpi::before { content:''; position:absolute; inset:0 auto 0 0; width:4px; background:var(--pd-muted); }
+.pf-kpi.pf-kpi-ok::before  { background:#12693A; }
+.pf-kpi.pf-kpi-bad::before { background:#C42127; }
+.pf-kpi-v { font-size:var(--pf-fs-kpi); font-weight:800; line-height:1.05; }
+.pf-kpi-l { font-size:var(--pf-fs-base); font-weight:600; margin-top:4px; }
+.pf-kpi-s { font-size:var(--pf-fs-micro); color:var(--pd-muted); margin-top:2px; }
+
+#pf-view > .pd-card { margin-bottom:16px; }
+#pf-view > .pd-card > h3 { margin:0 0 12px; font-size:var(--pf-fs-lg); }
+
+/* ---- The high-level Gantt ------------------------------------------------
+   ⚠️ EVERY HORIZONTAL MEASUREMENT IS A PERCENTAGE. The track is a plain block and
+   the bars are positioned inside it with left/width in %, which is what makes this
+   responsive with no resize observer, no zoom control and no scroll sync. Do NOT
+   give .pf-g-track a fixed width or a min-width in px. (The Registry's Gantt in
+   drawing-register uses px only because its lanes must align with grid rows
+   scrolling beside it; nothing aligns with these.) */
+.pf-gantt { --pf-lbl:210px; --pf-pct:74px; }
+.pf-g-head, .pf-g-row {
+  display:grid; grid-template-columns:var(--pf-lbl) 1fr var(--pf-pct);
+  align-items:center; gap:10px;
+}
+.pf-g-head { padding-bottom:6px; border-bottom:1px solid var(--pd-line); margin-bottom:6px; }
+.pf-g-ruler { position:relative; height:16px; }
+.pf-g-tick { position:absolute; top:0; bottom:0; border-left:1px dashed var(--pd-line); }
+.pf-g-tick span { position:absolute; left:3px; top:1px; font-size:var(--pf-fs-micro);
+  color:var(--pd-muted); white-space:nowrap; }
+.pf-g-now { position:absolute; top:0; bottom:-9999px; width:0;
+  border-left:2px solid color-mix(in srgb,#C42127 70%, transparent); z-index:1; }
+
+.pf-g-row { padding:3px 0; }
+.pf-g-lbl { display:block; width:100%; text-align:left; background:transparent; border:0;
+  padding:2px 4px; border-radius:5px; cursor:pointer; font:inherit; font-weight:600;
+  font-size:var(--pf-fs-sm); color:var(--pd-ink);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pf-g-lbl:hover { background:var(--pd-bg); color:var(--pd-red); }
+.pf-g-lbl:focus-visible { outline:2px solid var(--pd-red); outline-offset:1px; }
+.pf-g-track { position:relative; height:20px; border-radius:5px; background:var(--pd-bg); }
+.pf-g-bar { position:absolute; top:2px; bottom:2px; border-radius:4px; overflow:hidden;
+  background:color-mix(in srgb,#2563EB 22%,var(--pd-card));
+  border:1px solid color-mix(in srgb,#2563EB 45%,transparent); }
+.pf-g-bar.pf-g-late { background:color-mix(in srgb,#C42127 18%,var(--pd-card));
+  border-color:color-mix(in srgb,#C42127 45%,transparent); }
+.pf-g-fill { position:absolute; inset:0 auto 0 0; background:color-mix(in srgb,#2563EB 55%,transparent); }
+.pf-g-bar.pf-g-late .pf-g-fill { background:color-mix(in srgb,#C42127 50%,transparent); }
+.pf-g-in { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:var(--pf-fs-micro); font-weight:700; color:var(--pd-ink); }
+.pf-g-none { position:absolute; inset:0; display:flex; align-items:center; padding-left:8px;
+  font-size:var(--pf-fs-micro); color:var(--pd-muted); font-style:italic; }
+.pf-g-pct { text-align:right; font-weight:700; font-size:var(--pf-fs-sm);
+  font-variant-numeric:tabular-nums; }
+.pf-g-basis { display:block; font-size:9px; font-weight:600; color:var(--pd-muted);
+  text-transform:uppercase; letter-spacing:.03em; }
+.pf-g-foot { margin-top:10px; padding-top:8px; border-top:1px solid var(--pd-line);
+  font-size:var(--pf-fs-micro); color:var(--pd-muted); }
+.pf-gantt-c .pf-g-track { height:16px; }
+
+/* Group-head band inside the Gantt. Spans the whole grid, so it reads as a section
+   rule rather than as another lane. */
+.pf-g-gh { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+  margin:12px 0 4px; padding:5px 4px 5px 8px; border-left:3px solid var(--pd-red);
+  background:var(--pd-bg); border-radius:0 5px 5px 0; }
+.pf-g-gh:first-child { margin-top:2px; }
+.pf-g-ghn { font-weight:700; font-size:var(--pf-fs-base); }
+.pf-g-ghm { font-size:var(--pf-fs-micro); color:var(--pd-muted); }
+
+/* ---- Tables -------------------------------------------------------------- */
+.pf-tblcard { padding:0; }
+.pf-tblcard > h3 { padding:16px 18px 0; }
+.pf-tbl { width:100%; border-collapse:collapse; font-size:var(--pf-fs-base); }
+.pf-tbl th { text-align:left; font-size:var(--pf-fs-micro); text-transform:uppercase;
+  letter-spacing:.04em; color:var(--pd-muted); padding:8px 10px;
+  border-bottom:1px solid var(--pd-line); white-space:nowrap; }
+.pf-tbl td { padding:7px 10px; border-bottom:1px solid var(--pd-line); }
+.pf-sortable { cursor:pointer; user-select:none; }
+.pf-sortable:hover { color:var(--pd-ink); }
+.pf-sorted { color:var(--pd-red); }
+.pf-row { cursor:pointer; }
+.pf-row:hover > td { background:var(--pd-bg); }
+.pf-cellsub { display:block; font-size:9px; color:var(--pd-muted); font-weight:400; }
+.pf-lvltbl td, .pf-lvltbl th { white-space:nowrap; }
+
+/* The group-head heading row carries its own subtotals — see ghHeadHTML(). */
+.pf-ghrow > td { background:var(--pd-bg); font-weight:700;
+  border-top:2px solid var(--pd-line); border-bottom:1px solid var(--pd-line); }
+.pf-count-chip { display:inline-block; margin-left:8px; padding:1px 7px; border-radius:999px;
+  background:var(--pd-card); border:1px solid var(--pd-line); color:var(--pd-muted);
+  font-size:var(--pf-fs-micro); font-weight:700; }
+
+/* ---- ISD ---------------------------------------------------------------- */
+.pf-isd { display:flex; flex-direction:column; gap:2px; }
+.pf-isd-row { display:grid; grid-template-columns:200px 1fr 48px 96px 92px;
+  align-items:center; gap:10px; padding:4px 4px; border-radius:5px; cursor:pointer; }
+.pf-isd-row:hover { background:var(--pd-bg); }
+.pf-isd-row:focus-visible { outline:2px solid var(--pd-red); outline-offset:1px; }
+.pf-isd-n { font-weight:600; font-size:var(--pf-fs-sm); overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+/* Two lengths, two meanings: the OUTER width is how big this project's ISD scope is
+   relative to the largest in view, and the INNER fill is that project's own
+   progress. Collapsing them into one bar would make a finished 40-sheet project
+   look like a finished 900-sheet one. */
+.pf-isd-t { display:block; height:12px; border-radius:999px; background:var(--pd-bg); overflow:hidden; }
+.pf-isd-scope { display:block; height:100%; border-radius:999px;
+  background:color-mix(in srgb, var(--pd-line) 70%, transparent); }
+.pf-isd-f { display:block; height:100%; border-radius:999px;
+  background:color-mix(in srgb,#2563EB 60%,transparent); }
+.pf-isd-f.pf-isd-late { background:color-mix(in srgb,#C42127 55%,transparent); }
+.pf-isd-v { text-align:right; font-weight:700; font-variant-numeric:tabular-nums; font-size:var(--pf-fs-sm); }
+.pf-isd-c, .pf-isd-o { font-size:var(--pf-fs-micro); color:var(--pd-muted); text-align:right;
+  font-variant-numeric:tabular-nums; }
+
+/* ---- Project filter popup ----------------------------------------------- */
+.pf-projfilter { position:relative; }
+.pf-projbtn { height:34px; white-space:nowrap; }
+.pf-projpop { position:absolute; z-index:40; top:calc(100% + 4px); left:0; width:290px;
+  background:var(--pd-card); border:1px solid var(--pd-line); border-radius:8px;
+  box-shadow:0 8px 26px rgba(0,0,0,.2); padding:8px; display:flex; flex-direction:column; gap:6px; }
+.pf-projlist { max-height:260px; overflow:auto; display:flex; flex-direction:column; }
+.pf-pl-i { display:flex; align-items:center; gap:7px; padding:4px 6px; border-radius:5px;
+  font-size:var(--pf-fs-sm); cursor:pointer; }
+.pf-pl-i:hover { background:var(--pd-bg); }
+.pf-groupby { height:34px; max-width:210px; }
+
+/* ---- Notes / empty / skeleton ------------------------------------------- */
+.pf-note { border-left:3px solid #B45309; font-size:var(--pf-fs-sm); line-height:1.55; }
+.pf-note summary { cursor:pointer; font-weight:700; font-size:var(--pf-fs-base); }
+.pf-note ul { margin:10px 0 0; padding-left:20px; }
+.pf-note li { color:var(--pd-muted); margin-bottom:6px; }
+.pf-note strong { color:var(--pd-ink); }
+
+.pf-empty { padding:28px 26px; }
+.pf-empty h3 { margin:0 0 8px; font-size:var(--pf-fs-xl); }
+.pf-empty p { margin:0; color:var(--pd-muted); font-size:var(--pf-fs-base); line-height:1.6; max-width:68ch; }
+
+.pf-skcard { padding:16px 18px; }
+.pf-sk-head { display:flex; align-items:center; gap:8px; font-size:var(--pf-fs-base);
+  color:var(--pd-muted); margin-bottom:12px; }
+.pf-sk-spin { width:13px; height:13px; border:2px solid var(--pd-line); border-top-color:var(--pd-red);
+  border-radius:50%; animation:pf-spin .7s linear infinite; }
+@keyframes pf-spin { to { transform:rotate(360deg); } }
+.pf-sk-row { height:14px; border-radius:5px; margin-bottom:9px;
+  background:linear-gradient(90deg,var(--pd-bg) 25%,var(--pd-line) 37%,var(--pd-bg) 63%);
+  background-size:400% 100%; animation:pf-shim 1.3s ease-in-out infinite; }
+@keyframes pf-shim { 0% { background-position:100% 0; } 100% { background-position:0 0; } }
+
+@media (max-width: 900px) {
+  .pf-gantt { --pf-lbl:130px; --pf-pct:58px; }
+  .pf-isd-row { grid-template-columns:130px 1fr 44px 0 0; }
+  .pf-isd-c, .pf-isd-o { display:none; }
+}
+@media print {
+  .pd-topbar, .pf-projfilter, .pf-topbar-tools, .pf-tabs { display:none !important; }
+  .pf-note { break-inside:avoid; }
+}

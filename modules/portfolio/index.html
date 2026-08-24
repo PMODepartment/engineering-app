@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="../../assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="../../assets/img/icon.png" />
+  <script src="../../assets/js/theme.js?v=20260824a"></script>
+  <title>Portfolio · Engineering App</title>
+  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260824a" />
+  <link rel="stylesheet" href="module.css?v=20260824a" />
+</head>
+<body>
+  <div class="pd-app">
+    <div class="pd-content">
+      <div class="pd-topbar">
+        <a class="pd-btn pf-modback" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
+        <h1 class="pf-title" style="margin:0;"><span class="pf-title-ico" data-ico="barChart" data-ico-size="20"></span> <span class="pf-title-txt">Portfolio</span></h1>
+
+        <!-- ⚠️ NO PROJECT SELECTOR. This module is ORG-WIDE: it reads every project
+             the signed-in user can access. What sits here instead is a multi-select
+             FILTER that narrows the view — it never decides which single project the
+             page is about, because the page is not about one. -->
+        <div class="pf-projfilter">
+          <button class="pd-btn pf-projbtn" id="pf-projbtn" title="Narrow the portfolio to particular projects">All projects</button>
+          <div class="pf-projpop" id="pf-projpop" hidden>
+            <input class="pd-input" id="pf-projq" placeholder="Search projects…" />
+            <div class="pf-projlist" id="pf-projlist"></div>
+            <button class="pd-btn pd-btn-sm" id="pf-projall">Show all projects</button>
+          </div>
+        </div>
+
+        <!-- ⚠️ Group head is the DEFAULT grouping, not a nicety: a group head owns a
+             set of projects and is accountable for them, so "how is this group doing?"
+             is the question a portfolio exists to answer. A flat list of 20 projects
+             answers nobody. Order comes from group_heads.sort_order. -->
+        <select class="pd-select pd-input-sm pf-groupby" id="pf-groupby" title="Group projects by">
+          <option value="grouphead">Group by: Group Head</option>
+          <option value="none">Group by: None</option>
+        </select>
+
+        <div class="pf-tabs" role="tablist">
+          <button class="pf-tab active" data-view="overview">Overview</button>
+          <button class="pf-tab" data-view="gantt">Programme</button>
+          <button class="pf-tab" data-view="isd">ISD status</button>
+        </div>
+
+        <div class="pf-topbar-tools" id="pf-topbar-tools">
+          <button class="pd-btn" id="pf-refresh" title="Re-read every project"><span data-ico="refresh" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="pf-export" title="Export to Excel"><span data-ico="download" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="pf-print" title="Print / PDF"><span data-ico="printer" data-ico-size="16"></span></button>
+        </div>
+        <div id="user-bar"></div>
+      </div>
+
+      <div class="pd-main">
+        <div id="pf-view"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="../../assets/js/config.js?v=20260824a"></script>
+  <script src="../../assets/js/auth.js?v=20260824a"></script>
+  <script src="../../assets/js/db.js?v=20260824a"></script>
+  <script src="../../assets/js/ui.js?v=20260824a"></script>
+  <script src="../../assets/js/icons.js?v=20260824a"></script>
+  <script src="../../assets/js/perm.js?v=20260824a"></script>
+  <!-- The cross-project read model. Must load BEFORE module.js. -->
+  <script src="../../assets/js/engdata.js?v=20260824a"></script>
+  <script src="module.js?v=20260824a"></script>
+  <script>
+    AppAuth.requireLogin(function (user, profile) {
+      UI.renderUserBar(profile);
+      Portfolio.init(user, profile);
+      // Read-only page — nothing here writes, so there are no write actions to hide.
+      Perm.applyReadonly(document, profile);
+    });
+  </script>
+</body>
+</html>

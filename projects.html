@@ -27,7 +27,18 @@
               <span class="pd-proj-count" id="proj-count"></span>
             </div>
             <div class="pd-toolbar-right">
+              <!-- Group-head FILTER. Populated from `group_heads` at load — the count in
+                   the "all" label is real, so an empty portfolio cannot look filtered. -->
+              <select class="pd-select pd-input-sm" id="gh-filter" title="Show only one group head"></select>
+              <!-- ⚠️ "Group by: Group Head" was the DEFAULT-MISSING case: groupKeyOf()
+                   has always fallen through to ghIdOf(p) for any value that is not
+                   'status' or 'none', and ghLabel()/countFor() were already written for
+                   it — but the option was never in this list, so the grouping existed
+                   with no way to reach it. It leads now, and is the default, because a
+                   group head is how this portfolio is actually organised (and it is what
+                   the Planners Dashboard, which owns these records, defaults to). -->
               <select class="pd-select pd-input-sm" id="group-by" title="Group projects by">
+                <option value="grouphead">Group by: Group Head</option>
                 <option value="status">Group by: Status</option>
                 <option value="none">Group by: None</option>
               </select>
@@ -65,7 +76,12 @@
     // bucket, not a hidden state — an unassigned project must stay reachable.
     var NONE = '__nogh__';
     var GH = [], PROJ = [], ghById = {};
-    var view = 'list', groupBy = 'status', sortBy = 'name';
+    // ⚠️ Group head is the DEFAULT grouping. A project's group head is the one real
+    // organising fact this page has (status is nearly always 'active', so grouping
+    // by it produced a single heading over the whole list — a heading that says
+    // nothing). Matches the Planners Dashboard, which owns these records.
+    var view = 'list', groupBy = 'grouphead', sortBy = 'name';
+    var ghFilter = '';                 // '' = every group head; else a gh id or NONE
 
     // ---- landing here CLEARS the current project -----------------------------
     // This page IS the selection step, so arriving at it means "I have not
@@ -126,6 +142,7 @@
         GH = res[0]; PROJ = res[1];
       } catch (e) { UI.toast('Load failed: ' + e.message, 'error'); return; }
       GH.forEach(function (g) { ghById[g.id] = g; });
+      fillGhFilter();
       render();
       wireToolbar();
     }
@@ -145,10 +162,33 @@
       return PROJ.filter(function (p) { return ghIdOf(p) === id; }).length;
     }
 
+    // ⚠️ Built from the PROJECTS, not from the group_heads table: a group head with no
+    // project would offer a filter that can only ever return nothing, and the counts
+    // beside each name are what make the list worth reading. The "no group head"
+    // bucket is included only when something is actually in it.
+    function fillGhFilter() {
+      var el = document.getElementById('gh-filter');
+      if (!el) return;
+      var used = {};
+      PROJ.forEach(function (p) { used[ghIdOf(p)] = true; });
+      var ids = GH.map(function (g) { return g.id; }).filter(function (id) { return used[id]; });
+      if (used[NONE]) ids.push(NONE);
+      el.innerHTML = '<option value="">All group heads (' + ids.length + ')</option>' +
+        ids.map(function (id) {
+          return '<option value="' + Fmt.esc(id) + '">' + Fmt.esc(ghLabel(id)) +
+            ' (' + countFor(id) + ')</option>';
+        }).join('');
+      el.value = ghFilter;
+    }
+
     // ---- Projects in scope + search + sort ----
     function projectsInScope() {
       var q = (document.getElementById('proj-search').value || '').toLowerCase();
       var list = PROJ.slice();
+      // ⚠️ The group-head filter is applied BEFORE the search, and it compares through
+      // ghIdOf() so the "no group head" bucket is selectable like any other — an
+      // unassigned project must stay reachable, not become unfilterable.
+      if (ghFilter) list = list.filter(function (p) { return ghIdOf(p) === ghFilter; });
       if (q) list = list.filter(function (p) {
         return (p.name || '').toLowerCase().indexOf(q) !== -1 || (p.id || '').toLowerCase().indexOf(q) !== -1;
       });
@@ -219,9 +259,27 @@
         if (!groups[k]) { groups[k] = []; order.push(k); }
         groups[k].push(p);
       });
-      // The unassigned bucket always sits last; the rest read alphabetically.
+      // The unassigned bucket always sits last.
+      // ⚠️ WHEN GROUPING BY GROUP HEAD, THE ORDER IS `group_heads.sort_order`, not
+      // alphabetical. That column exists because the Planners Dashboard — which owns
+      // these records — lets someone arrange the group heads deliberately, and db.js
+      // already fetches GH ordered by it. Re-sorting alphabetically here would quietly
+      // throw that arrangement away and make the two apps disagree about the order of
+      // the same list. Every other grouping mode has no such intent to honour, so it
+      // still reads alphabetically.
+      var ghRank = {};
+      GH.forEach(function (g, i) { ghRank[g.id] = i; });
       order.sort(function (a, b) {
         if (a === NONE) return 1; if (b === NONE) return -1;
+        if (groupBy === 'grouphead') {
+          var ra = ghRank[a], rb = ghRank[b];
+          // A project tagged with a group head this app has not synced yet sorts
+          // after the known ones rather than jumping to the front on an undefined.
+          if (ra == null && rb == null) return groupLabelOf(a).localeCompare(groupLabelOf(b));
+          if (ra == null) return 1;
+          if (rb == null) return -1;
+          if (ra !== rb) return ra - rb;
+        }
         return groupLabelOf(a).localeCompare(groupLabelOf(b));
       });
       return order.map(function (k) { return [k, groups[k]]; });
@@ -287,6 +345,7 @@
       // ⚠️ 'input' alone is not enough: the native clear (×) and Esc fire 'search'
       // and 'change' but NOT 'input', which left the list filtered after clearing.
       bindSearch(document.getElementById('proj-search'), render);
+      document.getElementById('gh-filter').onchange = function () { ghFilter = this.value; render(); };
       document.getElementById('group-by').onchange = function () { groupBy = this.value; render(); };
       document.getElementById('sort-by').onchange = function () { sortBy = this.value; render(); };
       document.getElementById('vt-list').onclick = function () { view = 'list'; setVt(); render(); };
