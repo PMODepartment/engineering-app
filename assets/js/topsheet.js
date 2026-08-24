@@ -304,10 +304,24 @@ window.TopSheet = (function () {
       td({ cs: 3, cls: 'ts-9 ts-c bt br bb bl', v: 'Description' }) +
       td({ cls: 'ts-9 ts-c bt br bb bl', v: 'Pages' }) + '</tr>';
     var docs = d.documents || [];
-    for (var i = 0; i < 4; i++) {
+    // ⚠️ TWO REAL BUGS WERE FIXED HERE, both found once a register started supplying
+    // this table (before that nothing populated `documents`, so neither was reachable):
+    //
+    //  1. IT READ `r.no`, AND EVERY PRODUCER WRITES `doc_no`. So the document table
+    //     printed BLANK — on a controlled transmittal form whose whole purpose is to
+    //     list what is being sent for approval. `r.no` is still accepted as a fallback
+    //     so any caller written against the old shape keeps working.
+    //  2. IT RENDERED EXACTLY 4 ROWS AND SILENTLY DROPPED THE REST. An RFA that
+    //     transmits eight drawings would have printed four of them and lost four, with
+    //     nothing on the sheet saying so. It now prints EVERY document, padding to four
+    //     so a blank form still looks like the issued one. More than four grows the
+    //     sheet past A4 and it paginates — which is correct: a second page is far
+    //     better than a document that was never listed.
+    var nRows = Math.max(4, docs.length);
+    for (var i = 0; i < nRows; i++) {
       var r = docs[i] || {};
       h += '<tr>' +
-        td({ cs: 3, cls: 'ts-9 ts-c br bb bl', v: val(r.no), h: '7mm' }) +
+        td({ cs: 3, cls: 'ts-9 ts-c br bb bl', v: val(r.doc_no != null ? r.doc_no : r.no), h: '7mm' }) +
         td({ cs: 2, cls: 'ts-9 ts-c br bb bl', v: val(r.rev) }) +
         td({ cs: 3, cls: 'ts-9 ts-c br bb bl', v: val(r.description) }) +
         td({ cls: 'ts-9 ts-c br bb bl', v: val(r.pages) }) + '</tr>';
@@ -471,6 +485,13 @@ window.TopSheet = (function () {
             ? nMergeable + ' of ' + nAtt + ' documents merge under the sheet; the rest download separately (only PDFs can be merged).'
             : 'The attached document is not a PDF, so it downloads separately rather than under the sheet.');
     }
+    // ⚠️ Caller-supplied warnings, rendered as trusted HTML because the callers are
+    // this app's own modules composing an emphasised sentence — never user content.
+    // They show even when there is nothing attached at all, which is exactly the case
+    // the RFA register needs: "these drawings have no file to send".
+    var notes = (opts.notes || []).filter(Boolean);
+    if (notes.length) attNote += (attNote ? ' ' : '') + notes.join(' ');
+    var nAttShown = nAtt || notes.length;   // the note row must appear for notes alone
 
     var form = FIELDS[kind].map(function (f) {
       var key = f[0], label = f[1], type = f[2] || 'text';
@@ -510,7 +531,7 @@ window.TopSheet = (function () {
       '</div>' +
       '<div class="pd-modal-actions ts-noprint">' +
         '<button class="pd-btn" id="ts-cancel">Cancel</button>' +
-        (nAtt ? '<span class="ts-attnote" id="ts-attnote">' + attNote + '</span>' : '') +
+        (nAttShown ? '<span class="ts-attnote" id="ts-attnote">' + attNote + '</span>' : '') +
         '<button class="pd-btn" id="ts-print">Print</button>' +
         '<button class="pd-btn" id="ts-pdf">' +
           (nAtt ? 'Download PDF + document' : 'Download PDF') + '</button>' +

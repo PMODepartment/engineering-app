@@ -134,6 +134,14 @@ over Resend/SMTP because it sends as the real person, keeps a copy in their Sent
   Development roll-up still reads its own local copy, so the two disagree until the
   bridge lands. Do not "fix" that by copying rows between projects.
 - `modules/material-submittal/` — live
+- `modules/request-for-approval/` — live (Summary + Registry, migration `0020`);
+  see `modules/request-for-approval/CLAUDE.md`.
+  ⚠️ **An RFA is CONNECTED TO THE DRAWINGS it seeks approval for** — `rfa_drawings`, a real
+  many-to-many with FKs, answering both "what is this RFA asking for?" and "which RFA is
+  A-1204 waiting on?". The generated top sheet carries **each linked drawing's own file**
+  from the drawing register's bucket, at **the revision that RFA transmitted**. Read that
+  module's `CLAUDE.md` before touching the link or the approval write-back.
+  ⚠️ **RFI has no register, deliberately** — it is a question sheet, not a transmittal.
 - `modules/method-register/` — live (Summary + Registry, migration `0013`);
   see `modules/method-register/CLAUDE.md`
 - `modules/value-engineering/` — live (Summary + Registry, migration `0014`);

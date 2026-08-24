@@ -48,6 +48,9 @@ window.APP_CONFIG = {
     { key: 'material-submittal', name: 'Material Submittal Log', path: 'modules/material-submittal/index.html', icon: 'box',       enabled: true },
     { key: 'method-register',    name: 'Method Register',        path: 'modules/method-register/index.html',    icon: 'clipboard', enabled: true },
     { key: 'value-engineering',  name: 'Value Engineering List', path: 'modules/value-engineering/index.html',  icon: 'calculator', enabled: true },
+    // The RFA register (migration 0020). Project-scoped, so it IS gated when no
+    // project is chosen — do not add `orgWide` here.
+    { key: 'request-for-approval', name: 'Request for Approval', path: 'modules/request-for-approval/index.html', icon: 'fileText', enabled: true },
     // ⚠️ The only org-wide module. See `orgWide` above before copying this line.
     { key: 'initiatives',        name: 'Initiatives',            path: 'modules/initiatives/index.html',        icon: 'bulb',      enabled: true, orgWide: true },
   ],

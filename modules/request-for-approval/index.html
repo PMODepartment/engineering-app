@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="../../assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="../../assets/img/icon.png" />
+  <script src="../../assets/js/theme.js?v=20260824a"></script>
+  <title>Request for Approval · Engineering App</title>
+  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260824a" />
+  <link rel="stylesheet" href="../../assets/css/topsheet.css?v=20260824a" />
+  <link rel="stylesheet" href="module.css?v=20260824a" />
+</head>
+<body>
+  <div class="pd-app">
+    <!-- Sidebar-less shell (matches the sibling registers). -->
+    <div class="pd-content">
+      <div class="pd-topbar">
+        <a class="pd-btn rf-modback" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
+        <h1 class="rf-title" style="margin:0;"><span class="rf-title-ico" data-ico="clipboard" data-ico-size="20"></span> <span class="rf-title-txt">Request for Approval</span></h1>
+        <div class="rf-projctx">
+          <select class="pd-select rf-project" id="rf-project" title="Project"></select>
+        </div>
+        <div class="rf-tabs" role="tablist">
+          <button class="rf-tab active" data-view="summary">Summary</button>
+          <button class="rf-tab" data-view="registry">Registry</button>
+        </div>
+        <div class="rf-topbar-tools" id="rf-topbar-tools">
+          <button class="pd-btn rf-tb-labeled pd-btn-primary" id="rf-add" data-perm="create" title="Raise an RFA">+ Add</button>
+          <span class="rf-tb-sep"></span>
+          <button class="pd-btn" id="rf-export" title="Export to Excel"><span data-ico="download" data-ico-size="16"></span></button>
+          <button class="pd-btn" id="rf-print" title="Print / PDF"><span data-ico="printer" data-ico-size="16"></span></button>
+        </div>
+        <div id="user-bar"></div>
+      </div>
+
+      <div class="pd-main">
+        <!-- Filter bar — Registry view only. -->
+        <div class="rf-filters" id="rf-filters">
+          <span class="rf-filt-ico" data-ico="filter" data-ico-size="15"></span>
+          <input class="pd-input rf-search" id="rf-f-search" placeholder="Search RFA no., title, description, document no…" />
+          <select class="pd-select" id="rf-f-discipline"><option value="">All disciplines</option></select>
+          <select class="pd-select" id="rf-f-status"><option value="">All statuses</option></select>
+          <select class="pd-select" id="rf-f-type"><option value="">Any document type</option></select>
+          <label class="rf-chk" title="Only RFAs still waiting on a reply that are past their required date"><input type="checkbox" id="rf-f-overdue" /> Overdue only</label>
+          <label class="rf-chk" title="Hide RFAs that have been answered or withdrawn"><input type="checkbox" id="rf-f-openonly" /> Open only</label>
+          <button class="rf-clearfilt" id="rf-f-clear" title="Clear all filters" hidden><span data-ico="x" data-ico-size="13"></span> Clear</button>
+          <span class="rf-count" id="rf-count"></span>
+        </div>
+
+        <div id="rf-view"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- Top-sheet PDF output. html2pdf bundles html2canvas + jsPDF; pdf-lib does the
+       page-level merge that puts the submitted document under the sheet. Both are
+       only needed by topsheet.js, so they load beside it. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="../../assets/js/config.js?v=20260824a"></script>
+  <script src="../../assets/js/auth.js?v=20260824a"></script>
+  <script src="../../assets/js/db.js?v=20260824a"></script>
+  <script src="../../assets/js/ui.js?v=20260824a"></script>
+  <script src="../../assets/js/icons.js?v=20260824a"></script>
+  <script src="../../assets/js/perm.js?v=20260824a"></script>
+  <script src="../../assets/js/topsheet.js?v=20260824a"></script>
+  <script src="module.js?v=20260824a"></script>
+  <script>
+    AppAuth.requireLogin(function (user, profile) {
+      UI.renderUserBar(profile);
+      RequestForApproval.init(user, profile);
+      // Hide write actions this role may not perform. The DB enforces the same
+      // rules via RLS + the approval guard (0020) — this is only UX.
+      Perm.applyReadonly(document, profile);
+    });
+  </script>
+</body>
+</html>
