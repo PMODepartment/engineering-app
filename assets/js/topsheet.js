@@ -33,9 +33,20 @@
 // Every field stays editable before printing: the paper form is what the client
 // signs, and the log rarely carries the reviewer's exact wording.
 //
-// Printing is the browser's own "Save as PDF" — no PDF library. The layout is
-// already A4 in topsheet.css, so the print dialog produces the exact sheet and
-// nothing has to be kept in sync with a second rendering engine.
+// THREE OUTPUTS, and the difference between them matters:
+//   Print     the browser's own dialog. Pixel-exact, no library, best for paper.
+//             Gives the app NO file — it writes wherever the user chooses and
+//             tells this code nothing.
+//   Download  a PDF Blob built here (html2pdf), with any PDF attachment merged
+//             underneath by pdf-lib, so the sheet sits on top of the document it
+//             covers. This is the thing the user asked for.
+//   Email…    the same package, handed to the `send-mail` Edge Function, which
+//             sends it through Microsoft Graph as the signed-in user.
+//
+// ⚠️ Printing and the PDF are TWO RENDERERS OF ONE LAYOUT, not two layouts. Both
+// consume the same `render(kind, data)` markup and the same topsheet.css, which
+// states the sheet in millimetres. Never fork the markup for one of them.
+// ⚠️ Nothing is emailed without the user pressing Send in the compose dialog.
 // ============================================================================
 
 window.TopSheet = (function () {
@@ -501,8 +512,9 @@ window.TopSheet = (function () {
         '<button class="pd-btn" id="ts-cancel">Cancel</button>' +
         (nAtt ? '<span class="ts-attnote" id="ts-attnote">' + attNote + '</span>' : '') +
         '<button class="pd-btn" id="ts-print">Print</button>' +
-        '<button class="pd-btn pd-btn-primary" id="ts-pdf">' +
+        '<button class="pd-btn" id="ts-pdf">' +
           (nAtt ? 'Download PDF + document' : 'Download PDF') + '</button>' +
+        '<button class="pd-btn pd-btn-primary" id="ts-email">Email…</button>' +
       '</div>', { noBackdropClose: true });
 
     var prev = m.el.querySelector('#ts-prev');
@@ -557,6 +569,28 @@ window.TopSheet = (function () {
         UI.toast('PDF error: ' + ((e && e.message) || e), 'error');
       } finally {
         pdfBtn.disabled = false; pdfBtn.textContent = orig;
+      }
+    };
+
+    var mailBtn = m.el.querySelector('#ts-email');
+    mailBtn.onclick = async function () {
+      var orig = mailBtn.textContent;
+      mailBtn.disabled = true; mailBtn.textContent = 'Preparing…';
+      try {
+        // ⚠️ The package is built BEFORE the compose dialog opens, so what the
+        // dialog lists is the actual attachment — not a promise of one. A missing
+        // document is then something the user sees while writing the covering
+        // note, rather than after the mail has gone.
+        var pkg = await buildPackage(kind, data, atts, packageName(kind, data));
+        if (pkg.skipped.length) {
+          UI.toast('Could not read: ' + pkg.skipped.join(', ') +
+            ' — it will NOT be attached. Cancel if that document is required.', 'warn');
+        }
+        openCompose(kind, data, pkg, opts.defaults);
+      } catch (e) {
+        UI.toast('Could not prepare the email: ' + ((e && e.message) || e), 'error');
+      } finally {
+        mailBtn.disabled = false; mailBtn.textContent = orig;
       }
     };
     return m;
@@ -712,6 +746,125 @@ window.TopSheet = (function () {
       .filter(Boolean).join(' ').replace(/[\\/:*?"<>|]+/g, '-').trim();
   }
 
+  // ==========================================================================
+  // EMAIL — hand the generated package to the send-mail Edge Function
+  // --------------------------------------------------------------------------
+  // ⚠️ NOTHING IS SENT WITHOUT THE USER PRESSING SEND IN THE COMPOSE DIALOG.
+  // Issuing a top sheet puts a document in front of a client or consultant on
+  // Megawide's behalf, so it is never a side effect of generating one.
+  // ⚠️ The message leaves as the signed-in user, and the function decides that
+  // from their own profile — the address is NOT sent from here and cannot be
+  // overridden. See the security banner in supabase/functions/send-mail.
+  // ==========================================================================
+
+  function blobToB64(blob) {
+    return new Promise(function (res, rej) {
+      var fr = new FileReader();
+      // readAsDataURL gives "data:<mime>;base64,…" — Graph wants only the payload.
+      fr.onload = function () { res(String(fr.result).split(',')[1] || ''); };
+      fr.onerror = function () { rej(fr.error || new Error('Could not read the file')); };
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  async function sendMail(msg) {
+    if (!window.getSB) throw new Error('Not signed in.');
+    var res = await window.getSB().functions.invoke('send-mail', { body: msg });
+    // ⚠️ A non-2xx from an Edge Function arrives as res.error with the BODY
+    // discarded, and the body is where the useful message lives ("consent was
+    // never granted", "your profile has no email"). Read it back off the
+    // response so the toast says what actually went wrong.
+    if (res.error) {
+      var detail = '';
+      try { detail = (await res.error.context.json()).error || ''; } catch (e) { detail = ''; }
+      throw new Error(detail || res.error.message || 'Sending failed');
+    }
+    if (res.data && res.data.error) throw new Error(res.data.error);
+    return res.data;
+  }
+
+  // Compose dialog. `pkg` is a buildPackage() result, so what is attached here is
+  // exactly the file the Download button would have produced — the sheet, the
+  // merged document, and any non-mergeable attachment as its own file.
+  function openCompose(kind, data, pkg, defaults) {
+    var d = defaults || {};
+    var id = data[kind.toLowerCase() + 'Id'] || data.masId || data.rfaId || data.rfiId || '';
+    var proj = data.projectName || data.projectCode || '';
+    var subject = [FORMS[kind].label, id, '—', proj].filter(Boolean).join(' ');
+    var files = [pkg.file].concat(pkg.separate);
+    var kb = function (b) { return (b.size / 1024).toFixed(0) + ' KB'; };
+
+    var body = 'Dear Sir/Madam,\n\nPlease find attached ' + FORMS[kind].label +
+      (id ? ' ' + id : '') + ' for ' + (proj || 'the project') +
+      ', for your review and approval.\n\n' +
+      'The top sheet is the first page of the attached document.\n\n' +
+      'Thank you.\n\n' + ((data.submittedBy || d.from || '') || '');
+
+    var m = UI.modal(
+      '<div class="pd-modal-header"><h2 style="margin:0;">Email ' + esc(FORMS[kind].label) +
+        (id ? ' ' + esc(id) : '') + '</h2>' +
+        '<button class="pd-btn" id="tm-x" title="Close">&times;</button></div>' +
+      '<div class="ts-mail">' +
+        '<label class="ts-fld"><span>To — separate several with a comma</span>' +
+          '<input class="pd-input" id="tm-to" type="text" value="' + esc(d.default_to_email || '') + '" ' +
+          'placeholder="consultant@example.com" /></label>' +
+        '<label class="ts-fld"><span>Cc</span><input class="pd-input" id="tm-cc" type="text" value="" /></label>' +
+        '<label class="ts-fld"><span>Subject</span>' +
+          '<input class="pd-input" id="tm-subj" type="text" value="' + esc(subject) + '" /></label>' +
+        '<label class="ts-fld"><span>Message</span>' +
+          '<textarea class="pd-input" id="tm-body" rows="8">' + esc(body) + '</textarea></label>' +
+        '<div class="ts-mail-att"><strong>Attached</strong>' +
+          files.map(function (f) {
+            return '<div>' + esc(f.name) + ' <span class="ts-mut">' + kb(f.blob) + '</span></div>';
+          }).join('') +
+          (pkg.merged ? '<div class="ts-mut">The submitted document is merged under the top sheet.</div>' : '') +
+          (pkg.separate.length ? '<div class="ts-mut">' + pkg.separate.length +
+            ' file(s) could not be merged into the sheet and are attached separately.</div>' : '') +
+        '</div>' +
+        '<p class="ts-mut" id="tm-note">This will be sent from your own Megawide mailbox and kept in your Sent Items.</p>' +
+      '</div>' +
+      '<div class="pd-modal-actions">' +
+        '<button class="pd-btn" id="tm-cancel">Cancel</button>' +
+        '<button class="pd-btn pd-btn-primary" id="tm-send">Send</button>' +
+      '</div>', { noBackdropClose: true });
+
+    m.el.querySelector('#tm-x').onclick = m.close;
+    m.el.querySelector('#tm-cancel').onclick = m.close;
+
+    var sendBtn = m.el.querySelector('#tm-send');
+    sendBtn.onclick = async function () {
+      var to = m.el.querySelector('#tm-to').value.trim();
+      if (!to) { UI.toast('Enter at least one recipient.', 'error'); return; }
+      var orig = sendBtn.textContent;
+      sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
+      try {
+        var attachments = [];
+        for (var i = 0; i < files.length; i++) {
+          attachments.push({
+            name: files[i].name,
+            contentType: files[i].blob.type || 'application/octet-stream',
+            contentBytes: await blobToB64(files[i].blob)
+          });
+        }
+        var out = await sendMail({
+          to: to, cc: m.el.querySelector('#tm-cc').value.trim(),
+          subject: m.el.querySelector('#tm-subj').value.trim(),
+          body: m.el.querySelector('#tm-body').value,
+          attachments: attachments
+        });
+        UI.toast('Sent from ' + ((out && out.from) || 'your mailbox') + ' to ' + to, 'ok');
+        m.close();
+      } catch (e) {
+        // Left OPEN on failure: the composed message is the user's work and
+        // closing the dialog would throw it away along with the error.
+        UI.toast((e && e.message) || 'Sending failed', 'error');
+      } finally {
+        sendBtn.disabled = false; sendBtn.textContent = orig;
+      }
+    };
+    return m;
+  }
+
   // ---- per-project defaults (migration 0012) -------------------------------
   async function loadDefaults(projectId) {
     if (!projectId || !window.__sb) return {};
@@ -728,6 +881,7 @@ window.TopSheet = (function () {
     // opening the dialog (bulk issue, and the email path).
     toPdfBlob: toPdfBlob, mergePdfs: mergePdfs, buildPackage: buildPackage,
     packageName: packageName, saveBlob: saveBlob, isPdf: isPdf,
+    sendMail: sendMail, openCompose: openCompose, blobToB64: blobToB64,
     _internals: { FIELDS: FIELDS, RFA_TYPES: RFA_TYPES, REVIEW_STATUS: REVIEW_STATUS, fmtDate: fmtDate }
   };
 })();

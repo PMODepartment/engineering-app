@@ -69,6 +69,50 @@ A healthy row: `status_code 200`, `"caller":"scheduled"`, and `dropped_columns`
 listing exactly the five `schedule_*` names — anything else there means the
 Planners schema changed and the projection needs looking at.
 
+## Sending mail (the `send-mail` Edge Function)
+
+Top sheets (MAS / RFA / RFI) can be issued by email from the app. The app is a **static
+GitHub Pages site**, so it can hold no secret — a mail credential shipped to the browser
+is a published credential. Sending therefore happens in an Edge Function, deliberately
+**the same shape as `sync-projects`** (same CORS block, same JWT-decode-then-look-up-the-
+profile authorisation, same "report what we actually hold" key guard).
+
+Transport is **Microsoft Graph, client-credentials (app-only)** — chosen with the user
+over Resend/SMTP because it sends as the real person, keeps a copy in their Sent Items
+(which is what makes an issued RFA traceable), and needs no new domain or DNS record.
+
+    supabase functions deploy send-mail --project-ref zkxzaijznutmiueeurbb
+    supabase secrets set MS_TENANT_ID=… MS_CLIENT_ID=… MS_CLIENT_SECRET=… \
+      ENG_SERVICE_KEY=<sb_secret_…> --project-ref zkxzaijznutmiueeurbb
+
+- ⚠️ **`ENG_SERVICE_KEY` must be the new `sb_secret_…` key**, same trap as `sync-projects`:
+  the auto-injected legacy `SUPABASE_SERVICE_ROLE_KEY` silently degrades to `anon`, and the
+  profile lookup would come back empty — which reads as *"you are not authorised"* rather
+  than *"the function is misconfigured"*. The function guards and refuses.
+- ⚠️⚠️ **APPLICATION `Mail.Send` GRANTS SEND-AS-ANY-MAILBOX IN THE TENANT.** Left
+  unrestricted, this function's credential could send mail as anyone at Megawide. Two
+  things contain it, and **both are required**:
+  1. **Exchange must scope the app registration** to a mail-enabled security group —
+     `New-ApplicationAccessPolicy -AppId <client id> -PolicyScopeGroupId
+     eng-app-senders@megawide.com.ph -AccessRight RestrictAccess`. **IT does this once; the
+     app cannot self-provision it.** Until that policy exists, treat the function as
+     over-privileged.
+  2. **The sender is taken from the verified caller's own profile, never from the request
+     body.** A caller chooses recipients; they cannot choose whose mailbox the mail leaves
+     from. Do not add a `from` parameter — that one line is the whole guarantee.
+- **Planner and above only.** Issuing a top sheet to a client or consultant is an outward,
+  on-the-record act, so it takes the same roles that may write the registers the sheet is
+  generated from — not merely a signed-in reader.
+- **Two send paths, because Graph caps a `sendMail` request at 4MB.** Under ~3MB of
+  attachments goes inline in one round trip; over that it creates a draft, uploads each
+  attachment through an upload session, then sends. ⚠️ **Any failure after the draft exists
+  deletes the draft** — a half-built message left in someone's Drafts is one they may later
+  send by hand believing it complete.
+- `{"dry_run": true}` proves configuration and authorisation **without putting mail in front
+  of a client**, and returns before a token is even acquired, so it is safe as a smoke test.
+- ⚠️ **Nothing is sent without the user pressing Send in the compose dialog.** Generating a
+  sheet never mails it.
+
 ## Modules
 
 - `modules/drawing-register/` — live. ⚠️ **FIVE fixed top levels; levels 2..N are

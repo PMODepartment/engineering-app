@@ -62,6 +62,21 @@ the jsPDF instance (`.toPdf().get('pdf')` → `deletePage`).
 - Filenames are `MAS MAS-0042 SLN101.pdf` — form, id, project — so they are findable in a mail client
   six months later.
 
+### Emailing the package — the "Email…" button
+Same package the Download button produces, handed to the **`send-mail` Edge Function**
+(Microsoft Graph; setup, secrets and the send-as-anyone warning are in the root `CLAUDE.md`).
+- ⚠️ **The package is built BEFORE the compose dialog opens**, so the dialog lists the actual
+  attachment rather than a promise of one — and a document that could not be read is
+  something the user sees *while writing the covering note*, not after the mail has gone.
+- ⚠️ **No sender field is ever put in the payload.** The function derives it from the JWT.
+  Sending one from here would defeat the only thing standing between an application-wide
+  `Mail.Send` permission and "send as anybody".
+- ⚠️ **A non-2xx from an Edge Function arrives as `res.error` with the body DISCARDED**, and
+  the body is where the useful message lives ("consent was never granted", "your profile has
+  no email"). `sendMail()` reads it back off `res.error.context.json()`; without that every
+  failure toasts as a generic "non-2xx status code".
+- The dialog **stays open on failure** — the composed message is the user's work.
+
 ### Verification
 **16 checks in a real browser** (`ts.html`, `topsheet.js` `eval`'d and driven directly): the output
 carries the `%PDF` magic, is **exactly one A4 page** at 595.28×841.89pt, and is >40KB (a blank capture
@@ -72,6 +87,22 @@ in the document; and RFA and RFI both export with real content.
 - ⚠️ **Not verified signed-in**, and **no screenshot** — this environment's compositor is stalled
   (a long-standing limit noted throughout these files), so the sheet is verified by measured geometry
   and asserted content, not by looking at it.
+
+**23 further checks for the mail path** (`mail.html`, against a stubbed `functions.invoke`): base64
+carries no `data:` prefix and round-trips byte-for-byte; the compose dialog prefills To from the
+project defaults and names the form/id/project in the subject; it lists the merged package *and* the
+non-mergeable file; an empty recipient sends nothing and says why; a real send invokes `send-mail`
+once with both files attached, the merged PDF first, clean base64, and — the security invariant —
+**no `from`/`sender`/`as` key anywhere in the payload**; the dialog closes on success and confirms
+which mailbox it left from; and both failure shapes (a non-2xx whose message is inside the discarded
+body, and an error returned in a 200 body) surface the function's real message with the dialog left
+open.
+- ⚠️ **The Edge Function itself is NOT verified against live Microsoft Graph.** It type-checks clean
+  and its two send paths are written to Graph's documented contract, but no mail has been sent: the
+  Azure app registration, the admin consent for `Mail.Send` and the Exchange
+  `ApplicationAccessPolicy` are all IT actions that cannot be done from here. **Call it with
+  `{"dry_run": true}` first** — that proves secrets and authorisation without putting mail in front
+  of a client.
 - Assets `topsheet.js/css?v=20260824a`, `module.js?v=20260824a`.
 
 ## Dedicated UI pass — shared type scale, heading drift fixed (2026-08-06) — fmlozano
