@@ -2154,10 +2154,9 @@ window.DrawingRegister = (function () {
       sh('responsible', 'dr-c-resp', '', 'resp') + sh('scope', 'dr-c-scope', '', 'scope') +
       '<th class="dr-actcol"></th></tr>';
 
-    var body = '';
-    disp.forEach(function (item) {
-      body += item.type==='drawing' ? drawRowHTML(item, CB) : groupRowHTML(item, CB);
-    });
+    // ⚠️ ONLY THE FIRST CHUNK IS PAINTED SYNCHRONOUSLY — see REG_CHUNK. The rest is
+    // appended, a slice per task, by appendRegisterRows() below.
+    var body = regRowsHTML(disp, 0, REG_CHUNK, CB);
     // An empty tbody still renders the header row and the frozen columns, so the grid is
     // there to type into. A single hint row sits inside it rather than replacing it.
     if (!disp.length) {
@@ -2177,7 +2176,7 @@ window.DrawingRegister = (function () {
       ? '<div class="dr-split" id="dr-split">' +
           '<div class="dr-split-grid" id="dr-split-grid">' + grid + '</div>' +
           '<div class="dr-split-div" id="dr-split-div" title="Drag to resize · double-click to reset"></div>' +
-          '<div class="dr-split-gantt" id="dr-split-gantt">' + registryGanttHTML(disp) + '</div>' +
+          '<div class="dr-split-gantt" id="dr-split-gantt">' + registryGanttHTML(disp, REG_CHUNK) + '</div>' +
         '</div>'
       : grid) + footer;
     host.innerHTML = html;
@@ -2186,6 +2185,91 @@ window.DrawingRegister = (function () {
     wireRegister(host, disp);
     wireColResize(host);
     if (regSplit) wireRegSplit(host);
+    appendRegisterRows(host, disp, CB);
+  }
+
+  // ==========================================================================
+  // PROGRESSIVE PAINT — why the Registry no longer builds every row at once
+  // --------------------------------------------------------------------------
+  // MEASURED, in Chrome, on a 1,764-row register (SLN101's shape):
+  //   whole register in one innerHTML   2.31 MB   39,151 nodes   1,256 ms
+  //   first 200 rows, grid + Gantt      0.26 MB    4,505 nodes     118 ms
+  // Style + layout was ~1,077 ms of that 1,256 ms — the cost is the sheer node count,
+  // not string building (buildModel() itself is ~3 ms). And render() runs on EVERY sort
+  // click, collapse, filter keystroke and status change, so the whole second was being
+  // paid over and over for a one-cell change.
+  //
+  // ⚠️ WHY CHUNKED APPEND AND NOT SCROLL VIRTUALISATION. Virtualising would paint less
+  // in total, but it would break three things this register genuinely relies on: the
+  // browser's own Ctrl+F (a register is a document people search), the Gantt's positional
+  // lane alignment, and GridX's cell cursor, which addresses rows by `visibleIds` and
+  // would find nothing for an unpainted row. Chunking keeps the full DOM — every one of
+  // those keeps working — and moves the cost off the critical path, which is what the
+  // user actually feels.
+  //
+  // ⚠️ STALE RUNS ARE CANCELLED. Without the token, sorting three times in a row queues
+  // three full appends: the rows duplicate, and the third click waits behind ~2.5 s of
+  // work that is already obsolete.
+  var REG_CHUNK = 200;        // rows painted synchronously, and per appended slice
+  var _regTok = 0;            // bumped per render; a run whose token is stale stops
+
+  function regRowsHTML(disp, from, to, CB){
+    var out = '';
+    for (var i = from; i < to && i < disp.length; i++){
+      out += disp[i].type === 'drawing' ? drawRowHTML(disp[i], CB) : groupRowHTML(disp[i], CB);
+    }
+    return out;
+  }
+
+  function appendRegisterRows(host, disp, CB){
+    var tok = ++_regTok;
+    if (disp.length <= REG_CHUNK) return;
+    var tbody = host.querySelector('.dr-grid tbody');
+    if (!tbody) return;
+    var at = REG_CHUNK;
+    // ⚠️ THE FIRST CHUNK IS SCHEDULED, NOT CALLED. Running it inline appended rows
+    // 200–400 inside the same synchronous task as the first paint, so the render the user
+    // waits for was 400 rows, not 200 — the verification harness caught it.
+    //
+    // ⚠️⚠️ setTimeout, NOT requestAnimationFrame. DO NOT "improve" this back to rAF.
+    // rAF DOES NOT FIRE AT ALL IN A HIDDEN TAB, and a register is very often opened into
+    // a background tab. With rAF the append simply never ran: the grid stopped at the
+    // first 200 rows and looked like a complete register — a silently TRUNCATED register
+    // is far worse than a slow one, because nothing about it looks wrong. Caught in the
+    // verification harness, which runs with document.hidden === true. We are not
+    // animating, so frame alignment buys nothing; a queue that actually drains is the
+    // requirement. (Background tabs throttle setTimeout to ~1 s, so a big register fills
+    // in ~8 s while hidden and ~1 s while focused. It completes either way.)
+    function step(){
+      // A newer render (or a view switch that threw this DOM away) makes the rest of this
+      // run pointless — and appending into a detached tbody would silently build rows
+      // nobody can see.
+      if (tok !== _regTok || !tbody.isConnected) return;
+      var to = Math.min(at + REG_CHUNK, disp.length);
+      // ⚠️ WIRED IN A <template>, THEN MOVED IN — deliberately, and it must stay this
+      // way. Inserting first and then calling wireRegisterRows(tbody, …) would re-bind
+      // every row already in the grid on every pass, making the append quadratic: the
+      // last chunk of a 1,700-row register would re-wire all 1,700. A <template> holds
+      // real <tr> nodes (it is the one element with no content model), querySelectorAll
+      // works on its fragment, and appendChild MOVES the nodes with their listeners
+      // intact — so each row is wired exactly once.
+      var tpl = document.createElement('template');
+      tpl.innerHTML = regRowsHTML(disp, at, to, CB);
+      wireRegisterRows(tpl.content, host);
+      tbody.appendChild(tpl.content);
+      // ⚠️ Lanes are appended in the SAME slice, in the same task. Letting the grid run
+      // ahead of the Gantt would misalign every bar until the run finished.
+      // ⚠️ RE-QUERIED EVERY STEP, not captured once: a timeline-scale change replaces the
+      // whole Gantt pane mid-drain, and a cached reference would keep appending into the
+      // detached old container — the new pane would then stop at whatever it was built
+      // with and the rest of the lanes would silently never appear.
+      var lanes = host.querySelector('.dr-rg-body');
+      if (lanes) lanes.insertAdjacentHTML('beforeend', regLanesHTML(disp, at, to));
+      at = to;
+      if (at < disp.length) setTimeout(step, 0);
+      else refreshSel(host);   // select-all can only be right once every row exists
+    }
+    setTimeout(step, 0);
   }
 
   // ==========================================================================
@@ -2223,7 +2307,41 @@ window.DrawingRegister = (function () {
     saveUI();
   }
 
-  function registryGanttHTML(disp){
+  // Timeline geometry of the last registryGanttHTML() call, so appended chunks land on
+  // the same scale as the lanes already painted. One render is live at a time.
+  var _gGeo = null;
+
+  // One lane per display row, for `disp[from..to)`. Split out of registryGanttHTML() so
+  // the progressive append can produce lanes for a slice without rebuilding the ruler.
+  // ⚠️ Lane N must stay row N of the grid — alignment is by position and fixed row
+  // height (REG_ROWH), so this must be driven by the SAME `disp` array, sliced the same
+  // way as the grid body. Never filter one and not the other.
+  function regLanesHTML(disp, from, to){
+    if (!_gGeo) return '';
+    var min = _gGeo.min, dayw = _gGeo.dayw, spans = _gGeo.spans, out = '';
+    for (var i = from; i < to && i < disp.length; i++){
+      var item = disp[i], sp = spans[i], isGrp = item.type === 'group', bar = '';
+      if (sp) {
+        var x = gDays(min, sp.s) * dayw;
+        var w = Math.max((gDays(sp.s, sp.f) + 1) * dayw, 3);
+        var label = isGrp ? item.label : (item.row.drawing_code || item.row.drawing_no || item.row.title || '');
+        bar = '<div class="dr-g-bar'+(isGrp?' dr-g-sum':'')+(sp.pct>=100?' dr-g-done':'')+
+          '" style="left:'+x+'px;width:'+w+'px" title="'+
+          Fmt.esc(label+' · '+Fmt.date(gIso(sp.s))+' → '+
+                  Fmt.date(gIso(sp.f))+' · '+sp.pct+'%'+
+                  (sp.actual?' · approved '+Fmt.date(sp.actual):''))+'">' +
+          '<div class="dr-g-fill" style="width:'+sp.pct+'%"></div>' +
+          (w > 34 ? '<span class="dr-g-pct">'+sp.pct+'%</span>' : '') + '</div>';
+      }
+      out += '<div class="dr-rg-lane'+(isGrp?' dr-rg-grow':'')+'"'+
+        (isGrp?'':' data-gid="'+item.row.id+'"')+'>'+bar+'</div>';
+    }
+    return out;
+  }
+
+  // `limit` paints only the first N lanes; the rest are appended in chunks. Omitted
+  // means "all of them".
+  function registryGanttHTML(disp, limit){
     var spans = [], min = null, max = null;
     disp.forEach(function (item){
       var sp = ganttSpan(item);
@@ -2285,25 +2403,14 @@ window.DrawingRegister = (function () {
     var todayLine = (today >= min && today <= max)
       ? '<div class="dr-g-today" style="left:'+(gDays(min, today)*dayw)+'px" title="Today"></div>' : '';
 
-    var lanes = '';
-    disp.forEach(function (item, i){
-      var sp = spans[i], isGrp = item.type === 'group';
-      var bar = '';
-      if (sp) {
-        var x = gDays(min, sp.s) * dayw;
-        var w = Math.max((gDays(sp.s, sp.f) + 1) * dayw, 3);
-        var label = isGrp ? item.label : (item.row.drawing_code || item.row.drawing_no || item.row.title || '');
-        bar = '<div class="dr-g-bar'+(isGrp?' dr-g-sum':'')+(sp.pct>=100?' dr-g-done':'')+
-          '" style="left:'+x+'px;width:'+w+'px" title="'+
-          Fmt.esc(label+' · '+Fmt.date(gIso(sp.s))+' → '+
-                  Fmt.date(gIso(sp.f))+' · '+sp.pct+'%'+
-                  (sp.actual?' · approved '+Fmt.date(sp.actual):''))+'">' +
-          '<div class="dr-g-fill" style="width:'+sp.pct+'%"></div>' +
-          (w > 34 ? '<span class="dr-g-pct">'+sp.pct+'%</span>' : '') + '</div>';
-      }
-      lanes += '<div class="dr-rg-lane'+(isGrp?' dr-rg-grow':'')+'"'+
-        (isGrp?'':' data-gid="'+item.row.id+'"')+'>'+bar+'</div>';
-    });
+    // ⚠️ GEOMETRY IS STASHED, AND IT IS COMPUTED FROM **EVERY** ROW, not just the ones
+    // painted now. The lanes are painted in chunks (see REG_CHUNK), and if the ruler's
+    // min/max came only from the first chunk then every later chunk would arrive on a
+    // different scale — every bar already on screen would jump sideways as the register
+    // filled in. Spans for all of `disp` are already computed above, so the timeline is
+    // final from the first frame and the chunks only add lanes to it.
+    _gGeo = { min: min, dayw: dayw, spans: spans };
+    var lanes = regLanesHTML(disp, 0, limit == null ? disp.length : limit);
     if (!disp.length) lanes = '<div class="dr-rg-lane"></div>';
 
     return '<div class="dr-rg-head"><div class="dr-rg-ruler" style="width:'+W+'px">' +
@@ -2648,39 +2755,20 @@ window.DrawingRegister = (function () {
   }
 
   // ------------------------------------------------------------- wiring ------
-  function wireRegister(host, disp) {
-    // Column sort [UI review #3] — click a header to cycle asc → desc → manual.
-    host.querySelectorAll('th.dr-sortable[data-scol]').forEach(function (th){
-      th.onclick = function (){ regSetSort(th.dataset.scol); };
-    });
-    var sc = host.querySelector('#dr-sortclear');
-    if (sc) sc.onclick = function (){ regSort.col = null; regSort.dir = 1; saveUI(); render(); };
 
-    var xall = host.querySelector('#dr-xall');
-    if (xall) xall.onclick = function(){
-      var pkeys = disp.filter(isTopItem).map(function(x){return x.key;});
-      // Acts on whichever map is live, so "expand all" works during a filter too.
-      var anyOpen = pkeys.some(function (k){ return !isCollapsed(k); });
-      if (anyFilter()) { fCollapsed = {}; if (anyOpen) pkeys.forEach(function (k){ fCollapsed[k] = true; }); }
-      else if (anyOpen) pkeys.forEach(function (k){ collapsed[k] = true; });
-      else collapsed = {};
-      saveUI(); render();
-    };
-    // duplicate-code legend: click to toggle "show only duplicates"
-    var dupleg = host.querySelector('#dr-duplegend');
-    if (dupleg) dupleg.onclick = function(){ filters.dupsOnly = !filters.dupsOnly; fCollapsed = {}; render(); };
-    // jump to a phase [feature 6]
-    var jump = host.querySelector('#dr-jump');
-    if (jump) jump.onchange = function(){
-      var key = jump.value; if (!key) return;
-      delete collapsed[key]; delete fCollapsed[key]; saveUI(); render();
-      var tr = document.querySelector('tr.dr-grp[data-grp="'+key.replace(/"/g,'\\"')+'"]');
-      if (tr) tr.scrollIntoView({ block:'start', behavior:'smooth' });
-    };
+  // ---- row-scoped wiring ---------------------------------------------------
+  // ⚠️ EVERY binding in here is per-row and must be re-applied to rows appended after
+  // the first paint (see REG_CHUNK / appendRegisterRows). `scope` is the container
+  // holding the new rows; `host` stays the view root, because refreshSel(),
+  // markActiveGroup() and the reorder pane all address the whole grid, not the chunk.
+  // ⚠️ Keeps its own `canWrite` gate so the read-only wiring is byte-identical to what
+  // wireRegister() used to do inline — a reader gets the group/view/caret handlers and
+  // nothing that writes.
+  function wireRegisterRows(scope, host) {
     // Group rows: click ANYWHERE on the row to collapse/expand (Project Schedule's
     // Excel-style behaviour). Previously only the small label span toggled, so
     // clicking the rest of the row appeared to do nothing.
-    host.querySelectorAll('tr.dr-grp').forEach(function (tr){
+    scope.querySelectorAll('tr.dr-grp').forEach(function (tr){
       var glabel = tr.querySelector('.dr-glabel');
       tr.addEventListener('click', function (e){
         setContextFromRow(tr);
@@ -2699,13 +2787,13 @@ window.DrawingRegister = (function () {
       if (dl) dl.onclick = function(e){ e.stopPropagation(); deleteLevel(tr.dataset); };
     });
 
-    host.querySelectorAll('[data-view]').forEach(function (b){ b.onclick=function(e){ e.stopPropagation(); viewFile(b.dataset.view); }; });
-    host.querySelectorAll('[data-edit]').forEach(function (b){ b.onclick=function(e){ e.stopPropagation(); openForm(rows.find(function(x){return x.id===b.dataset.edit;})); }; });
-    host.querySelectorAll('[data-del]').forEach(function (b){ b.onclick=function(e){ e.stopPropagation(); del(rows.find(function(x){return x.id===b.dataset.del;})); }; });
+    scope.querySelectorAll('[data-view]').forEach(function (b){ b.onclick=function(e){ e.stopPropagation(); viewFile(b.dataset.view); }; });
+    scope.querySelectorAll('[data-edit]').forEach(function (b){ b.onclick=function(e){ e.stopPropagation(); openForm(rows.find(function(x){return x.id===b.dataset.edit;})); }; });
+    scope.querySelectorAll('[data-del]').forEach(function (b){ b.onclick=function(e){ e.stopPropagation(); del(rows.find(function(x){return x.id===b.dataset.del;})); }; });
     // Sheet caret: collapse/expand a drawing's sheet rows. ⚠️ stopPropagation —
     // it lives inside a row whose click selects the row and whose dblclick edits
     // the code cell, so without it toggling also starts an edit.
-    host.querySelectorAll('.dr-scaret[data-sgrp]').forEach(function (c){
+    scope.querySelectorAll('.dr-scaret[data-sgrp]').forEach(function (c){
       c.onclick = function (e){
         e.stopPropagation();
         var k = c.dataset.sgrp;
@@ -2714,12 +2802,12 @@ window.DrawingRegister = (function () {
       };
     });
     if (!canWrite) { return; }
-    host.querySelectorAll('[data-sheets]').forEach(function (b){
+    scope.querySelectorAll('[data-sheets]').forEach(function (b){
       b.onclick = function (e){ e.stopPropagation(); openSheetsDialog(rows.find(function(x){return x.id===b.dataset.sheets;})); };
     });
 
     // status dropdowns (always visible)
-    host.querySelectorAll('select[data-stat]').forEach(function (sel){
+    scope.querySelectorAll('select[data-stat]').forEach(function (sel){
       sel.onclick = function(e){ e.stopPropagation(); };
       sel.onchange = async function(){
         var r = rows.find(function(x){return x.id===sel.dataset.stat;}); if(!r) return;
@@ -2733,7 +2821,7 @@ window.DrawingRegister = (function () {
     });
 
     // scheme dropdowns (only rendered when the project has schemes)
-    host.querySelectorAll('select[data-scheme]').forEach(function (sel){
+    scope.querySelectorAll('select[data-scheme]').forEach(function (sel){
       sel.onclick = function(e){ e.stopPropagation(); };
       sel.onchange = async function(){
         var r = rows.find(function(x){return x.id===sel.dataset.scheme;}); if(!r) return;
@@ -2750,12 +2838,12 @@ window.DrawingRegister = (function () {
     });
 
     // inline edit (double-click a cell)
-    host.querySelectorAll('td.dr-ed').forEach(function (td){
+    scope.querySelectorAll('td.dr-ed').forEach(function (td){
       td.ondblclick = function(e){ e.stopPropagation(); beginEdit(td); };
     });
 
     // row selection (single click)
-    host.querySelectorAll('tr.dr-drow').forEach(function (tr){
+    scope.querySelectorAll('tr.dr-drow').forEach(function (tr){
       tr.addEventListener('click', function(e){
         if (e.target.closest('.dr-ed') && e.detail>1) return;  // ignore the dblclick-to-edit
         if (e.target.closest('button,select,input,.dr-editing')) return;
@@ -2773,7 +2861,7 @@ window.DrawingRegister = (function () {
     // drag-to-reorder within a group (Project Schedule's row drag)
     var pane = host.querySelector('.dr-grid');
     if (pane) pane.classList.toggle('dr-reorder', reorderEnabled());
-    if (reorderEnabled()) host.querySelectorAll('tr.dr-drow[draggable]').forEach(function (tr){
+    if (reorderEnabled()) scope.querySelectorAll('tr.dr-drow[draggable]').forEach(function (tr){
       tr.addEventListener('dragstart', function (e){
         // Don't start a drag out of a cell that's being edited.
         if (e.target.closest && e.target.closest('.dr-editing')) { e.preventDefault(); return; }
@@ -2809,28 +2897,89 @@ window.DrawingRegister = (function () {
     });
 
     // checkboxes
-    host.querySelectorAll('input[data-sel]').forEach(function (cb){
+    scope.querySelectorAll('input[data-sel]').forEach(function (cb){
       cb.onclick = function(e){ e.stopPropagation(); };
       cb.onchange = function(){ if (cb.checked) selected[cb.dataset.sel]=true; else delete selected[cb.dataset.sel]; lastClickedId=cb.dataset.sel; refreshSel(host); };
     });
-    host.querySelectorAll('input[data-selgrp]').forEach(function (cb){
+    scope.querySelectorAll('input[data-selgrp]').forEach(function (cb){
       cb.onclick = function(e){ e.stopPropagation(); };
       cb.onchange = function(){
         cb.dataset.selgrp.split(',').forEach(function (id){ if(!id) return; if (cb.checked) selected[id]=true; else delete selected[id]; });
         refreshSel(host);
       };
     });
+  }
+
+  function wireRegister(host, disp) {
+    // Column sort [UI review #3] — click a header to cycle asc → desc → manual.
+    host.querySelectorAll('th.dr-sortable[data-scol]').forEach(function (th){
+      th.onclick = function (){ regSetSort(th.dataset.scol); };
+    });
+    var sc = host.querySelector('#dr-sortclear');
+    if (sc) sc.onclick = function (){ regSort.col = null; regSort.dir = 1; saveUI(); render(); };
+
+    var xall = host.querySelector('#dr-xall');
+    if (xall) xall.onclick = function(){
+      var pkeys = disp.filter(isTopItem).map(function(x){return x.key;});
+      // Acts on whichever map is live, so "expand all" works during a filter too.
+      var anyOpen = pkeys.some(function (k){ return !isCollapsed(k); });
+      if (anyFilter()) { fCollapsed = {}; if (anyOpen) pkeys.forEach(function (k){ fCollapsed[k] = true; }); }
+      else if (anyOpen) pkeys.forEach(function (k){ collapsed[k] = true; });
+      else collapsed = {};
+      saveUI(); render();
+    };
+    // duplicate-code legend: click to toggle "show only duplicates"
+    var dupleg = host.querySelector('#dr-duplegend');
+    if (dupleg) dupleg.onclick = function(){ filters.dupsOnly = !filters.dupsOnly; fCollapsed = {}; render(); };
+    // jump to a phase [feature 6]
+    var jump = host.querySelector('#dr-jump');
+    if (jump) jump.onchange = function(){
+      var key = jump.value; if (!key) return;
+      delete collapsed[key]; delete fCollapsed[key]; saveUI(); render();
+      var tr = document.querySelector('tr.dr-grp[data-grp="'+key.replace(/"/g,'\\"')+'"]');
+      if (tr) tr.scrollIntoView({ block:'start', behavior:'smooth' });
+    };
+    // ⚠️ Row-scoped wiring lives in wireRegisterRows() so the PROGRESSIVE APPEND can wire
+    // each chunk it paints with exactly the same handlers. Called here for the first
+    // chunk, and again by appendRegisterRows() for every chunk after it.
+    wireRegisterRows(host, host);
+    // ⚠️ THIS GATE IS NOT REDUNDANT. It used to live mid-way through this function
+    // (`if (!canWrite) { return; }`) and stopped everything below it, so a read-only
+    // viewer never got the bulk-action bar, the timeline-scale buttons, the Grid/Gantt
+    // toggle or the grid keyboard. That block moved into wireRegisterRows(), where its
+    // `return` can only exit that function — so without this line a reader would
+    // silently start getting write-side wiring. Behaviour preserved deliberately.
+    // (That a reader cannot switch Grid/Gantt or change the timeline scale looks like a
+    // real defect, but fixing it is a separate change, not a side effect of this one.)
+    if (!canWrite) return;
     var all = host.querySelector('#dr-selall');
-    if (all) all.onclick=function(e){e.stopPropagation();}, all.onchange = function(){ visibleIds.forEach(function (id){ if(all.checked) selected[id]=true; else delete selected[id]; }); render(); };
-    var clr = host.querySelector('#dr-selclear'); if (clr) clr.onclick = function(){ selected={}; render(); };
+    // ⚠️ TICKING A BOX MUST NOT REBUILD THE REGISTER. Both of these called render(),
+    // which on a 1,700-row register is ~1.2 s of layout (measured) to change a checkbox
+    // and show the bulk-action bar — nothing about the row SET changes. refreshSel()
+    // already patches the highlight, the boxes and the bar in place, which is what the
+    // per-row checkboxes have always used; these two now do the same.
+    if (all) all.onclick=function(e){e.stopPropagation();}, all.onchange = function(){ visibleIds.forEach(function (id){ if(all.checked) selected[id]=true; else delete selected[id]; }); refreshSel(host); };
+    var clr = host.querySelector('#dr-selclear'); if (clr) clr.onclick = function(){ selected={}; refreshSel(host); };
     var sd  = host.querySelector('#dr-seldel');   if (sd)  sd.onclick  = deleteSelected;
     var ss  = host.querySelector('#dr-selstatus'); if (ss) ss.onchange = function(){ if (ss.value) setStatusSelected(ss.value); };
 
     // Only the Gantt pane changes on a scale change, so re-render just that — rebuilding
     // the whole Registry would drop the cell cursor and stutter.
+    // ⚠️ REPAINTS ONLY AS MANY LANES AS THE GRID HAS ROWS. Changing the timeline scale
+    // can happen while the progressive append is still running, and painting all the
+    // lanes here would put the Gantt ahead of the grid — every bar misaligned from its
+    // row until the drain caught up, and then the drain would append the remaining lanes
+    // on top of ones this call had already drawn, duplicating them. Handing it the
+    // painted row count keeps lane N == row N at every instant, and the in-flight drain
+    // (which re-queries the lane container each step) carries on into the new pane.
     function repaintGantt(){
       var pane = host.querySelector('#dr-split-gantt');
-      if (pane){ pane.innerHTML = registryGanttHTML(buildModel()); wireRegSplit(host); }
+      if (!pane) return;
+      var d = buildModel();
+      var tb = host.querySelector('.dr-grid tbody');
+      var painted = tb ? tb.children.length : d.length;
+      pane.innerHTML = registryGanttHTML(d, painted);
+      wireRegSplit(host);
     }
     var unitSeg = host.querySelector('#dr-g-unit');
     if (unitSeg) unitSeg.querySelectorAll('[data-unit]').forEach(function (b){
@@ -2871,6 +3020,14 @@ window.DrawingRegister = (function () {
     host.querySelectorAll('tr.dr-drow').forEach(function (tr){
       tr.classList.toggle('dr-selrow', !!selected[tr.dataset.id]);
       var cb = tr.querySelector('input[data-sel]'); if (cb) cb.checked = !!selected[tr.dataset.id];
+    });
+    // A group's box is ticked when everything under it is. Added because select-all and
+    // Clear no longer re-render (they used to rebuild the whole grid just to redraw a
+    // tick), and without this the group boxes were the one thing left showing the old
+    // state — a header unticked above a block of ticked rows.
+    host.querySelectorAll('input[data-selgrp]').forEach(function (cb){
+      var gids = String(cb.dataset.selgrp || '').split(',').filter(Boolean);
+      cb.checked = gids.length > 0 && gids.every(function (id){ return !!selected[id]; });
     });
   }
 

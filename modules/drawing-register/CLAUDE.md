@@ -1,5 +1,93 @@
 # Module: drawing-register
 
+## The Registry paints in chunks — the "UI lags sometimes" report, measured (2026-08-24) — fmlozano
+User: *"User Interface lags sometimes. Let's assess and fix."* Measured before changing anything, in
+Chrome, against a synthetic register of **SLN101's real shape** (1,764 display rows / 4 levels):
+
+| | payload | DOM nodes | re-render |
+|---|---|---|---|
+| before | 2.31 MB | 39,151 | **1,256 ms** |
+| grid windowed to 200, Gantt untouched | 0.59 MB | 9,271 | 280 ms |
+| **grid + Gantt windowed to 200** | 0.26 MB | 4,505 | **118 ms** |
+
+- ⚠️ **The cost is NODE COUNT, not string building.** `buildModel()` is ~3 ms and `indexSheets()`
+  under 1 ms; **style + layout alone was 1,077 of the 1,256 ms.** Any "optimise the model" instinct
+  here is aimed at the wrong 1%. The register was building **every row in one `innerHTML`**, and
+  `render()` runs on every sort click, collapse, filter keystroke and status change — so the whole
+  second was paid again for a one-cell change.
+- ⚠️ **The Gantt is HALF the problem and is easy to miss.** `#dr-split-gantt` renders **one
+  absolutely-positioned lane per display row** (384 KB of the 2.31 MB, ~5,400 nodes). Windowing only
+  the grid gets 280 ms; windowing both gets 118 ms. I first mis-read that 384 KB as fixed page
+  chrome — it is not, it scales with the register.
+
+### What it does now: progressive paint, not virtualisation
+`REG_CHUNK = 200` rows paint synchronously; the rest are appended in 200-row slices, one per task, by
+`appendRegisterRows()`. `regRowsHTML(disp,from,to,CB)` and `regLanesHTML(disp,from,to)` are the slice
+builders split out of `renderRegister()` / `registryGanttHTML()` (which now takes a `limit`).
+- ⚠️ **NOT scroll virtualisation, deliberately.** Virtualising paints less in total but breaks three
+  things this register relies on: the browser's own **Ctrl+F** (a register is a document people
+  search), the Gantt's **positional lane alignment**, and **GridX's cell cursor**, which addresses
+  rows by `visibleIds` and would find nothing for an unpainted row. Chunking keeps the full DOM, so
+  all three keep working, and moves the cost off the critical path — which is what the user feels.
+- ⚠️ **Row-scoped wiring was factored into `wireRegisterRows(scope, host)`** so appended rows get the
+  same handlers. Two traps in that alone:
+  - **Wire in a `<template>`, THEN move the nodes in.** Inserting first and re-running the wiring
+    over `tbody` would re-bind every row already present on every pass — the last chunk of a
+    1,700-row register would re-wire all 1,700. `appendChild` moves nodes with their listeners
+    intact, so each row is wired exactly once.
+  - **`wireRegister()` needed its `if (!canWrite) return;` restored.** That gate used to sit *inside*
+    the extracted block and stopped the whole function; once moved, its `return` only exits
+    `wireRegisterRows`, so without re-adding it a read-only viewer would silently start getting
+    write-side wiring. (That a reader cannot switch Grid/Gantt or change the timeline scale is a
+    **pre-existing defect** this preserved rather than fixed — separate change.)
+- ⚠️ **Stale runs are cancelled** via `_regTok`. Without it, sorting three times queues three full
+  appends, the rows duplicate, and the third click waits behind ~2.5 s of obsolete work.
+- ⚠️ **Ruler geometry is computed from EVERY row, not the painted ones** (`_gGeo`), or each chunk
+  would land on a different scale and every bar already on screen would jump sideways.
+- ⚠️ **`repaintGantt()` (timeline-scale change) paints only as many lanes as the grid has rows**, and
+  the drain **re-queries `.dr-rg-body` every step** rather than caching it — a scale change replaces
+  the whole pane mid-drain, and getting either half wrong gives duplicated or permanently missing lanes.
+
+### ⚠️⚠️ setTimeout, NOT requestAnimationFrame — do not "improve" this back
+The first implementation used rAF. **rAF does not fire at all in a hidden tab**, and a register is
+often opened into a background tab: the append never ran, the grid stopped at 200 rows and **looked
+like a complete register**. A silently TRUNCATED register is far worse than a slow one, because
+nothing about it looks wrong. Caught because the verification harness runs with
+`document.hidden === true`. We are not animating; frame alignment buys nothing.
+- Background tabs throttle `setTimeout` to ~1 s, so a 1,764-row register takes ~8 s to fill while
+  hidden and ~1 s while focused. It **completes** either way, which is the requirement.
+
+### Selection no longer re-renders
+`#dr-selall` and `#dr-selclear` called `render()` — ~1.2 s of layout to tick a checkbox, when the row
+**set** does not change. Both now use `refreshSel()`, which is what the per-row checkboxes always
+used. `refreshSel()` gained group-checkbox syncing (`input[data-selgrp]`), since without a re-render
+the group boxes were the one thing left showing stale state.
+
+### ⚠️ This was rebased onto the schemes/S-curve work, not merged
+The change was written against `821043c` and the branch had moved on six commits (schemes above
+level 1, the S-curve on the Overview, the split-pane scroll fix, the Backlog UI pass, migration 0019).
+`module.js` had churned +803/−153 in the same functions, so the commit was **re-applied onto the new
+code rather than conflict-resolved** — a mechanical merge of a refactor this size is how you get a
+file that parses and misbehaves. The old commit is kept on the local branch `chunked-registry-wip`.
+- ⚠️ **The Gantt tooltip off-by-one is NOT part of this change any more.** My version also fixed it;
+  upstream `a0a9951` had already fixed it the same way (`gIso`), so that hunk was dropped on re-apply.
+
+### Verification
+**16 checks in a real browser** (`verify.html`, module source `eval`'d with an injected test export —
+the shipped functions, never reimplemented), re-run green **after** the re-apply, on a 1,764-row
+register: first paint is exactly REG_CHUNK rows **and** REG_CHUNK lanes; after the drain every row and
+lane is present; **lane N == row N for all 1,764 rows** (the regression this change could cause); the
+streamed grid and lane markup are **byte-identical to a one-shot render**; a row beyond the first
+chunk still has its checkbox, fires its handler and has editable cells; and a **re-render mid-drain**
+leaves each row and lane exactly once with no duplicated ids. First paint measured 109–163 ms against
+the 1,256 ms baseline.
+- ⚠️ **Not verified signed-in** — no live login here; the register shape is synthetic, matched to
+  SLN101's structure (5 top levels → building → trade → category, ISD sheet-tracked). In particular
+  **the schemes tier added by 0019 is not represented in the fixture**, so its interaction with
+  chunking is reasoned (schemes sit above level 1 and only change what `buildModel()` returns, which
+  chunking slices without interpreting) rather than measured.
+- Assets `module.css/js?v=20260824a`.
+
 ## Migration 0019 is RUN, and schemes are verified working (2026-08-21) — fmlozano
 `0019` was applied to the live Engineering App project by the user. Every "0019 is not run yet" note
 below is superseded by this entry.
