@@ -257,8 +257,16 @@ window.Portfolio = (function () {
       mo++; if (mo > 12) { mo = 1; y++; }
       cur = y + '-' + String(mo).padStart(2, '0') + '-01';
     }
+    // ⚠⚠ THE TODAY LINE MUST NOT LIVE IN THE RULER. It used to be an absolutely
+    // positioned child of `.pf-g-ruler` (16px tall) stretched with `bottom:-9999px` to
+    // reach down over the lanes. That is ~10,000px of real overflow: the page grew a
+    // giant empty scroll region with a single red line running through it, which is
+    // exactly what it looked like. It now sits in `.pf-g-nowwrap`, an overlay pinned to
+    // the lane column INSIDE `.pf-g-canvas`, so it spans the ruler and the lanes and
+    // nothing else. Never give it a negative offset again.
     var nowLine = (today >= min && today <= max)
-      ? '<div class="pf-g-now" style="left:' + pct(today).toFixed(3) + '%" title="Today"></div>' : '';
+      ? '<div class="pf-g-nowwrap"><div class="pf-g-now" style="left:' +
+        pct(today).toFixed(3) + '%" title="Today"></div></div>' : '';
 
     // ⚠️ ONE SHARED TIMELINE ACROSS EVERY GROUP HEAD, always. The min/max above
     // are computed from the whole list before any grouping, so a bar under one group
@@ -319,9 +327,13 @@ window.Portfolio = (function () {
     }
 
     return '<div class="pf-gantt' + (opts.compact ? ' pf-gantt-c' : '') + '">' +
-      '<div class="pf-g-head"><span class="pf-g-lblsp"></span>' +
-        '<div class="pf-g-ruler">' + ticks + nowLine + '</div><span class="pf-g-pctsp"></span></div>' +
-      lanes +
+      // `.pf-g-canvas` is the positioning context for the today line: it wraps the ruler
+      // and every lane, so an overlay pinned to top:0/bottom:0 covers exactly them.
+      '<div class="pf-g-canvas">' +
+        '<div class="pf-g-head"><span class="pf-g-lblsp"></span>' +
+          '<div class="pf-g-ruler">' + ticks + '</div><span class="pf-g-pctsp"></span></div>' +
+        lanes + nowLine +
+      '</div>' +
       '<div class="pf-g-foot">' + esc(fmtDate(min)) + ' → ' + esc(fmtDate(max)) +
         ' · the bar spans earliest planned to latest planned/actual approval; the fill is progress' +
       '</div></div>';

@@ -217,8 +217,20 @@ body.pf-fit .pf-tablecard { flex:1; min-height:0; }
 .pf-g-tick { position:absolute; top:0; bottom:0; border-left:1px dashed var(--pd-line); }
 .pf-g-tick span { position:absolute; left:3px; top:1px; font-size:var(--pf-fs-micro);
   color:var(--pd-muted); white-space:nowrap; }
-.pf-g-now { position:absolute; top:0; bottom:-9999px; width:0;
-  border-left:2px solid color-mix(in srgb,#C42127 70%, transparent); z-index:1; }
+/* ⚠⚠ THE TODAY LINE. It previously lived inside the 16px `.pf-g-ruler` with
+   `bottom:-9999px` so it would reach down over the lanes — which is ~10,000px of real
+   overflow and gave the page an endless empty scroll region with one red line in it.
+   It now sits in an overlay pinned to the LANE COLUMN of `.pf-g-canvas`, so it spans
+   the ruler and the lanes and nothing more. `left`/`right` mirror the grid's own
+   columns plus its 10px gap; keep them in step with `.pf-g-row`'s template. */
+.pf-g-canvas { position:relative; }
+.pf-g-nowwrap {
+  position:absolute; top:0; bottom:0;
+  left:calc(var(--pf-lbl) + 10px); right:calc(var(--pf-pct) + 10px);
+  pointer-events:none; z-index:1;
+}
+.pf-g-now { position:absolute; top:0; bottom:0; width:0;
+  border-left:2px solid color-mix(in srgb,#C42127 70%, transparent); }
 
 .pf-g-row { padding:3px 0; }
 .pf-g-lbl { display:block; width:100%; text-align:left; background:transparent; border:0;
