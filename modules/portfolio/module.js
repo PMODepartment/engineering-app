@@ -539,10 +539,22 @@ window.Portfolio = (function () {
       return '<polyline class="' + cls + '" points="' +
         S.map(function (d, i) { return x(i) + ',' + yCum(get(d)); }).join(' ') + '"/>';
     };
-    // x labels thinned so they never overlap
+    // x labels thinned so they never overlap.
+    // ⚠️ THE LAST LABEL REPLACES THE PREVIOUS ONE WHEN IT WOULD LAND TOO CLOSE, rather
+    // than being drawn on top of it. Forcing `i === last` in addition to the every-nth
+    // rule printed "Sep '26Oct '26" as one run of overlapping glyphs whenever the series
+    // length was not a multiple of the step — visible on the live portfolio.
     var step = Math.ceil(S.length / 12);
+    var shown = [];
+    for (var si = 0; si < S.length; si += step) shown.push(si);
+    var lastI = S.length - 1;
+    if (shown[shown.length - 1] !== lastI) {
+      if (lastI - shown[shown.length - 1] < step) shown[shown.length - 1] = lastI;
+      else shown.push(lastI);
+    }
+    var show = {}; shown.forEach(function (i) { show[i] = 1; });
     var xlab = S.map(function (d, i) {
-      return (i % step === 0 || i === S.length - 1)
+      return show[i]
         ? '<text class="pf-sc-xlab" x="' + x(i) + '" y="' + (H - 10) + '">' + esc(d.label) + '</text>' : '';
     }).join('');
 
