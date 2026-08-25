@@ -1,5 +1,70 @@
 # Module: portfolio
 
+## Reporting visuals: approvals S-curve, status donut, aging bar, top-5 lists (2026-08-25) — fmlozano
+Four figures on the Overview, for department reporting. `EngData.portfolio()` gained three
+more per-project datasets to feed them: `months` (planned/actual approval counts by
+`YYYY-MM`), `status` (a tally under the real status names) and `aging` (open drawings only).
+
+- ⚠️ **PER PROJECT, NEVER PRE-SUMMED.** The project filter and the group-head grouping
+  both narrow the set *after* the aggregation runs, so a total computed in `engdata` could
+  not be narrowed and would describe the whole department while the page claimed to show
+  one group.
+- ⚠️ **The aging vocabulary is copied verbatim from `drawing-register`'s
+  `agingBucketOf()`** — six buckets, same boundaries (>60 / 31–60 / 1–30 / due ≤7 / not
+  due / no date). That module calls it "the single source of truth for which bucket a row
+  falls in… so the three can never disagree"; a portfolio that bucketed the same drawings
+  differently would be a fourth opinion, and the one people compare against the register.
+  The boundaries are asserted at 60, 30, 0 and −7 days.
+- ⚠️ **The "open" test mirrors the register's too** — not approved, OR sent back for
+  rework. `Resubmit` is not an approved status so the second clause is redundant today; it
+  is kept because the register keeps it, and the two must not drift.
+
+### ⚠️ Inline SVG, no chart library — and the two aspect-ratio rules
+The drawing register loads Chart.js for its own period chart, but this page's only
+dependencies are supabase and xlsx, and its Gantt already proves the pattern.
+- The **S-curve carries `preserveAspectRatio="none"`** so the viewBox stretches to the
+  card. That is safe *there* because every mark in it is a rect, a line or a horizontal
+  run of text.
+- ⚠️ **The donut must NOT.** A circle that stretches goes oval. Both the CSS and a
+  harness check say so, because copying the S-curve's attribute across is the obvious
+  mistake.
+
+### What each figure is careful about
+- **S-curve — empty months are FILLED IN.** Skipping a month with no approvals would draw
+  the cumulative line as though time had not passed, compressing a six-month stall into
+  one step. It also states the gap in words ("640 behind the plan to date") and names its
+  basis, because a picture alone gets quoted wrongly.
+- ⚠️ **Aging bar — "No due date" is REPORTED, NOT PLOTTED.** The register learned this the
+  hard way: on a register where most drawings carry no planned approval it swamped the bar
+  into one grey blob and reduced the genuinely urgent buckets to a sliver. Live, that is
+  **645 aged against 507 that cannot be** — which would have been most of the bar.
+- **Donut** — legacy statuses (`For Review`, `Revise & Resubmit`, `Superseded`) keep their
+  own names via `drStatus()`, so a register still holding them reads as its own words
+  rather than as a mystery slice. Arc lengths are asserted to sum to the exact
+  circumference: no gap, no overlap.
+- **Rank lists** — each states the measure it ranks on. "Top 5" with no unit is the kind
+  of figure that gets quoted in a meeting and then cannot be reproduced. *Worst slippage*
+  needs both a last-planned and a last-actual date and shows "Nothing to rank" otherwise,
+  rather than inventing an order.
+
+### ⚠️ REAL BUG FOUND BY LOOKING AT THE LIVE PAGE
+The x axis read **"Sep '26Oct '26"** as one run of overlapping glyphs. Forcing the final
+label *in addition to* the every-nth rule draws two labels a single step apart whenever
+the series length is not a multiple of the step. The last label now **replaces** the
+previous one when it would land too close. Regression check: no two x labels crowd together.
+
+### Verification
+**112 checks** (`pf.html`), all driving the shipped functions. Beyond the figures'
+own maths: aging totals only OPEN drawings; the bar's segments sum to 100% (proving the
+undated bucket is not competing for width); the cumulative series is gap-filled, monotonic
+and ends at its own totals; quarterly regrouping loses nothing; and all four figures render
+in the real Overview with no runaway geometry.
+- **Confirmed live, signed in**, against the real 2,554-drawing portfolio: 1,316 of 1,956
+  scheduled approvals achieved / 640 behind plan; 645 open drawings aged and 507 stated as
+  un-ageable; the donut's eight statuses; and the rank lists naming Jab Greenwoods (451
+  overdue) and Bauhinia (1,122 ISD sheets).
+- Assets `module.css/js?v=20260825f`, `engdata.js?v=20260825e`.
+
 ## Cross-project rollup: high-level Gantt + ISD status, grouped by group head (2026-08-25) — fmlozano
 User: *"Develop Portfolio Dashboard including High Level Gantt Chart & ISD Status. I think we can
 utilize the dashboard in the per project view in the Planning App."* Then, mid-build: *"Update the
