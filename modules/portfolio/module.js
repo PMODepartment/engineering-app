@@ -852,7 +852,9 @@ window.Portfolio = (function () {
   }
 
   function emptyHTML() {
-    return '<div class="pd-card pf-empty"><h3>Nothing to report yet</h3>' +
+    return '<div class="pd-card pf-empty">' +
+      '<span class="pf-empty-ic">' + ico('barChart', 22) + '</span>' +
+      '<h3>Nothing to report yet</h3>' +
       '<p>No project you can access has drawings in its register. Once a Drawing Register is ' +
       'imported or built, this portfolio picks it up automatically — there is nothing to configure ' +
       'here.</p></div>';

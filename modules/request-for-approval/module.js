@@ -697,11 +697,13 @@ window.RequestForApproval = (function () {
   }
 
   function emptyHTML() {
-    return '<div class="pd-card rf-empty"><h3>No RFAs raised yet</h3>' +
+    return '<div class="pd-card rf-empty">' +
+      '<span class="rf-empty-ic">' + ico('fileText', 22) + '</span>' +
+      '<h3>No RFAs raised yet</h3>' +
       '<p>An RFA transmits a document — a method statement, shop drawings, a schedule — ' +
       'to the consultant or client for approval. Raise one here and the app generates the ' +
       'F-GEN011 top sheet with the document placed underneath it, ready to issue.</p>' +
-      (canWrite ? '<p style="margin-top:14px;"><button class="pd-btn pd-btn-primary" id="rf-e-add">Raise the first RFA</button></p>' : '') +
+      (canWrite ? '<div class="rf-empty-act"><button class="pd-btn pd-btn-primary" id="rf-e-add">Raise the first RFA</button></div>' : '') +
       '</div>';
   }
   function wireEmpty() {

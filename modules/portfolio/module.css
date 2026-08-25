@@ -125,9 +125,6 @@
 .pf-iconbtn { padding:3px 6px; line-height:1; }
 .pf-iconbtn-del:hover { color:var(--pd-red); border-color:var(--pd-red); }
 /* ---- Empty + skeleton ---------------------------------------------------- */
-.pf-empty { padding:40px; text-align:center; }
-.pf-empty h3 { margin:0 0 6px; font-size:var(--pf-fs-lg); }
-.pf-empty p { color:var(--pd-muted); font-size:var(--pf-fs-base); margin:0 auto; max-width:520px; line-height:1.55; }
 .pf-skcard { padding:16px; }
 .pf-sk-head { display:flex; align-items:center; gap:8px; font-size:var(--pf-fs-base); color:var(--pd-muted); margin-bottom:12px; }
 .pf-spin { width:13px; height:13px; border:2px solid var(--pd-line); border-top-color:var(--pd-red);
@@ -332,9 +329,23 @@ body.pf-fit .pf-tablecard { flex:1; min-height:0; }
 .pf-note li { color:var(--pd-muted); margin-bottom:6px; }
 .pf-note strong { color:var(--pd-ink); }
 
-.pf-empty { padding:28px 26px; }
+/* ---- Empty state -------------------------------------------------------
+   ⚠️ ONE definition. There were two, inherited from the renamed sibling
+   stylesheet and then appended to: the first centred the text, the second set
+   `margin:0` on the paragraph, so the heading sat centred while the copy hugged
+   the left edge of a full-width banner with a screen of dead space beneath it.
+   ⚠️ CONTAINED AND CENTRED, not full-bleed. A card stretched across 1500px to
+   hold two sentences reads as a page that failed to load rather than as a state.
+   Do not re-add a second .pf-empty rule — change this one. */
+.pf-empty { max-width:620px; margin:clamp(24px, 7vh, 72px) auto; padding:34px 32px;
+  text-align:center; }
+.pf-empty-ic { display:inline-flex; align-items:center; justify-content:center;
+  width:46px; height:46px; border-radius:50%; margin-bottom:14px;
+  background:var(--pd-bg); color:var(--pd-muted); }
 .pf-empty h3 { margin:0 0 8px; font-size:var(--pf-fs-xl); }
-.pf-empty p { margin:0; color:var(--pd-muted); font-size:var(--pf-fs-base); line-height:1.6; max-width:68ch; }
+.pf-empty p { margin:0 auto; color:var(--pd-muted); font-size:var(--pf-fs-base);
+  line-height:1.6; max-width:48ch; }
+.pf-empty-act { margin-top:18px; }
 
 .pf-skcard { padding:16px 18px; }
 .pf-sk-head { display:flex; align-items:center; gap:8px; font-size:var(--pf-fs-base);

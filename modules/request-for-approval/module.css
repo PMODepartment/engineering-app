@@ -139,9 +139,6 @@
 .rf-iconbtn { padding:3px 6px; line-height:1; }
 .rf-iconbtn-del:hover { color:var(--pd-red); border-color:var(--pd-red); }
 /* ---- Empty + skeleton ---------------------------------------------------- */
-.rf-empty { padding:40px; text-align:center; }
-.rf-empty h3 { margin:0 0 6px; font-size:var(--rf-fs-lg); }
-.rf-empty p { color:var(--pd-muted); font-size:var(--rf-fs-base); margin:0 auto; max-width:520px; line-height:1.55; }
 .rf-skcard { padding:16px; }
 .rf-sk-head { display:flex; align-items:center; gap:8px; font-size:var(--rf-fs-base); color:var(--pd-muted); margin-bottom:12px; }
 .rf-spin { width:13px; height:13px; border:2px solid var(--pd-line); border-top-color:var(--pd-red);
@@ -320,9 +317,23 @@ strong.rf-late, td.rf-late { color:#C42127; font-weight:700; }
   background-size:400% 100%; animation:rf-shim 1.3s ease-in-out infinite; }
 @keyframes rf-shim { 0% { background-position:100% 0; } 100% { background-position:0 0; } }
 
-.rf-empty { padding:28px 26px; }
+/* ---- Empty state -------------------------------------------------------
+   ⚠️ ONE definition. There were two, inherited from the renamed sibling
+   stylesheet and then appended to: the first centred the text, the second set
+   `margin:0` on the paragraph, so the heading sat centred while the copy hugged
+   the left edge of a full-width banner with a screen of dead space beneath it.
+   ⚠️ CONTAINED AND CENTRED, not full-bleed. A card stretched across 1500px to
+   hold two sentences reads as a page that failed to load rather than as a state.
+   Do not re-add a second .rf-empty rule — change this one. */
+.rf-empty { max-width:620px; margin:clamp(24px, 7vh, 72px) auto; padding:34px 32px;
+  text-align:center; }
+.rf-empty-ic { display:inline-flex; align-items:center; justify-content:center;
+  width:46px; height:46px; border-radius:50%; margin-bottom:14px;
+  background:var(--pd-bg); color:var(--pd-muted); }
 .rf-empty h3 { margin:0 0 8px; font-size:var(--rf-fs-xl); }
-.rf-empty p { margin:0; color:var(--pd-muted); font-size:var(--rf-fs-base); line-height:1.6; max-width:66ch; }
+.rf-empty p { margin:0 auto; color:var(--pd-muted); font-size:var(--rf-fs-base);
+  line-height:1.6; max-width:48ch; }
+.rf-empty-act { margin-top:18px; }
 .rf-tablecard { padding:0; overflow:auto; max-height:calc(100vh - 240px); }
 
 @media print {
