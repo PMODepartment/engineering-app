@@ -365,3 +365,85 @@ body.pf-fit .pf-tablecard { flex:1; min-height:0; }
    needs the same line. (The sibling registers already carry it for
    `.rf-clearfilt` / `.ve-clearfilt`, which is where the pattern comes from.) */
 .pf-projpop[hidden] { display:none; }
+
+/* ==========================================================================
+   REPORTING VISUALS — S-curve, status donut, aging bar, top-5 lists
+   ========================================================================== */
+
+/* ---- S-curve ------------------------------------------------------------
+   ⚠️ preserveAspectRatio="none" on the <svg> means the viewBox stretches to the
+   card width. That is fine HERE because every mark is a rect, a line or a
+   horizontal run of text — there is no circle or rotated glyph to distort. Do
+   not copy this to the donut, which is round and would go oval. */
+.pf-sc { width:100%; height:260px; display:block; }
+.pf-sc-grid { stroke:var(--pd-line); stroke-width:1; }
+.pf-sc-ylab { fill:var(--pd-muted); font-size:11px; text-anchor:end; }
+.pf-sc-xlab { fill:var(--pd-muted); font-size:11px; text-anchor:middle; }
+.pf-sc-bp { fill:color-mix(in srgb,#8A8F98 45%,transparent); }
+.pf-sc-ba { fill:color-mix(in srgb,#2563EB 55%,transparent); }
+.pf-sc-lp { fill:none; stroke:var(--pd-ink); stroke-width:2; stroke-dasharray:5 4;
+  vector-effect:non-scaling-stroke; }
+.pf-sc-la { fill:none; stroke:#C42127; stroke-width:2.5; vector-effect:non-scaling-stroke; }
+
+.pf-sc-head { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:8px; }
+.pf-sc-key { display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+  font-size:var(--pf-fs-micro); color:var(--pd-muted); margin-left:auto; }
+.pf-k { width:11px; height:11px; border-radius:3px; display:inline-block; margin-left:8px; }
+.pf-k-bp { background:color-mix(in srgb,#8A8F98 45%,transparent); }
+.pf-k-ba { background:color-mix(in srgb,#2563EB 55%,transparent); }
+.pf-k-lp { height:0; border-top:2px dashed var(--pd-ink); border-radius:0; }
+.pf-k-la { height:0; border-top:2.5px solid #C42127; border-radius:0; }
+
+.pf-seg { display:inline-flex; border:1px solid var(--pd-line); border-radius:var(--pd-radius);
+  overflow:hidden; }
+.pf-seg-b { border:0; background:transparent; padding:5px 12px; cursor:pointer;
+  font-size:var(--pf-fs-sm); color:var(--pd-ink); }
+.pf-seg-b:hover { background:var(--pd-bg); }
+.pf-seg-b.active { background:var(--pd-red); color:#fff; }
+
+/* ---- Status donut ------------------------------------------------------- */
+.pf-dn { display:flex; align-items:center; gap:20px; flex-wrap:wrap; }
+/* ⚠️ NO preserveAspectRatio override here — a donut must stay circular. */
+.pf-dn-svg { width:150px; height:150px; flex:none; }
+.pf-dn-arc { transition:stroke-width .12s; }
+.pf-dn-arc:hover { stroke-width:23; }
+.pf-dn-c1 { text-anchor:middle; font-size:19px; font-weight:800; fill:var(--pd-ink); }
+.pf-dn-c2 { text-anchor:middle; font-size:9px; fill:var(--pd-muted); text-transform:uppercase;
+  letter-spacing:.06em; }
+.pf-dn-leg { flex:1 1 240px; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.pf-dn-li { display:flex; align-items:center; gap:8px; font-size:var(--pf-fs-sm); }
+.pf-dn-sw { width:10px; height:10px; border-radius:3px; flex:none; }
+.pf-dn-nm { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pf-dn-n { font-weight:700; font-variant-numeric:tabular-nums; }
+.pf-dn-p { color:var(--pd-muted); width:38px; text-align:right; font-variant-numeric:tabular-nums; }
+
+/* ---- Aging bar ---------------------------------------------------------- */
+.pf-ag-bar { display:flex; height:22px; border-radius:5px; overflow:hidden; background:var(--pd-bg); }
+.pf-ag-seg { display:block; height:100%; }
+.pf-ag-leg { display:flex; flex-wrap:wrap; gap:6px 16px; margin-top:10px;
+  font-size:var(--pf-fs-micro); color:var(--pd-muted); }
+.pf-ag-li { display:inline-flex; align-items:center; gap:6px; }
+.pf-ag-sw { width:10px; height:10px; border-radius:3px; display:inline-block; }
+.pf-ag-li strong { color:var(--pd-ink); font-variant-numeric:tabular-nums; }
+
+/* ---- Top-5 rank lists --------------------------------------------------- */
+.pf-ranks { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:20px; }
+.pf-rank h4 { margin:0 0 2px; font-size:var(--pf-fs-base); }
+.pf-rank > .pf-mut { margin:0 0 8px; }
+.pf-rk-row { display:grid; grid-template-columns:1fr 84px 62px; align-items:center; gap:8px;
+  padding:3px 4px; border-radius:5px; cursor:pointer; font-size:var(--pf-fs-sm); }
+.pf-rk-row:hover { background:var(--pd-bg); }
+.pf-rk-row:focus-visible { outline:2px solid var(--pd-red); outline-offset:1px; }
+.pf-rk-n { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pf-rk-t { height:8px; border-radius:999px; background:var(--pd-bg); overflow:hidden; }
+.pf-rk-f { display:block; height:100%; border-radius:999px;
+  background:color-mix(in srgb,#C42127 55%,transparent); }
+.pf-rk-v { text-align:right; font-weight:700; font-variant-numeric:tabular-nums; }
+
+@media (max-width: 900px) {
+  .pf-sc { height:210px; }
+  .pf-sc-key { margin-left:0; }
+}
+@media print {
+  .pf-seg { display:none !important; }
+}

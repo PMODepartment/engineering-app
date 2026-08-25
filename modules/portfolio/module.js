@@ -193,12 +193,21 @@ window.Portfolio = (function () {
     host.innerHTML =
       '<div class="pf-eyebrow">ENGINEERING PORTFOLIO — ' + list.length + ' PROJECT' + (list.length > 1 ? 'S' : '') + '</div>' +
       '<div class="pf-kpis">' + kpis + '</div>' +
+      '<div class="pd-card"><h3>Approvals over time <span class="pf-mut">— due vs achieved, ' +
+        'and the gap between them</span></h3>' + sCurveHTML(list) + '</div>' +
+      '<div class="pf-grid2">' +
+        '<div class="pd-card"><h3>Drawings by status</h3>' + donutHTML(list) + '</div>' +
+        '<div class="pd-card"><h3>Open drawings by age <span class="pf-mut">— against their ' +
+          'planned approval</span></h3>' + agingHTML(list) + '</div>' +
+      '</div>' +
+      '<div class="pd-card"><h3>Where to look first</h3>' + topListsHTML(list) + '</div>' +
       '<div class="pd-card"><h3>High-level programme <span class="pf-mut">— one lane per project</span></h3>' +
         ganttHTML(list, { compact: true }) + '</div>' +
       '<div class="pd-card pf-tblcard"><h3>By project</h3>' + tableHTML(list) + '</div>' +
       basisNoteHTML();
     wireTable(host);
     wireGantt(host);
+    wirePeriod(host);
   }
 
   // ---- the high-level Gantt ------------------------------------------------
@@ -437,6 +446,267 @@ window.Portfolio = (function () {
     wireGantt(host);
   }
 
+
+  // ==========================================================================
+  // REPORTING VISUALS — approvals over time, top-5 lists, status + aging
+  // --------------------------------------------------------------------------
+  // ⚠️ ALL INLINE SVG, NO CHART LIBRARY. The drawing register loads Chart.js for its
+  // own period chart, but this page's only dependencies are supabase and xlsx, and its
+  // Gantt already proves the pattern: percent/viewBox geometry that resizes with no
+  // resize observer. Adding a charting CDN here to draw three small figures would be a
+  // dependency the page otherwise does not need.
+  //
+  // ⚠️ EVERY FIGURE IS BUILT FROM THE SCOPED LIST, not from `data.projects`. The project
+  // filter and the group-head grouping both narrow the set, and a chart that ignored
+  // that would contradict the KPI row above it.
+  // ==========================================================================
+
+  var periodMode = 'month';        // 'month' | 'quarter'
+
+  // Merge the per-project month buckets into one series for the scoped set.
+  // Returns [{ key, label, planned, actual, cumPlanned, cumActual }] in date order.
+  function approvalSeries(list) {
+    var m = {};
+    list.forEach(function (p) {
+      Object.keys(p.months || {}).forEach(function (k) {
+        var src = p.months[k];
+        var key = periodMode === 'quarter'
+          ? k.slice(0, 4) + '-Q' + (Math.floor((+k.slice(5, 7) - 1) / 3) + 1)
+          : k;
+        var b = m[key] || (m[key] = { key: key, planned: 0, actual: 0 });
+        b.planned += src.planned; b.actual += src.actual;
+      });
+    });
+    var keys = Object.keys(m).sort();
+    // ⚠️ GAPS ARE FILLED. Skipping a month with no approvals would draw the cumulative
+    // line as though time had not passed, compressing a six-month stall into one step.
+    if (keys.length && periodMode === 'month') {
+      var out = [], cur = keys[0], last = keys[keys.length - 1], guard = 0;
+      while (cur <= last && guard++ < 400) {
+        out.push(m[cur] || { key: cur, planned: 0, actual: 0 });
+        var y = +cur.slice(0, 4), mo = +cur.slice(5, 7) + 1;
+        if (mo > 12) { mo = 1; y++; }
+        cur = y + '-' + String(mo).padStart(2, '0');
+      }
+      keys = out.map(function (b) { return b.key; });
+      out.forEach(function (b) { m[b.key] = b; });
+    }
+    var cp = 0, ca = 0;
+    return keys.map(function (k) {
+      var b = m[k];
+      cp += b.planned; ca += b.actual;
+      return { key: k, label: periodMode === 'quarter' ? k.replace('-', ' ') : fmtMonth(k + '-01'),
+               planned: b.planned, actual: b.actual, cumPlanned: cp, cumActual: ca };
+    });
+  }
+
+  // The S-curve. Bars = approvals due in the period; lines = cumulative due vs cumulative
+  // achieved. The gap between the two lines IS the backlog, which is the thing to read.
+  function sCurveHTML(list) {
+    var S = approvalSeries(list);
+    if (!S.length) {
+      return '<p class="pf-mut">No planned or actual approval dates yet, so there is nothing ' +
+        'to plot. Dates come from the Drawing Register.</p>';
+    }
+    var W = 1000, H = 260, PADL = 46, PADR = 14, PADT = 12, PADB = 30;
+    var iw = W - PADL - PADR, ih = H - PADT - PADB;
+    var maxCum = Math.max(1, S[S.length - 1].cumPlanned, S[S.length - 1].cumActual);
+    var maxBar = Math.max(1, S.reduce(function (a, b) { return Math.max(a, b.planned, b.actual); }, 0));
+    var bw = iw / S.length;
+    var x = function (i) { return PADL + i * bw + bw / 2; };
+    var yCum = function (v) { return PADT + ih - (v / maxCum) * ih; };
+    var yBar = function (v) { return PADT + ih - (v / maxBar) * (ih * 0.55); };
+
+    // gridlines + y labels, on the cumulative scale (the lines are the headline)
+    var grid = '', TICKS = 4;
+    for (var t = 0; t <= TICKS; t++) {
+      var v = Math.round(maxCum * t / TICKS), yy = yCum(v);
+      grid += '<line class="pf-sc-grid" x1="' + PADL + '" x2="' + (W - PADR) + '" y1="' + yy + '" y2="' + yy + '"/>' +
+        '<text class="pf-sc-ylab" x="' + (PADL - 6) + '" y="' + (yy + 3) + '">' + v + '</text>';
+    }
+
+    // bars: planned behind, actual in front, so a period that over-delivered still shows
+    var bars = S.map(function (d, i) {
+      var w = Math.max(2, bw * 0.34);
+      var xp = PADL + i * bw + bw / 2 - w - 1, xa = PADL + i * bw + bw / 2 + 1;
+      return (d.planned ? '<rect class="pf-sc-bp" x="' + xp + '" y="' + yBar(d.planned) + '" width="' + w +
+        '" height="' + (PADT + ih - yBar(d.planned)) + '"><title>' + esc(d.label) + ' · ' + d.planned + ' due</title></rect>' : '') +
+        (d.actual ? '<rect class="pf-sc-ba" x="' + xa + '" y="' + yBar(d.actual) + '" width="' + w +
+        '" height="' + (PADT + ih - yBar(d.actual)) + '"><title>' + esc(d.label) + ' · ' + d.actual + ' approved</title></rect>' : '');
+    }).join('');
+
+    var line = function (get, cls) {
+      return '<polyline class="' + cls + '" points="' +
+        S.map(function (d, i) { return x(i) + ',' + yCum(get(d)); }).join(' ') + '"/>';
+    };
+    // x labels thinned so they never overlap
+    var step = Math.ceil(S.length / 12);
+    var xlab = S.map(function (d, i) {
+      return (i % step === 0 || i === S.length - 1)
+        ? '<text class="pf-sc-xlab" x="' + x(i) + '" y="' + (H - 10) + '">' + esc(d.label) + '</text>' : '';
+    }).join('');
+
+    var lastP = S[S.length - 1].cumPlanned, lastA = S[S.length - 1].cumActual;
+    var behind = lastP - lastA;
+
+    return '<div class="pf-sc-head">' +
+        '<span class="pf-seg">' +
+          '<button class="pf-seg-b' + (periodMode === 'month' ? ' active' : '') + '" data-period="month">Monthly</button>' +
+          '<button class="pf-seg-b' + (periodMode === 'quarter' ? ' active' : '') + '" data-period="quarter">Quarterly</button>' +
+        '</span>' +
+        '<span class="pf-sc-key">' +
+          '<span class="pf-k pf-k-bp"></span>Due <span class="pf-k pf-k-ba"></span>Approved' +
+          '<span class="pf-k pf-k-lp"></span>Cumulative due <span class="pf-k pf-k-la"></span>Cumulative approved' +
+        '</span>' +
+      '</div>' +
+      '<svg class="pf-sc" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" ' +
+        'aria-label="Approvals due versus approved over time">' +
+        grid + bars + line(function (d) { return d.cumPlanned; }, 'pf-sc-lp') +
+        line(function (d) { return d.cumActual; }, 'pf-sc-la') + xlab +
+      '</svg>' +
+      '<p class="pf-mut">' + lastA.toLocaleString() + ' of ' + lastP.toLocaleString() +
+        ' scheduled approvals achieved' +
+        (behind > 0 ? ' — <strong class="pf-late">' + behind.toLocaleString() +
+          ' behind the plan to date</strong>' : behind < 0
+          ? ' — <strong>' + (-behind).toLocaleString() + ' ahead of plan</strong>' : '') +
+        '. ⚠️ Counted in DRAWINGS, on their own planned and actual approval dates; a drawing with ' +
+        'neither date appears in neither series.</p>';
+  }
+
+  // ---- status donut --------------------------------------------------------
+  // Colours come from EngData's own status vocabulary, so a slice here is the same
+  // colour as the same status on the project dashboard.
+  var STATUS_HUE = {
+    'Approved': '#12693A', 'Approved w/ comments': '#0F766E',
+    'Submitted': '#B45309', 'For Review': '#B45309',
+    'Resubmit': '#C42127', 'Revise & Resubmit': '#C42127',
+    'In Progress': '#2563EB', 'Not Started': '#8A8F98',
+    'Cancelled': '#6B7280', 'Superseded': '#6B7280'
+  };
+  function statusTotals(list) {
+    var m = {};
+    list.forEach(function (p) {
+      Object.keys(p.status || {}).forEach(function (k) { m[k] = (m[k] || 0) + p.status[k]; });
+    });
+    return m;
+  }
+  function donutHTML(list) {
+    var m = statusTotals(list);
+    var keys = Object.keys(m).filter(function (k) { return m[k] > 0; })
+      .sort(function (a, b) { return m[b] - m[a]; });
+    var total = keys.reduce(function (a, k) { return a + m[k]; }, 0);
+    if (!total) return '<p class="pf-mut">No drawings to report.</p>';
+    var R = 54, C = 2 * Math.PI * R, off = 0;
+    var arcs = keys.map(function (k) {
+      var frac = m[k] / total, len = frac * C;
+      var seg = '<circle class="pf-dn-arc" r="' + R + '" cx="70" cy="70" fill="none" ' +
+        'stroke="' + (STATUS_HUE[k] || '#8A8F98') + '" stroke-width="20" ' +
+        'stroke-dasharray="' + len + ' ' + (C - len) + '" stroke-dashoffset="' + (-off) + '">' +
+        '<title>' + esc(k) + ' · ' + m[k].toLocaleString() + ' (' + Math.round(frac * 100) + '%)</title></circle>';
+      off += len;
+      return seg;
+    }).join('');
+    var legend = keys.map(function (k) {
+      return '<div class="pf-dn-li"><span class="pf-dn-sw" style="background:' +
+        (STATUS_HUE[k] || '#8A8F98') + '"></span>' +
+        '<span class="pf-dn-nm">' + esc(k) + '</span>' +
+        '<span class="pf-dn-n">' + m[k].toLocaleString() + '</span>' +
+        '<span class="pf-dn-p">' + Math.round(m[k] / total * 100) + '%</span></div>';
+    }).join('');
+    return '<div class="pf-dn">' +
+      '<svg viewBox="0 0 140 140" class="pf-dn-svg" role="img" aria-label="Drawings by status">' +
+        '<g transform="rotate(-90 70 70)">' + arcs + '</g>' +
+        '<text class="pf-dn-c1" x="70" y="66">' + total.toLocaleString() + '</text>' +
+        '<text class="pf-dn-c2" x="70" y="82">drawings</text>' +
+      '</svg><div class="pf-dn-leg">' + legend + '</div></div>';
+  }
+
+  // ---- aging bar -----------------------------------------------------------
+  function agingTotals(list) {
+    var m = {};
+    (data.AGING_ORDER || []).forEach(function (k) { m[k] = 0; });
+    list.forEach(function (p) {
+      Object.keys(p.aging || {}).forEach(function (k) { m[k] = (m[k] || 0) + p.aging[k]; });
+    });
+    return m;
+  }
+  var AGING_HUE = { '>60d overdue': '#C42127', '31–60d overdue': '#DC2626',
+    '1–30d overdue': '#B45309', 'Due ≤7 days': '#CA8A04',
+    'Not due yet': '#12693A', 'No due date': '#8A8F98' };
+  function agingHTML(list) {
+    var m = agingTotals(list);
+    var order = (data.AGING_ORDER || []);
+    // ⚠️ "No due date" is REPORTED, NOT PLOTTED. The drawing register learned this the
+    // hard way: on a register where most drawings carry no planned approval it swamped
+    // the bar into one grey blob and reduced the genuinely urgent buckets to a sliver.
+    var dated = order.filter(function (k) { return k !== 'No due date'; });
+    var tot = dated.reduce(function (a, k) { return a + (m[k] || 0); }, 0);
+    var undated = m['No due date'] || 0;
+    if (!tot) {
+      return '<p class="pf-mut">' + (undated
+        ? undated.toLocaleString() + ' open drawing(s), none with a planned approval date — ' +
+          'so none can be aged. Set planned approval dates in the Drawing Register.'
+        : 'No open drawings — everything is approved.') + '</p>';
+    }
+    var segs = dated.map(function (k) {
+      var n = m[k] || 0; if (!n) return '';
+      return '<span class="pf-ag-seg" style="width:' + (n / tot * 100) + '%;background:' +
+        AGING_HUE[k] + '" title="' + esc(k + ' · ' + n.toLocaleString()) + '"></span>';
+    }).join('');
+    var legend = dated.map(function (k) {
+      var n = m[k] || 0; if (!n) return '';
+      return '<span class="pf-ag-li"><span class="pf-ag-sw" style="background:' + AGING_HUE[k] + '"></span>' +
+        esc(k) + ' <strong>' + n.toLocaleString() + '</strong></span>';
+    }).join('');
+    return '<div class="pf-ag-bar">' + segs + '</div>' +
+      '<div class="pf-ag-leg">' + legend + '</div>' +
+      '<p class="pf-mut">' + tot.toLocaleString() + ' open drawing(s) with a planned approval date.' +
+        (undated ? ' <strong>' + undated.toLocaleString() + '</strong> more have no date and cannot be aged.' : '') +
+      '</p>';
+  }
+
+  // ---- top-5 rank lists ----------------------------------------------------
+  // ⚠️ Each list states the measure it ranks on. "Top 5" with no unit is the kind of
+  // figure that gets quoted in a meeting and then cannot be reproduced.
+  function slipDays(p) {
+    // How far the last approval ran past the last date planned for one. Positive = late.
+    if (!p.maxPlanned || !p.maxActual) return null;
+    return EngData._portfolio.daysBetweenISO(p.maxPlanned, p.maxActual);
+  }
+  function rankHTML(title, sub, rows, fmt) {
+    if (!rows.length) return '<div class="pf-rank"><h4>' + esc(title) + '</h4>' +
+      '<p class="pf-mut">' + esc(sub) + '</p><p class="pf-mut">Nothing to rank.</p></div>';
+    var max = Math.max.apply(null, rows.map(function (r) { return Math.abs(r.v); })) || 1;
+    return '<div class="pf-rank"><h4>' + esc(title) + '</h4><p class="pf-mut">' + esc(sub) + '</p>' +
+      rows.map(function (r) {
+        return '<div class="pf-rk-row pf-drill" data-drill="' + esc(r.id) + '" role="button" tabindex="0" ' +
+          'title="Open this project’s Drawing Register">' +
+          '<span class="pf-rk-n">' + esc(projName(r.id)) + '</span>' +
+          '<span class="pf-rk-t"><span class="pf-rk-f" style="width:' +
+            (Math.abs(r.v) / max * 100).toFixed(1) + '%"></span></span>' +
+          '<span class="pf-rk-v">' + fmt(r.v) + '</span></div>';
+      }).join('') + '</div>';
+  }
+  function topListsHTML(list) {
+    var overdue = list.filter(function (p) { return p.overdue > 0; })
+      .sort(function (a, b) { return b.overdue - a.overdue; }).slice(0, 5)
+      .map(function (p) { return { id: p.project_id, v: p.overdue }; });
+    var isd = list.filter(function (p) { return p.isd && p.isd.sheets > 0; })
+      .sort(function (a, b) { return b.isd.sheets - a.isd.sheets; }).slice(0, 5)
+      .map(function (p) { return { id: p.project_id, v: p.isd.sheets }; });
+    var slip = list.map(function (p) { return { id: p.project_id, v: slipDays(p) }; })
+      .filter(function (r) { return r.v != null && r.v > 0; })
+      .sort(function (a, b) { return b.v - a.v; }).slice(0, 5);
+    return '<div class="pf-ranks">' +
+      rankHTML('Most overdue drawings', 'Drawings past their own planned approval date',
+        overdue, function (v) { return v.toLocaleString(); }) +
+      rankHTML('Largest ISD scope', 'Individual Services Drawings, counted in sheets',
+        isd, function (v) { return v.toLocaleString() + ' sh'; }) +
+      rankHTML('Worst slippage', 'Days from the last planned approval to the last actual one',
+        slip, function (v) { return v.toLocaleString() + 'd'; }) +
+    '</div>';
+  }
+
   // ---- tables --------------------------------------------------------------
   var COLS = [
     { k: 'name',     l: 'Project' },
@@ -597,6 +867,20 @@ window.Portfolio = (function () {
       el.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
     });
   }
+  // The S-curve's period toggle. Re-renders the whole view rather than just the chart,
+  // because the choice is persistent and the footer sentence under the chart changes
+  // with it — repainting only the <svg> would leave that sentence describing the old
+  // grouping.
+  function wirePeriod(host) {
+    host.querySelectorAll('[data-period]').forEach(function (b) {
+      b.onclick = function () {
+        if (periodMode === b.dataset.period) return;
+        periodMode = b.dataset.period;
+        render();
+      };
+    });
+  }
+
   function wireTable(host) {
     host.querySelectorAll('th.pf-sortable').forEach(function (th) {
       th.onclick = function () {
@@ -736,6 +1020,10 @@ window.Portfolio = (function () {
       setData: function (d) { data = d; }, setProjects: function (p) { projects = p; },
       setSel: function (s) { sel = s || {}; }, setView: function (v) { view = v; },
       byGroupHead: byGroupHead, ghIdOf: ghIdOf, ghLabel: ghLabel, ghHeadHTML: ghHeadHTML,
+      approvalSeries: approvalSeries, sCurveHTML: sCurveHTML, donutHTML: donutHTML,
+      agingHTML: agingHTML, topListsHTML: topListsHTML, statusTotals: statusTotals,
+      agingTotals: agingTotals, slipDays: slipDays,
+      setPeriod: function (m) { periodMode = m; },
       setGroupBy: function (g) { groupBy = g; },
       setGH: function (list) {
         GH = list || []; ghById = {}; ghRank = {};

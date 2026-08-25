@@ -256,6 +256,33 @@
     'Temporary Works Drawings', 'Individual Services Drawings'];
   var ISD = 'Individual Services Drawings';
 
+  // ⚠️ AGING VOCABULARY COPIED VERBATIM FROM drawing-register's agingBucketOf(),
+  // not re-derived. That module calls it "the single source of truth for which bucket a
+  // row falls in — used to build the chart, to colour the Aging cell, and to filter the
+  // Backlog, so the three can never disagree". A portfolio that bucketed the same
+  // drawings differently would be a fourth opinion, and the one people compare against
+  // the register.
+  var AGING_ORDER = ['>60d overdue', '31–60d overdue', '1–30d overdue',
+                     'Due ≤7 days', 'Not due yet', 'No due date'];
+  function agingBucket(days) {
+    if (days == null)  return 'No due date';
+    if (days > 60)     return '>60d overdue';
+    if (days > 30)     return '31–60d overdue';
+    if (days > 0)      return '1–30d overdue';
+    if (days >= -7)    return 'Due ≤7 days';
+    return 'Not due yet';
+  }
+  // Whole days between two ISO dates by UTC arithmetic on the date parts only, so no
+  // timezone can shift it — the trap this repo documents repeatedly.
+  function daysBetweenISO(a, b) {
+    if (!a || !b) return null;
+    var x = String(a).slice(0, 10).split('-'), y = String(b).slice(0, 10).split('-');
+    if (x.length !== 3 || y.length !== 3) return null;
+    var ta = Date.UTC(+x[0], +x[1] - 1, +x[2]), tb = Date.UTC(+y[0], +y[1] - 1, +y[2]);
+    if (isNaN(ta) || isNaN(tb)) return null;
+    return Math.round((tb - ta) / 86400000);
+  }
+
   async function portfolio(opts) {
     opts = opts || {};
     var today = todayISO();
@@ -288,7 +315,14 @@
       var p = proj[pidKey] || (proj[pidKey] = {
         project_id: pidKey, drawings: 0, approvedDrawings: 0, sheets: 0, approvedSheets: 0,
         overdue: 0, minPlanned: null, maxPlanned: null, maxActual: null,
-        levels: {}, isd: null
+        levels: {}, isd: null,
+        // ⚠️ Kept PER PROJECT, never pre-summed. The portfolio's project filter and its
+        // group-head grouping both narrow the set after this runs, so a total computed
+        // here could not be narrowed and would silently describe the whole department
+        // while the page claimed to show one group.
+        months: {},     // 'YYYY-MM' -> { planned, actual }  (approvals, for the S-curve)
+        status: {},     // drStatus label -> count
+        aging: {}       // aging bucket -> count, OPEN drawings only
       });
       var L = p.levels[phase] || (p.levels[phase] = {
         phase: phase, drawings: 0, approvedDrawings: 0, sheets: 0, approvedSheets: 0,
@@ -330,6 +364,36 @@
         if (!p.maxActual || ac > p.maxActual) p.maxActual = ac;
         if (!L.maxActual || ac > L.maxActual) L.maxActual = ac;
       }
+
+      // ---- approvals over time -----------------------------------------------
+      // A drawing contributes to the PLANNED series in the month it was due and to the
+      // ACTUAL series in the month it was approved. Those are different months whenever
+      // anything ran late, which is the entire point of plotting them together.
+      var mk;
+      if (validApprovalDate(pl)) {
+        mk = pl.slice(0, 7);
+        (p.months[mk] = p.months[mk] || { planned: 0, actual: 0 }).planned++;
+      }
+      if (validApprovalDate(ac)) {
+        mk = ac.slice(0, 7);
+        (p.months[mk] = p.months[mk] || { planned: 0, actual: 0 }).actual++;
+      }
+
+      // ---- status ------------------------------------------------------------
+      // drStatus() maps the legacy spellings, so a register still holding 'Ongoing' or
+      // 'For Review' is counted under the name it became rather than as its own slice.
+      var st = drStatus(r.status);
+      p.status[st] = (p.status[st] || 0) + 1;
+
+      // ---- aging of the OPEN queue -------------------------------------------
+      // ⚠️ The open test mirrors the register's own: not approved, OR sent back for
+      // rework. `Resubmit` is not an approved status so the second clause is redundant
+      // today — it is kept because the register keeps it, and these two must not drift.
+      if (!drApproved(r.status) || st === 'Resubmit') {
+        var ad = validApprovalDate(pl) ? daysBetweenISO(pl, today) : null;
+        var ab = agingBucket(ad);
+        p.aging[ab] = (p.aging[ab] || 0) + 1;
+      }
     });
 
     // Finish each project: percentages, the ordered level list, and ISD pulled out.
@@ -358,7 +422,7 @@
     });
 
     return { projects: list, rowsRead: rows.length, warning: warning, today: today,
-             TOP_LEVELS: TOP_LEVELS, ISD: ISD };
+             TOP_LEVELS: TOP_LEVELS, ISD: ISD, AGING_ORDER: AGING_ORDER };
   }
 
   function tally(rows, keyFn, order, clsFn) {
@@ -819,6 +883,7 @@
   EngData.portfolio = portfolio;
   EngData._portfolio = {
     validApprovalDate: validApprovalDate, TOP_LEVELS: TOP_LEVELS, ISD: ISD,
+    AGING_ORDER: AGING_ORDER, agingBucket: agingBucket, daysBetweenISO: daysBetweenISO,
     drApproved: drApproved, PORTFOLIO_WARN_ROWS: PORTFOLIO_WARN_ROWS,
     // Runs the real aggregation over rows supplied by the caller, bypassing only the
     // network. Keeps the maths under test while the fetch is not.
