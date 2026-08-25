@@ -52,28 +52,52 @@
     // so this is the live answer to "is a project in context?" — not a guess.
     var noProject = !sessionStorage.getItem('pd_project');
 
-    html += section('Engineering');
-    html += link('projects.html', 'grid', 'Projects', null, active === 'projects');
+    // ⚠⚠ THE SIDEBAR IS SPLIT BY SCOPE, AND THAT SPLIT IS THE POINT.
+    // Everything used to sit under one "Engineering" heading: the project list, the
+    // project dashboard, five project-scoped registers and two org-wide modules, in
+    // one undifferentiated run. Nothing on screen said which items belonged to the
+    // project you had chosen and which were department-wide, so the only way to find
+    // out was to click and see whether it bounced. Two labelled groups say it up front,
+    // and the project group is TITLED WITH THE PROJECT so the scope is named rather
+    // than inferred.
+    //
+    // ⚠️ An org-wide module must appear in the ORGANISATION group and must never be
+    // gated — see `orgWide` in config.js. Putting one in the project group would be
+    // wrong twice over: it would claim a scope the module does not have, and on a cold
+    // start it would sit in a group that is entirely disabled.
+    var orgMods = [], projMods = [];
+    (APP_CONFIG.MODULES || []).forEach(function (m) {
+      // A module the user's role cannot open is omitted entirely rather than
+      // shown disabled — an inert row they can never use is just noise.
+      if (!m.enabled || !Perm.canModule(profile, m.key)) return;
+      (m.orgWide ? orgMods : projMods).push(m);
+    });
+
+    html += section('Organisation');
+    // Org-wide modules lead, because with nothing selected they are the only things
+    // here that actually work — and the app now lands on one of them.
+    orgMods.forEach(function (m) {
+      html += link(m.path, m.icon, m.name, null, active === m.key);
+    });
+    html += link('projects.html', 'grid', 'Projects',
+      noProject ? null : 'Change the current project', active === 'projects');
+
+    // ⚠️ The heading NAMES the project when there is one. "Project" over a list of
+    // registers tells you nothing; "Project — Bauhinia Residences" tells you exactly
+    // whose drawings you are about to open, which is the mistake this prevents.
+    html += section(noProject ? 'Project — none selected' : 'Project — ' + pn);
     // On the Projects page the user is choosing a project, so the previously
     // selected one must not be advertised underneath Dashboard as if it were
     // already in context.
     html += link('dashboard.html', 'home', 'Dashboard',
-      active === 'projects' ? null : (pn || 'No project selected'), active === 'dashboard',
-      { disabled: noProject });
+      active === 'projects' ? null : (noProject ? 'Select a project first' : null),
+      active === 'dashboard', { disabled: noProject });
 
-    // Engineering modules — config-driven, permission-filtered. A module the
-    // user's role cannot open is omitted entirely rather than shown disabled.
-    //
-    // ⚠️ Gating is per-module, NOT blanket. Most modules are project-scoped and
-    // redirect to projects.html with nothing selected, so offering a link that
-    // silently undoes itself reads as broken — those gate. A module flagged
-    // `orgWide` in config.js (Initiatives) is meaningful with no project chosen,
-    // and gating it would make it unreachable from a cold start, since the only
-    // way to clear the gate is to pick a project it does not need.
-    (APP_CONFIG.MODULES || []).forEach(function (m) {
-      if (!m.enabled || !Perm.canModule(profile, m.key)) return;
-      html += link(m.path, m.icon, m.name, null, active === m.key,
-        { disabled: noProject && !m.orgWide });
+    // ⚠️ Gating is per-module, NOT blanket — these are the project-scoped ones, so
+    // they all gate together. They redirect to projects.html with nothing selected, so
+    // offering a link that silently undoes itself reads as broken.
+    projMods.forEach(function (m) {
+      html += link(m.path, m.icon, m.name, null, active === m.key, { disabled: noProject });
     });
 
     html += section('System');

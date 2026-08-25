@@ -62,13 +62,13 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="assets/js/config.js?v=20260819a"></script>
-  <script src="assets/js/auth.js?v=20260819a"></script>
+  <script src="assets/js/config.js?v=20260825c"></script>
+  <script src="assets/js/auth.js?v=20260825c"></script>
   <script src="assets/js/db.js?v=20260819a"></script>
   <script src="assets/js/ui.js?v=20260819a"></script>
   <script src="assets/js/icons.js?v=20260819a"></script>
   <script src="assets/js/perm.js?v=20260819a"></script>
-  <script src="assets/js/nav.js?v=20260819a"></script>
+  <script src="assets/js/nav.js?v=20260825c"></script>
   <script>
   (function () {
     // A project carries ONE group_head_id. There is no tree: sorting, filtering
@@ -102,7 +102,29 @@
       });
     }
 
+    // ⚠⚠ AN OAUTH RETURN PASSES THROUGH TO HOME — AND ONLY FROM IN HERE.
+    // Microsoft sign-in comes back to THIS page rather than to APP_CONFIG.HOME, because
+    // Supabase only completes a session for a redirect URL on its allow-list and this is
+    // the URL that is on it (see loginWithMicrosoft in auth.js). Without this, a
+    // Microsoft user lands on the project list while an email user lands on the
+    // Portfolio.
+    //
+    // ⚠️ It MUST run inside requireLogin's callback, never at the top of the page.
+    // Supabase exchanges the OAuth code for a session ASYNCHRONOUSLY on load
+    // (detectSessionInUrl); navigating away before that finishes would abandon the
+    // exchange and bounce the user back to sign-in — breaking Microsoft login outright,
+    // which is far worse than landing on the wrong page. Here the session is already
+    // established, because requireLogin resolved.
+    //
+    // ⚠️ Gated on the OAuth markers ONLY — `?code=` (PKCE) or a `#access_token=`
+    // fragment. Forwarding unconditionally would make Projects unreachable from the
+    // sidebar, which is the opposite of the problem being solved.
     AppAuth.requireLogin(function (user, profile) {
+      if (/[?&]code=/.test(location.search) || /[#&]access_token=/.test(location.hash)) {
+        // replace(), not href: keeps the token-bearing URL out of session history.
+        location.replace(APP_CONFIG.HOME);
+        return;
+      }
       UI.renderUserBar(profile);
       Nav.render(profile, 'projects');
       // Projects and group heads are SOURCED from the Planners Dashboard, never

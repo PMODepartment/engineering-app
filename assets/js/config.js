@@ -25,6 +25,21 @@ window.APP_CONFIG = {
   // ---- Sibling app (used by the cross-app links in the sidebar) ----
   PLANNING_APP_URL: 'https://pmodepartment.github.io/planning-app/',
 
+  // ---- Where signing in lands -----------------------------------------------
+  // ⚠️ HOME IS THE PORTFOLIO, NOT THE PROJECT LIST. Until org-wide modules existed,
+  // "choose a project" was reasonably the first thing the app asked. It is not any
+  // more: Portfolio and Initiatives are meaningful with nothing selected, and making
+  // the project list the gate meant the only route to a module that needs no project
+  // ran through choosing one. Landing on the Portfolio puts the department-level view
+  // first and demotes picking a project to a step you take from it.
+  //
+  // ⚠️ `projects.html` STILL CLEARS THE SELECTION when it loads — it is still the
+  // selection step, and that rule is unchanged. What changed is only where you arrive.
+  //
+  // ⚠️ Paths here are ROOT-RELATIVE. Callers inside modules/<key>/ must prefix
+  // '../../' (AppAuth.redirect() and Nav already do).
+  HOME: 'modules/portfolio/index.html',
+
   // ---- Engineering modules (the module launcher reads this list) ----
   // `key`     — folder name under /modules and DB table prefix
   // `path`    — entry page

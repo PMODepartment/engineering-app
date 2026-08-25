@@ -165,6 +165,43 @@ over Resend/SMTP because it sends as the real person, keeps a copy in their Sent
 
 See `docs/MODULE_GUIDE.md` before adding or building out a module.
 
+## Signing in lands on the PORTFOLIO, not the project list (2026-08-25)
+
+`APP_CONFIG.HOME` is `modules/portfolio/index.html` and every sign-in route ends there.
+Until org-wide modules existed, "choose a project" was reasonably the first thing the
+app asked; it is not any more, because the only route to a module that needs no project
+ran through choosing one.
+
+- ⚠️ **`projects.html` still clears the selection** — it is still the selection step.
+  Only the arrival point changed. Every rule in the next section is unchanged.
+- ⚠️⚠️ **MICROSOFT SIGN-IN STILL RETURNS TO `projects.html`, DELIBERATELY.** Supabase
+  only completes a session for a redirect URL on its allow-list, and that is the URL
+  that is on it. Pointing `loginWithMicrosoft`'s `redirectTo` at the module path without
+  adding it to that list first would **break Microsoft sign-in outright** — an external
+  config change the code cannot make or verify. `projects.html` forwards an OAuth return
+  to `HOME` instead, **from inside `requireLogin`'s callback**: forwarding at the top of
+  the page would navigate away before Supabase finished exchanging the code
+  (`detectSessionInUrl` is async) and abandon the session. The forward is gated on the
+  OAuth markers (`?code=` / `#access_token=`) only — forwarding unconditionally would
+  make Projects unreachable from the sidebar.
+
+## The sidebar is split by scope (2026-08-25)
+
+Three groups: **Organisation** (org-wide modules, then Projects), **Project — <name>**
+(Dashboard + every project-scoped module), then **System**. Everything used to sit under
+one "Engineering" heading, so nothing on screen said which items belonged to the chosen
+project and which were department-wide — the only way to find out was to click and see
+whether it bounced.
+
+- ⚠️ The project heading **names the project**. "Project" over a list of registers tells
+  you nothing; "Project — Bauhinia Residences" tells you whose drawings you are opening.
+- ⚠️ **An `orgWide` module belongs in Organisation and is never gated.** Putting one in
+  the project group would claim a scope it does not have, and on a cold start it would
+  sit inside a group that is entirely disabled — unreachable, which is the bug `orgWide`
+  exists to prevent.
+- 19 checks (`nav.html`) cover both states, the gating, permission filtering, and that no
+  org-wide module leaks into the project group.
+
 ## Project-first is now enforced everywhere
 
 A project is "current" only because the user chose it. Three rules, and they have

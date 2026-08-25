@@ -84,7 +84,9 @@
     return requireLogin(function (user, profile) {
       if (roles.indexOf(profile.role) === -1) {
         alert('You do not have access to this page.');
-        return redirect('projects.html');
+        // Home, not the project list: being refused a page is not a reason to make
+        // someone choose a project before they can see anything.
+        return redirect(APP_CONFIG.HOME);
       }
       if (cb) cb(user, profile);
     });
@@ -108,12 +110,19 @@
   }
 
   // loginWithMicrosoft(): redirects to Microsoft (Azure AD) via Supabase's
-  // "azure" OAuth provider. Only called from index.html (root), so the
-  // redirect target is always the root projects.html. On return, Supabase
-  // completes the session from the URL automatically (detectSessionInUrl, on
-  // by default) — the landing page just calls requireLogin() as usual, which
-  // self-heals a profile row for a first-time Microsoft sign-in the same way
-  // email sign-up does.
+  // "azure" OAuth provider. On return, Supabase completes the session from the
+  // URL automatically (detectSessionInUrl, on by default) — the landing page just
+  // calls requireLogin() as usual, which self-heals a profile row for a first-time
+  // Microsoft sign-in the same way email sign-up does.
+  //
+  // ⚠⚠ THE RETURN URL IS DELIBERATELY STILL projects.html, NOT APP_CONFIG.HOME.
+  // Supabase only completes a session for a redirect URL that is on the project's
+  // allow-list, and `projects.html` is the one that has been there and working.
+  // Pointing this at a new path without adding it to that list first would break
+  // Microsoft sign-in outright — an external config change this code cannot make or
+  // verify. `projects.html` forwards an OAuth return on to HOME instead, so every
+  // sign-in route still ends at the same place. If the allow-list is ever updated to
+  // include the module path, this can be simplified — not before.
   async function loginWithMicrosoft() {
     return getSB().auth.signInWithOAuth({
       provider: 'azure',
