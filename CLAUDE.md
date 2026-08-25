@@ -69,7 +69,20 @@ A healthy row: `status_code 200`, `"caller":"scheduled"`, and `dropped_columns`
 listing exactly the five `schedule_*` names — anything else there means the
 Planners schema changed and the projection needs looking at.
 
-## Sending mail (the `send-mail` Edge Function)
+## Sending mail (the `send-mail` Edge Function) — BUILT, THEN UNWIRED
+
+⚠️⚠️ **THERE IS NO EMAIL BUTTON IN THE APP.** This function was built and then taken out
+of the UI on the owner's call (2026-08-25): issuing a top sheet is ordinary
+correspondence and people already do it from Outlook, where they have their signature,
+their distribution lists and a Sent Items they trust. **Download the PDF and attach it.**
+The function is still deployed and `sendMail`/`openCompose` are still in `topsheet.js`,
+both **unreferenced** — re-wiring is adding the button back, not rebuilding. Do not
+re-add it without asking. Everything below describes it as built, and is kept because the
+security reasoning is the expensive part.
+
+⚠️ One practical consequence of unwiring it: the tenant-wide `Mail.Send` grant below is
+**no longer in the loop**, so the Exchange `ApplicationAccessPolicy` is not currently
+load-bearing. It becomes load-bearing again the moment anyone re-wires the button.
 
 Top sheets (MAS / RFA / RFI) can be issued by email from the app. The app is a **static
 GitHub Pages site**, so it can hold no secret — a mail credential shipped to the browser

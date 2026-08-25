@@ -33,20 +33,25 @@
 // Every field stays editable before printing: the paper form is what the client
 // signs, and the log rarely carries the reviewer's exact wording.
 //
-// THREE OUTPUTS, and the difference between them matters:
+// TWO OUTPUTS, and the difference between them matters:
 //   Print     the browser's own dialog. Pixel-exact, no library, best for paper.
 //             Gives the app NO file — it writes wherever the user chooses and
 //             tells this code nothing.
 //   Download  a PDF Blob built here (html2pdf), with any PDF attachment merged
 //             underneath by pdf-lib, so the sheet sits on top of the document it
 //             covers. This is the thing the user asked for.
-//   Email…    the same package, handed to the `send-mail` Edge Function, which
-//             sends it through Microsoft Graph as the signed-in user.
 //
 // ⚠️ Printing and the PDF are TWO RENDERERS OF ONE LAYOUT, not two layouts. Both
 // consume the same `render(kind, data)` markup and the same topsheet.css, which
 // states the sheet in millimetres. Never fork the markup for one of them.
-// ⚠️ Nothing is emailed without the user pressing Send in the compose dialog.
+// ⚠️ THERE IS DELIBERATELY NO "EMAIL" BUTTON. Sending from inside the app was built
+// (a Microsoft Graph Edge Function, `supabase/functions/send-mail`) and then dropped on
+// the owner's call: issuing a top sheet is ordinary correspondence, and people already
+// do that from Outlook — where they have their signature, their distribution lists and
+// a Sent Items they trust. Downloading the PDF and attaching it is fewer moving parts
+// and no tenant-wide send permission to govern. `sendMail`/`openCompose` remain in this
+// file and the function remains deployed but UNREFERENCED, so re-wiring is adding the
+// button back rather than rebuilding. Do not re-add it without asking.
 // ============================================================================
 
 window.TopSheet = (function () {
@@ -128,6 +133,22 @@ window.TopSheet = (function () {
     if (opts.pick) return box(opts.pick === 'yes' ? Y : N, opts.pick === 'yes' ? yes : no);
     return '<span class="ts-yn">' + box(Y, yes) + box(N, no) + '</span>';
   }
+  // A signature caption with the signatory's name printed above it, when one was
+  // given. ⚠️ THE NAME IS OPTIONAL AND THE CAPTION IS NOT. Signatories change — the
+  // consultant's reviewer this month is not next month's — so the app cannot know them
+  // and must not invent them. Typing one prints it; leaving it blank prints the bare
+  // caption exactly as the issued form does, for signing by hand.
+  function signCap(name) {
+    var n = esc(name || '');
+    return (n ? '<div class="ts-val ts-signname">' + n + '</div>' : '') +
+      '<div>Name / Signature / Date</div>';
+  }
+  // "For and on behalf of X". Falls back to the issued form's own wording rather than
+  // printing an empty behalf-of line.
+  function behalf(v, fallback) {
+    return 'For and on behalf of ' + (v ? esc(v) : (fallback || 'Client / Owner'));
+  }
+
   function reviewStatusCell(cls) {
     var h = '<div class="ts-rs-hd">Submittal Review Status</div>';
     h += REVIEW_STATUS.map(function (s) { return '<div class="ts-rs">' + box(s, false) + '</div>'; }).join('');
@@ -200,7 +221,19 @@ window.TopSheet = (function () {
       td({ cs: 2, cls: 'ts-10 ts-c bt br bb', v: 'Location / Use' }) + '</tr>';
     // description body
     h += '<tr>' +
-      // ⚠️ 54mm, NOT 62mm — the MAS sheet DID NOT FIT ON A4. Measured: at 62mm the sheet
+      // ⚠️ 46mm. Twice now this box has been the place the MAS sheet's overflow was
+      // paid from, because it is the only cell on the form that is deliberately empty
+      // space AND sizes its own row (the review blocks below do not — their height comes
+      // from the four-line review-status column beside them, so trimming those is a
+      // no-op, measured).
+      //   62 -> 54mm: the sheet rendered 304.69mm against A4's 297 and paged onto a
+      //               near-blank second sheet — true of the Print path all along.
+      //   54 -> 46mm: printing an optional signatory name above each of the two
+      //               "Name / Signature / Date" captions adds ~3.2mm apiece, taking it
+      //               to 303.36mm. Signatories change and must be typeable, so the
+      //               space comes from here.
+      // 46mm still leaves far more room than the four short fields beside it need.
+      // ⚠️ ORIGINAL NOTE, still true — Measured: at 62mm the sheet
       // rendered 304.69mm tall against A4's 297mm, so it overflowed by 7.69mm and paged
       // onto a near-blank second sheet. That was true of the Print path all along; it only
       // became obvious once the PDF export made the page count checkable (RFA and RFI both
@@ -209,7 +242,7 @@ window.TopSheet = (function () {
       // The 8mm comes out of this free-text box rather than any labelled row or signature
       // band: it is the one block on the form that is deliberately empty space, and 54mm
       // still leaves far more room than the four fields beside it need.
-      td({ cs: 3, cls: 'ts-10 bt br bb bl', v: pre(d.productName), h: '54mm' }) +
+      td({ cs: 3, cls: 'ts-10 bt br bb bl', v: pre(d.productName), h: '46mm' }) +
       td({ cs: 2, cls: 'ts-10 ts-c bt br bb bl ts-mid', v: pre(d.manufacturer) }) +
       td({ cs: 2, cls: 'ts-10 bt br bb bl ts-mid', v: pre(d.specRef) }) +
       td({ cs: 2, cls: 'ts-10 ts-c bt br bb ts-mid', v: pre(d.location) }) + '</tr>';
@@ -220,23 +253,30 @@ window.TopSheet = (function () {
     h += '<tr>' +
       td({ cs: 5, cls: 'ts-10 ts-c br bb bl ts-bot', v: val(d.submittedBy) +
         (d.submittedByTitle ? '<div class="ts-sub">' + esc(d.submittedByTitle) + '</div>' : ''), h: '20mm' }) +
-      td({ cs: 4, cls: 'ts-10 ts-c br bb' }) + '</tr>';
+      td({ cs: 4, cls: 'ts-10 ts-c br bb ts-bot', v: val(d.respondedBy) +
+        (d.respondedByTitle ? '<div class="ts-sub">' + esc(d.respondedByTitle) + '</div>' : '') }) + '</tr>';
     h += '<tr>' +
       td({ cs: 5, cls: 'ts-10 ts-c bt br bb bl', v: 'Name / Signature / Date' }) +
       td({ cs: 4, cls: 'ts-10 ts-c bt br bb', v: 'Name / Signature / Date' }) + '</tr>';
     h += band("PROJECT MANAGEMENT / CONSULTANT'S REVIEW AND APPROVAL");
     h += '<tr>' +
-      td({ cs: 5, cls: 'ts-10 bt br bl', v: 'For and on behalf of Client / Owner<div>Comments:</div>', h: '30mm' }) +
+      td({ cs: 5, cls: 'ts-10 bt br bl',
+           // ⚠️ The height here is NOT what sizes this row — the review-status column
+           // beside it (a heading plus four checkbox lines) is taller and wins. Trimming
+           // this value to claw back space does nothing; measured, 30mm and 26mm give an
+           // identical sheet. Take space from the product box above instead.
+           v: behalf(d.consultantName) + '<div>Comments:</div>' + pre(d.consultantComments), h: '30mm' }) +
       reviewStatusCell('ts-10 bt br') + '</tr>';
     h += '<tr>' +
-      td({ cs: 5, cls: 'ts-10 ts-c bt br bb bl', v: 'Name / Signature / Date' }) +
+      td({ cs: 5, cls: 'ts-10 ts-c bt br bb bl', v: signCap(d.consultantSignatory) }) +
       td({ cs: 4, cls: 'ts-10 br bb' }) + '</tr>';
     h += band("CLIENT / OWNERS' REVIEW AND APPROVAL");
     h += '<tr>' +
-      td({ cs: 5, cls: 'ts-10 bt br bl', v: 'For and on behalf of Client / Owner<div>Comments:</div>', h: '30mm' }) +
+      td({ cs: 5, cls: 'ts-10 bt br bl',
+           v: behalf(d.clientName || d.client) + '<div>Comments:</div>' + pre(d.clientComments), h: '30mm' }) +
       reviewStatusCell('ts-10 bt br') + '</tr>';
     h += '<tr>' +
-      td({ cs: 5, cls: 'ts-10 ts-c bt br bb bl', v: 'Name / Signature / Date' }) +
+      td({ cs: 5, cls: 'ts-10 ts-c bt br bb bl', v: signCap(d.clientSignatory) }) +
       td({ cs: 4, cls: 'ts-10 br bb' }) + '</tr>';
     h += '<tr>' +
       td({ cls: 'ts-9 bt bb bl', v: 'Copies:' }) +
@@ -275,7 +315,11 @@ window.TopSheet = (function () {
     // Widths follow the issued sheet's rules: the ID value runs from the end of
     // column A to column E, which is what keeps a full document code on one line.
     h += '<tr>' +
-      td({ cls: 'ts-10 bt bl', v: 'RFA ID:' }) +
+      // ⚠️ ts-nowrap: column A is 7.5% of the sheet (≈16mm, measured from the issued
+      // form) and "RFA ID:" wrapped to two lines in it, which both looked wrong and cost
+      // ~4mm of a sheet that has none to spare. Kept as a nowrap rather than widening the
+      // column, because the column widths were measured off the real form.
+      td({ cls: 'ts-10 bt bl ts-nowrap', v: 'RFA ID:' }) +
       td({ cs: 4, cls: 'ts-10 bt', v: val(d.rfaId) }) +
       td({ cs: 2, cls: 'ts-10 bt', v: 'Attachments included?' }) +
       td({ cs: 2, cls: 'ts-10 bt br', v: yesNo(d.attachments, { caps: true }) }) + '</tr>';
@@ -317,7 +361,14 @@ window.TopSheet = (function () {
     //     so a blank form still looks like the issued one. More than four grows the
     //     sheet past A4 and it paginates — which is correct: a second page is far
     //     better than a document that was never listed.
-    var nRows = Math.max(4, docs.length);
+    // ⚠️ PAD TO FOUR ROWS ONLY WHILE THERE IS ROOM FOR IT. The issued blank form has
+    // four document rows, so a sheet carrying nothing (or one or two documents) still
+    // looks like the form people know. But each blank row costs 8.3mm on a sheet with
+    // barely any slack, and a REAL RFA measured 299.07mm against A4's 297 — tipping a
+    // perfectly ordinary transmittal onto a second page. Once there are three or more
+    // real documents the padding has done its job and the space is better spent fitting
+    // on one page.
+    var nRows = docs.length >= 3 ? docs.length : 4;
     for (var i = 0; i < nRows; i++) {
       var r = docs[i] || {};
       h += '<tr>' +
@@ -339,7 +390,8 @@ window.TopSheet = (function () {
       });
     h += band("CONSULTANT'S REVIEW AND APPROVAL");
     h += '<tr>' +
-      td({ cs: 5, cls: 'ts-10 bt br bl', v: 'For and on behalf of Client / Owner<div>Comments:</div>', h: '26mm' }) +
+      td({ cs: 5, cls: 'ts-10 bt br bl',
+           v: behalf(d.consultantName) + '<div>Comments:</div>' + pre(d.consultantComments), h: '26mm' }) +
       reviewStatusCell('ts-10 bt br') + '</tr>';
     h += '<tr>' +
       td({ cs: 5, cls: 'ts-10 ts-c bt br bb bl', v: 'Name / Signature / Date' }) +
@@ -401,12 +453,17 @@ window.TopSheet = (function () {
     h += band("DESIGN CONSULTANT'S RESPONSE");
     h += '<tr>' + td({ cs: 9, cls: 'ts-10 bt br bl', h: '34mm' }) + '</tr>';
     h += '<tr>' + td({ cs: 9, cls: 'ts-10 br bl',
+      // ⚠️ `[Engineer]` is the blank form's PLACEHOLDER, not a value. Typing the
+      // consultant replaces it; leaving it blank keeps the bracketed placeholder, which
+      // is what the issued blank form shows.
       v: 'For and on behalf of ' + (d.consultant ? val(d.consultant) : '[Engineer]') }) + '</tr>';
-    h += signRow('');
+    h += signRow(val(d.consultantSignatory));
     h += band("PROJECT MANAGEMENT / CLIENT'S APPROVAL");
     h += '<tr>' + td({ cs: 9, cls: 'ts-10 bt br bl', h: '34mm' }) + '</tr>';
-    h += '<tr>' + td({ cs: 9, cls: 'ts-10 br bl', v: 'For and on behalf of [Project Management / Client]' }) + '</tr>';
-    h += signRow('', true);
+    h += '<tr>' + td({ cs: 9, cls: 'ts-10 br bl',
+      v: 'For and on behalf of ' + (d.clientName ? val(d.clientName)
+        : (d.client ? val(d.client) : '[Project Management / Client]')) }) + '</tr>';
+    h += signRow(val(d.clientSignatory), true);
     h += '<tr>' + td({ cs: 9, cls: 'ts-8 bt br bb bl',
       v: 'Note: In case that a change in the Contract Amount or Contract Time is required, notify Project Manager within 48 hours from your receipt of the above response and prior to your proceeding with affected work.' }) + '</tr>';
     h += '<tr>' +
@@ -439,7 +496,19 @@ window.TopSheet = (function () {
       ['attachments', 'Attachment included?', 'yesno'],
       ['productName', 'Product Name', 'area'], ['manufacturer', 'Manufacturer / Supplier', 'area'],
       ['specRef', 'Specification / BOQ Ref.', 'area'], ['location', 'Location / Use', 'area'],
-      ['submittedBy', 'Submitted by'], ['submittedByTitle', 'Submitted by — position']
+      ['submittedBy', 'Submitted by'], ['submittedByTitle', 'Submitted by — position'],
+      // ⚠️ SIGNATORY BLOCK — everything the app cannot know. Reviewers and their
+      // companies change between submittals, so these are typed, never derived, and every
+      // one is OPTIONAL: left blank the sheet prints the issued form's own wording and a
+      // bare signature line to be completed by hand.
+      ['respondedBy', 'Responded by (client) — name'],
+      ['respondedByTitle', 'Responded by — position'],
+      ['consultantName', 'Consultant / PM — company on the review block'],
+      ['consultantSignatory', 'Consultant / PM — signatory name'],
+      ['consultantComments', "Consultant / PM — comments", 'area'],
+      ['clientName', 'Client / owner — company on the review block'],
+      ['clientSignatory', 'Client / owner — signatory name'],
+      ['clientComments', 'Client / owner — comments', 'area']
     ],
     RFA: [
       ['rfaId', 'RFA ID'], ['date', 'RFA Date', 'date'], ['dateRequired', 'Date Required', 'date'],
@@ -448,7 +517,14 @@ window.TopSheet = (function () {
       ['category', 'RFA Category'], ['subCategory', 'RFA Sub-category'],
       ['attachments', 'Attachments included?', 'yesno'],
       ['types', 'Document types', 'types'],
-      ['preparedBy', 'Prepared and submitted by'], ['checkedBy', 'Checked by'], ['approvedBy', 'Approved by']
+      ['preparedBy', 'Prepared and submitted by'], ['checkedBy', 'Checked by'], ['approvedBy', 'Approved by'],
+      // See the note on the MAS block — same reasoning, same optionality.
+      ['consultantName', 'Consultant — company on the review block'],
+      ['consultantSignatory', 'Consultant — signatory name'],
+      ['consultantComments', 'Consultant — comments', 'area'],
+      ['clientName', 'Client / owner — company on the review block'],
+      ['clientSignatory', 'Client / owner — signatory name'],
+      ['clientComments', 'Client / owner — comments', 'area']
     ],
     RFI: [
       ['rfiId', 'RFI ID'], ['date', 'RFI Date', 'date'], ['dateRequired', 'Date Required', 'date'],
@@ -456,7 +532,11 @@ window.TopSheet = (function () {
       ['from', 'FROM — name & position'], ['fromCompany', 'FROM — company'],
       ['category', 'RFI Category'], ['subCategory', 'RFI Sub-category'],
       ['attachments', 'Attachments included?', 'yesno'],
-      ['description', 'RFI Description', 'area'], ['consultant', 'Design Consultant (Engineer)']
+      ['description', 'RFI Description', 'area'],
+      ['consultant', 'Design Consultant (Engineer)'],
+      ['consultantSignatory', 'Design Consultant — signatory name'],
+      ['clientName', 'Project Management / Client — company'],
+      ['clientSignatory', 'Project Management / Client — signatory name']
     ]
   };
 
@@ -533,9 +613,8 @@ window.TopSheet = (function () {
         '<button class="pd-btn" id="ts-cancel">Cancel</button>' +
         (nAttShown ? '<span class="ts-attnote" id="ts-attnote">' + attNote + '</span>' : '') +
         '<button class="pd-btn" id="ts-print">Print</button>' +
-        '<button class="pd-btn" id="ts-pdf">' +
+        '<button class="pd-btn pd-btn-primary" id="ts-pdf">' +
           (nAtt ? 'Download PDF + document' : 'Download PDF') + '</button>' +
-        '<button class="pd-btn pd-btn-primary" id="ts-email">Email…</button>' +
       '</div>', { noBackdropClose: true });
 
     var prev = m.el.querySelector('#ts-prev');
@@ -593,27 +672,6 @@ window.TopSheet = (function () {
       }
     };
 
-    var mailBtn = m.el.querySelector('#ts-email');
-    mailBtn.onclick = async function () {
-      var orig = mailBtn.textContent;
-      mailBtn.disabled = true; mailBtn.textContent = 'Preparing…';
-      try {
-        // ⚠️ The package is built BEFORE the compose dialog opens, so what the
-        // dialog lists is the actual attachment — not a promise of one. A missing
-        // document is then something the user sees while writing the covering
-        // note, rather than after the mail has gone.
-        var pkg = await buildPackage(kind, data, atts, packageName(kind, data));
-        if (pkg.skipped.length) {
-          UI.toast('Could not read: ' + pkg.skipped.join(', ') +
-            ' — it will NOT be attached. Cancel if that document is required.', 'warn');
-        }
-        openCompose(kind, data, pkg, opts.defaults);
-      } catch (e) {
-        UI.toast('Could not prepare the email: ' + ((e && e.message) || e), 'error');
-      } finally {
-        mailBtn.disabled = false; mailBtn.textContent = orig;
-      }
-    };
     return m;
   }
 

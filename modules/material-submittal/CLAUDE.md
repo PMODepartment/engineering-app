@@ -1,5 +1,72 @@
 # Module: material-submittal
 
+## The sheets were LOOKED AT, signatories are typeable, and the email button is gone (2026-08-25) — fmlozano
+Three asks: drop the in-app email in favour of the PDF, check whether the generated sheet
+actually follows the form, and let the user enter what the app cannot know.
+
+### ⚠️ THE EMAIL BUTTON IS GONE, DELIBERATELY
+Sending from inside the app was built (Microsoft Graph, `supabase/functions/send-mail`)
+and then dropped on the owner's call: issuing a top sheet is ordinary correspondence and
+people already do it from Outlook, where they have their signature, their distribution
+lists and a Sent Items they trust. Downloading the PDF and attaching it is fewer moving
+parts and **no tenant-wide send permission to govern** — the `Mail.Send` grant that
+needed an Exchange `ApplicationAccessPolicy` to contain is now simply not in the loop.
+- `sendMail` / `openCompose` **remain in topsheet.js** and the Edge Function remains
+  deployed but **unreferenced**, so re-wiring is adding the button back rather than
+  rebuilding. Do not re-add it without asking.
+
+### How the contents are filled — it was never automatic-only
+Every field on all three sheets has always been editable: the dialog is a side form over
+a live preview, prefilled from the record and `topsheet_defaults`, and repainted on each
+keystroke. What was missing was **the signature blocks**, which had no inputs at all.
+
+### ⚠️ SIGNATORIES ARE TYPED, NEVER DERIVED
+Reviewers and their companies change between submittals, so the app cannot know them and
+must not invent them. Added, all **optional**:
+- **MAS** — "Responded by (client)" name + position (that cell printed empty before);
+  consultant/PM company and signatory; client/owner company and signatory; comments for
+  both review blocks.
+- **RFA** — consultant and client/owner company, signatory and comments.
+- **RFI** — the consultant's signatory, and the **`[Project Management / Client]`
+  placeholder** is now replaceable with a real company.
+- `signCap()` prints the name above the "Name / Signature / Date" caption when given, and
+  the bare caption when not — so a blank sheet still prints exactly as the issued form
+  does, for signing by hand. `behalf()` falls back to the form's own "Client / Owner"
+  wording rather than printing an empty behalf-of line.
+
+### ⚠️ REAL BUG FOUND BY ACTUALLY LOOKING: the RFA did not fit on A4 either
+The earlier pass fixed the MAS (62→54mm) but only ever measured a *sparse* sheet. Rendered
+with realistic content — a full TO/FROM, three transmitted documents — the **RFA measured
+299.07mm against A4's 297** and paged onto a second sheet. Two causes, both fixed:
+- **"RFA ID:" wrapped to two lines** inside column A (7.5% ≈ 16mm), which looked wrong and
+  cost ~4mm. Fixed with `ts-nowrap`, **not** by widening the column — the widths were
+  measured off the issued form.
+- **The document table always padded to four rows.** The blank form has four, so a sheet
+  with 0–2 documents still pads; but from three real documents the padding has done its
+  job and the 8.3mm is better spent fitting on one page.
+- **Measured after: 0–4 documents = 297mm = one page.** Five or more legitimately runs to
+  a second page, which is correct for a transmittal carrying that many drawings.
+
+### ⚠️ AND THE SIGNATORY LINES THEN BROKE THE MAS — trimmed where it actually helps
+Printing a name above each of the MAS's two "Name / Signature / Date" captions adds
+~3.2mm apiece, taking the sheet to **303.36mm**. The 8mm came out of the **product box
+(54→46mm)**.
+- ⚠️ **Trimming the review-comment blocks does NOTHING and the code now says so.** Their
+  row height comes from the four-line review-status column beside them, not from their own
+  `h:` — measured, 30mm and 26mm give an identical sheet. The product box is the only cell
+  that is both discretionary space *and* sizes its own row.
+
+### Verification — measured in a real browser, and looked at
+All three sheets render at **exactly 210 × 297mm, one page, zero clipped cells**, with the
+signatory fields printing where they should ("Responded by Client" filled, "For and on
+behalf of ACME Consultants, Inc.", names above their captions). 16 PDF checks and the RFA
+register's 108 checks re-run green.
+- ⚠️ **A harness fragility fixed while here:** `rfa.html` pinned "23 days overdue" while
+  `stats()` calls `todayISO()` itself, so the suite failed the moment the date rolled over.
+  Those assertions are now relative to the module's own clock.
+- ⚠️ **Still not verified signed-in against a real record** — the sheets were driven with
+  representative data, not a live MAS/RFA row.
+
 ## Top sheets now produce a real PDF, with the submitted document merged under it (2026-08-24) — fmlozano
 User: *"Auto Generate and Email Top Sheet MAS & RFA & RFI through App… The RFA and MAS will have a
 document attached to it and the topsheet will be placed on top of the document for signature and

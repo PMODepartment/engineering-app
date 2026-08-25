@@ -165,3 +165,12 @@
 }
 .ts-mail-att strong { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--pd-muted); }
 .ts-mut { color: var(--pd-muted); font-size: 11.5px; }
+
+/* A signatory's name printed above its "Name / Signature / Date" caption. Sits on the
+   line the caption describes, and is bold like every other filled value. */
+.ts-doc .ts-signname { margin-bottom: 1mm; }
+/* ⚠️ Column A is 7.5% of the sheet (≈16mm, measured off the issued RFA) and
+   "RFA ID:" wrapped to two lines inside it — which looked wrong and cost ~4mm on a
+   sheet with no slack. A nowrap, because the column widths came from the real form and
+   should not be re-proportioned to fix one label. */
+.ts-doc .ts-nowrap { white-space: nowrap; }
