@@ -7,16 +7,16 @@
   <link rel="apple-touch-icon" href="../../assets/img/icon.png" />
   <script src="../../assets/js/theme.js?v=20260824a"></script>
   <title>Portfolio · Engineering App</title>
-  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260824a" />
+  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260825g" />
   <link rel="stylesheet" href="module.css?v=20260825e" />
 </head>
 <body>
   <div class="pd-app">
     <div class="pd-content">
       <div class="pd-topbar">
-        <a class="pd-btn pf-modback" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
-        <h1 class="pf-title" style="margin:0;"><span class="pf-title-ico" data-ico="barChart" data-ico-size="20"></span> <span class="pf-title-txt">Portfolio</span></h1>
-
+        <!-- Home + module switcher. Replaces the bare back arrow and the <h1>:
+             see Nav.switcher() for why an arrow alone was a dead end here. -->
+        <div class="pd-modnav" id="modsw"></div>
         <!-- ⚠️ NO PROJECT SELECTOR. This module is ORG-WIDE: it reads every project
              the signed-in user can access. What sits here instead is a multi-select
              FILTER that narrows the view — it never decides which single project the
@@ -65,14 +65,16 @@
   <script src="../../assets/js/auth.js?v=20260825c"></script>
   <script src="../../assets/js/db.js?v=20260824a"></script>
   <script src="../../assets/js/ui.js?v=20260824a"></script>
-  <script src="../../assets/js/icons.js?v=20260824a"></script>
+  <script src="../../assets/js/icons.js?v=20260825g"></script>
   <script src="../../assets/js/perm.js?v=20260824a"></script>
+  <script src="../../assets/js/nav.js?v=20260825g"></script>
   <!-- The cross-project read model. Must load BEFORE module.js. -->
   <script src="../../assets/js/engdata.js?v=20260825e"></script>
   <script src="module.js?v=20260825f"></script>
   <script>
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);
+      Nav.switcher(profile, 'portfolio');
       Portfolio.init(user, profile);
       // Read-only page — nothing here writes, so there are no write actions to hide.
       Perm.applyReadonly(document, profile);

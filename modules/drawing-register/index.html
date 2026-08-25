@@ -7,7 +7,7 @@
   <link rel="apple-touch-icon" href="../../assets/img/icon.png" />
   <script src="../../assets/js/theme.js?v=20260819d"></script>
   <title>Drawing Register · Engineering App</title>
-  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260819d" />
+  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260825g" />
   <link rel="stylesheet" href="module.css?v=20260825a" />
 </head>
 <body>
@@ -15,8 +15,9 @@
     <!-- Sidebar removed (matches Project Schedule / Cash Flow): the back button returns to the module selector. -->
     <div class="pd-content">
       <div class="pd-topbar">
-        <a class="pd-btn dr-modback" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
-        <h1 class="dr-title" style="margin:0;"><span class="dr-title-ico" data-ico="ruler" data-ico-size="20"></span> <span class="dr-title-txt">Drawing Register</span></h1>
+        <!-- Home + module switcher. Replaces the bare back arrow and the <h1>:
+             see Nav.switcher() for why an arrow alone was a dead end here. -->
+        <div class="pd-modnav" id="modsw"></div>
         <div class="dr-projctx">
           <select class="pd-select dr-project" id="dr-project" title="Project"></select>
         </div>
@@ -101,11 +102,12 @@
   <script src="../../assets/js/auth.js?v=20260825c"></script>
   <script src="../../assets/js/db.js?v=20260819d"></script>
   <script src="../../assets/js/ui.js?v=20260819d"></script>
-  <script src="../../assets/js/icons.js?v=20260819d"></script>
+  <script src="../../assets/js/icons.js?v=20260825g"></script>
   <!-- The shared Excel-like grid layer. Must load BEFORE module.js, which calls
        GridX.create() on first render. -->
   <script src="../../assets/js/gridx.js?v=20260819d"></script>
   <script src="../../assets/js/perm.js?v=20260819d"></script>
+  <script src="../../assets/js/nav.js?v=20260825g"></script>
   <script src="../../assets/js/offline.js?v=20260819d"></script>
   <script src="../../assets/js/collab.js?v=20260819d"></script>
   <script src="../../assets/js/autosave.js?v=20260819d"></script>
@@ -113,6 +115,7 @@
   <script>
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);
+      Nav.switcher(profile, 'drawing-register');
       DrawingRegister.init(user, profile);
       // Hide write actions this role may not perform. The DB enforces the
       // same rules via RLS + the approval-guard trigger — this is only UX.

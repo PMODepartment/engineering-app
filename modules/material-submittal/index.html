@@ -7,7 +7,7 @@
   <link rel="apple-touch-icon" href="../../assets/img/icon.png" />
   <script src="../../assets/js/theme.js?v=20260819a"></script>
   <title>Material Submittal Log · Engineering App</title>
-  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260819a" />
+  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260825g" />
   <link rel="stylesheet" href="../../assets/css/topsheet.css?v=20260825d" />
   <link rel="stylesheet" href="module.css?v=20260818a" />
 </head>
@@ -16,8 +16,9 @@
     <!-- Sidebar-less shell (matches Drawing Register / Cash Flow / Project Schedule). -->
     <div class="pd-content">
       <div class="pd-topbar">
-        <a class="pd-btn ms-modback" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
-        <h1 class="ms-title" style="margin:0;"><span class="ms-title-ico" data-ico="box" data-ico-size="20"></span> <span class="ms-title-txt">Material Submittal Log</span></h1>
+        <!-- Home + module switcher. Replaces the bare back arrow and the <h1>:
+             see Nav.switcher() for why an arrow alone was a dead end here. -->
+        <div class="pd-modnav" id="modsw"></div>
         <div class="ms-projctx">
           <select class="pd-select ms-project" id="ms-project" title="Project"></select>
         </div>
@@ -76,10 +77,11 @@
   <script src="../../assets/js/auth.js?v=20260825c"></script>
   <script src="../../assets/js/db.js?v=20260819a"></script>
   <script src="../../assets/js/ui.js?v=20260819a"></script>
-  <script src="../../assets/js/icons.js?v=20260819a"></script>
+  <script src="../../assets/js/icons.js?v=20260825g"></script>
   <!-- The shared Excel-like grid layer. Must load BEFORE module.js. -->
   <script src="../../assets/js/gridx.js?v=20260819a"></script>
   <script src="../../assets/js/perm.js?v=20260819a"></script>
+  <script src="../../assets/js/nav.js?v=20260825g"></script>
   <script src="../../assets/js/offline.js?v=20260819a"></script>
   <script src="../../assets/js/collab.js?v=20260819a"></script>
   <script src="../../assets/js/autosave.js?v=20260819a"></script>
@@ -94,6 +96,7 @@
   <script>
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);
+      Nav.switcher(profile, 'material-submittal');
       MaterialSubmittal.init(user, profile);
       // Hide write actions this role may not perform. The DB enforces the
       // same rules via RLS + the approval-guard trigger — this is only UX.

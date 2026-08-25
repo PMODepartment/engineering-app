@@ -123,5 +123,100 @@
     if (window.UI && UI.initShell) UI.initShell();
   }
 
-  window.Nav = { render: render };
+  // ==========================================================================
+  // MODULE SWITCHER \u2014 navigation for the SIDEBAR-LESS module pages
+  // --------------------------------------------------------------------------
+  // \u26a0\ufe0f Module pages carry no sidebar. That was a deliberate choice (full width for the
+  // grids, matching the planning app's schedule), but it left a bare \u2190 arrow as the ONLY
+  // way out of a module: to reach another register you went back, then clicked in again.
+  // Worse, every one of those arrows pointed at `dashboard.html`, which is PROJECT-SCOPED
+  // \u2014 so from an org-wide module with nothing selected the only navigation on the page
+  // bounced you to the project selector. From the Portfolio, which is now where signing in
+  // lands, the single visible control was a dead end.
+  //
+  // This renders a switcher into the topbar instead: the current module's name, and a menu
+  // of everywhere else. Full width is preserved, because it REPLACES the arrow and the
+  // <h1> rather than adding to them.
+  //
+  // \u26a0\ufe0f IT LIVES IN THIS FILE ON PURPOSE. The grouping (Organisation vs Project), the
+  // per-module `orgWide` gating and the permission filter are exactly the sidebar's rules,
+  // and this repo has paid repeatedly for the same rule expressed twice. Adding a module to
+  // config.js must update both surfaces at once, and it does, because there is one list.
+  // ==========================================================================
+  function switcher(profile, activeKey) {
+    var host = document.getElementById('modsw');
+    if (!host) return;
+    var pn = sessionStorage.getItem('pd_project_name') || sessionStorage.getItem('pd_project');
+    var noProject = !sessionStorage.getItem('pd_project');
+
+    var org = [], proj = [];
+    (APP_CONFIG.MODULES || []).forEach(function (m) {
+      if (!m.enabled || !Perm.canModule(profile, m.key)) return;
+      (m.orgWide ? org : proj).push(m);
+    });
+
+    // What the button itself says. An unknown key (a page not in MODULES) still gets a
+    // usable label rather than an empty button.
+    var cur = (APP_CONFIG.MODULES || []).filter(function (m) { return m.key === activeKey; })[0];
+    var curName = cur ? cur.name : (activeKey === 'dashboard' ? 'Dashboard' : 'Engineering App');
+    var curIcon = cur ? cur.icon : 'grid';
+    var curScope = cur ? (cur.orgWide ? 'Organisation' : (noProject ? 'Project' : pn)) : '';
+
+    function item(href, icon, label, opts) {
+      opts = opts || {};
+      var dis = !!opts.disabled;
+      return '<a class="pd-modsw-i' + (opts.cur ? ' cur' : '') + (dis ? ' dis' : '') + '" ' +
+        'href="' + prefix() + (dis ? 'projects.html' : href) + '"' +
+        (dis ? ' aria-disabled="true"' : '') +
+        ' title="' + Fmt.esc(dis ? 'Select a project first' : label) + '">' +
+        '<span class="pd-modsw-ii">' + (window.Icons ? Icons.svg(icon, 16) : '') + '</span>' +
+        '<span>' + Fmt.esc(label) + '</span>' +
+        (dis ? '<span class="pd-modsw-lock">needs a project</span>' : '') + '</a>';
+    }
+
+    var menu = '<div class="pd-modsw-h">Organisation</div>';
+    org.forEach(function (m) {
+      menu += item(m.path, m.icon, m.name, { cur: m.key === activeKey });
+    });
+    menu += item('projects.html', 'grid', 'Projects', { cur: activeKey === 'projects' });
+    menu += '<div class="pd-modsw-h">' +
+      Fmt.esc(noProject ? 'Project \u2014 none selected' : 'Project \u2014 ' + pn) + '</div>';
+    menu += item('dashboard.html', 'home', 'Dashboard',
+      { cur: activeKey === 'dashboard', disabled: noProject });
+    proj.forEach(function (m) {
+      menu += item(m.path, m.icon, m.name, { cur: m.key === activeKey, disabled: noProject });
+    });
+
+    host.innerHTML =
+      // A labelled home, not a bare arrow: it says where it goes, and it goes to the
+      // app's actual home rather than to a project-scoped dashboard.
+      '<a class="pd-modhome" href="' + prefix() + APP_CONFIG.HOME + '" title="Engineering Portfolio \u2014 the home page">' +
+        (window.Icons ? Icons.svg('home', 17) : '') + '</a>' +
+      '<div class="pd-modsw">' +
+        '<button class="pd-modsw-btn" id="modsw-btn" type="button" aria-haspopup="true" aria-expanded="false">' +
+          '<span class="pd-modsw-ic">' + (window.Icons ? Icons.svg(curIcon, 19) : '') + '</span>' +
+          '<span class="pd-modsw-t"><strong>' + Fmt.esc(curName) + '</strong>' +
+            (curScope ? '<small>' + Fmt.esc(curScope) + '</small>' : '') + '</span>' +
+          '<span class="pd-modsw-cv">\u25be</span>' +
+        '</button>' +
+        '<div class="pd-modsw-menu" id="modsw-menu">' + menu + '</div>' +
+      '</div>';
+
+    var btn = document.getElementById('modsw-btn');
+    var box = document.getElementById('modsw-menu');
+    function close() { box.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); }
+    btn.onclick = function (e) {
+      e.stopPropagation();
+      var open = box.classList.toggle('open');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    // Clicking anywhere else closes it; Escape does too, so it is not a mouse-only control.
+    document.addEventListener('click', function (e) {
+      if (!box.classList.contains('open')) return;
+      if (!box.contains(e.target) && e.target !== btn) close();
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+  }
+
+  window.Nav = { render: render, switcher: switcher };
 })();

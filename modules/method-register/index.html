@@ -7,7 +7,7 @@
   <link rel="apple-touch-icon" href="../../assets/img/icon.png" />
   <script src="../../assets/js/theme.js?v=20260819a"></script>
   <title>Method Register · Engineering App</title>
-  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260819a" />
+  <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260825g" />
   <link rel="stylesheet" href="module.css?v=20260819a" />
 </head>
 <body>
@@ -15,8 +15,9 @@
     <!-- Sidebar-less shell (matches Drawing Register / Material Submittal Log). -->
     <div class="pd-content">
       <div class="pd-topbar">
-        <a class="pd-btn mr-modback" href="../../dashboard.html" title="Back to the Engineering Dashboard"><span data-ico="arrowLeft" data-ico-size="18"></span></a>
-        <h1 class="mr-title" style="margin:0;"><span class="mr-title-ico" data-ico="clipboard" data-ico-size="20"></span> <span class="mr-title-txt">Method Register</span></h1>
+        <!-- Home + module switcher. Replaces the bare back arrow and the <h1>:
+             see Nav.switcher() for why an arrow alone was a dead end here. -->
+        <div class="pd-modnav" id="modsw"></div>
         <div class="mr-projctx">
           <select class="pd-select mr-project" id="mr-project" title="Project"></select>
         </div>
@@ -62,12 +63,14 @@
   <script src="../../assets/js/auth.js?v=20260825c"></script>
   <script src="../../assets/js/db.js?v=20260819a"></script>
   <script src="../../assets/js/ui.js?v=20260819a"></script>
-  <script src="../../assets/js/icons.js?v=20260819a"></script>
+  <script src="../../assets/js/icons.js?v=20260825g"></script>
   <script src="../../assets/js/perm.js?v=20260819a"></script>
+  <script src="../../assets/js/nav.js?v=20260825g"></script>
   <script src="module.js?v=20260819a"></script>
   <script>
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);
+      Nav.switcher(profile, 'method-register');
       MethodRegister.init(user, profile);
       // Hide write actions this role may not perform. The DB enforces the same
       // rules via RLS — this is only UX.

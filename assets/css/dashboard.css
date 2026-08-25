@@ -934,3 +934,51 @@ body.gx-resizing { cursor: col-resize; user-select: none; }
 /* The drag grip on a resizable header. */
 .gx-grip { position:absolute; top:0; right:0; width:7px; height:100%; cursor:col-resize; z-index:3; }
 .gx-grip:hover { background:var(--pd-red-mid); }
+
+/* ==========================================================================
+   MODULE SWITCHER — topbar navigation for the sidebar-less module pages.
+   Replaces the bare ← arrow (see Nav.switcher in nav.js for why). Modelled on
+   .pd-projsw, which solves the same problem for projects.
+   ========================================================================== */
+.pd-modnav { display:flex; align-items:center; gap:8px; flex:none; }
+.pd-modhome { display:inline-flex; align-items:center; justify-content:center;
+  width:34px; height:34px; border-radius:var(--pd-radius); flex:none;
+  color:var(--pd-muted); border:1px solid transparent; }
+.pd-modhome:hover { background:var(--pd-bg); border-color:var(--pd-line); color:var(--pd-red); }
+
+.pd-modsw { position:relative; flex:none; }
+.pd-modsw-btn { display:inline-flex; align-items:center; gap:9px; background:var(--pd-bg);
+  border:1px solid var(--pd-line); border-radius:var(--pd-radius); padding:4px 10px;
+  height:38px; cursor:pointer; color:var(--pd-ink); max-width:340px; }
+.pd-modsw-btn:hover { border-color:var(--pd-red); }
+.pd-modsw-ic { display:inline-flex; color:var(--pd-red); flex:none; }
+.pd-modsw-t { display:flex; flex-direction:column; line-height:1.15; text-align:left; min-width:0; }
+.pd-modsw-t strong { font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pd-modsw-t small { color:var(--pd-muted); font-size:10.5px; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+.pd-modsw-cv { color:var(--pd-muted); flex:none; }
+
+.pd-modsw-menu { position:absolute; top:calc(100% + 6px); left:0; z-index:60; display:none;
+  min-width:280px; background:var(--pd-card); border:1px solid var(--pd-line);
+  border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,.24); padding:6px; }
+.pd-modsw-menu.open { display:block; }
+.pd-modsw-h { padding:8px 10px 4px; font-size:10.5px; text-transform:uppercase;
+  letter-spacing:.05em; color:var(--pd-muted); font-weight:700;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pd-modsw-i { display:flex; align-items:center; gap:9px; padding:7px 10px; border-radius:6px;
+  font-size:13.5px; color:var(--pd-ink); text-decoration:none; }
+.pd-modsw-i:hover { background:var(--pd-bg); }
+.pd-modsw-i.cur { background:var(--pd-red-light); font-weight:600; }
+.pd-modsw-ii { display:inline-flex; color:var(--pd-muted); flex:none; }
+.pd-modsw-i.cur .pd-modsw-ii { color:var(--pd-red); }
+/* A gated item stays visible and says why, rather than vanishing — the same
+   reasoning as the sidebar's inert items. */
+.pd-modsw-i.dis { color:var(--pd-muted); }
+.pd-modsw-lock { margin-left:auto; font-size:10px; text-transform:uppercase;
+  letter-spacing:.04em; color:var(--pd-muted); flex:none; }
+
+@media (max-width: 820px) {
+  .pd-modsw-btn { max-width:190px; }
+  .pd-modsw-t small { display:none; }
+}
+@media print { .pd-modhome, .pd-modsw { display:none !important; } }
