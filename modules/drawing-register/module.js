@@ -18,7 +18,7 @@ window.DrawingRegister = (function () {
   var profile = null, uid = null, pid = null, projName = '';
   var rows = [];
   var view = 'overview';                       // overview | backlog | registry | gantt
-  var filters = { phase: '', discipline: '', scheme: '', scope: '', status: '', search: '', dupsOnly: false };
+  var filters = { phase: '', discipline: '', scheme: '', scope: '', status: '', search: '', dupsOnly: false, pkg: '' };
   var SCOPES = ['Main Contract', 'Change Order'];
 
   // ---- Registry column widths [drag-resize + double-click auto-fit] --------
@@ -574,6 +574,54 @@ window.DrawingRegister = (function () {
   }
 
   function sb() { return AppAuth.getSB(); }
+  /* CONTRACT PACKAGES, mirrored from the Planners app (0021-planners-packages.sql).
+     A project is bought as several contract lots — "Package 1 — Tower 1 and General
+     Requirements", "Package 2 — Towers 2-7" — and a drawing belongs to one of them.
+     ⚠️ THIS APP AND PLANNERS ARE SEPARATE SUPABASE PROJECTS, so the list is mirrored
+        in, never read live. Planners' push-packages owns the table; nothing here can
+        write it.
+     ⚠️ ORTHOGONAL TO SCOPE. The Main Contract / Change Order filter beside this one is
+        a different axis: a change order BELONGS TO a package. Neither is derived from
+        the other, and both filters compose.
+     ⚠️ [] ON ANY FAILURE, including "table does not exist" — the migration may not be
+        run, and that must degrade to "no package filter offered", never a broken
+        register. */
+  var PKGS = [];
+  async function loadPackages() {
+    PKGS = [];
+    if (!pid) return;
+    try {
+      var r = await sb().from('planners_packages')
+        .select('planners_package_id,code,name,status,sort_order')
+        .eq('project_id', pid).order('sort_order');
+      if (!r.error && r.data) PKGS = r.data;
+    } catch (e) { PKGS = []; }
+    paintPackageFilter();
+  }
+  function packageLabelOf(id) {
+    var k = PKGS.filter(function (x) { return String(x.planners_package_id) === String(id); })[0];
+    /* A drawing filed against a package that has since been retired upstream must not
+       read as blank — "no package" and "a package that vanished" are different facts. */
+    return k ? ((k.code ? k.code + ' — ' : '') + k.name) : (id ? '⚠ no longer in Planners' : '');
+  }
+  function paintPackageFilter() {
+    var el = document.getElementById('dr-f-package');
+    if (!el) return;
+    // Hidden entirely when the project has no packages: an empty lens is noise, and a
+    // filter that can only ever match nothing reads as broken.
+    var wrap = el;
+    if (!PKGS.length) { wrap.style.display = 'none'; return; }
+    wrap.style.display = '';
+    var cur = filters.pkg || '';
+    wrap.innerHTML = '<option value="">All packages</option>' +
+      PKGS.map(function (k) {
+        return '<option value="' + Fmt.esc(k.planners_package_id) + '"' +
+          (String(cur) === String(k.planners_package_id) ? ' selected' : '') + '>' +
+          Fmt.esc((k.code ? k.code + ' — ' : '') + k.name) + '</option>';
+      }).join('') +
+      '<option value="__none__"' + (cur === '__none__' ? ' selected' : '') + '>— Not assigned to a package —</option>';
+  }
+
 
   // ================= live collaboration (presence + cell cursors) ============
   // Google-Sheets-style co-editing via the shared PDCollab layer (Supabase
@@ -829,6 +877,7 @@ window.DrawingRegister = (function () {
       filters.discipline = document.getElementById('dr-f-discipline').value;
       filters.scheme     = elVal('dr-f-scheme');
       filters.scope      = document.getElementById('dr-f-scope').value;
+      var _pk = document.getElementById('dr-f-package'); filters.pkg = _pk ? _pk.value : '';
       filters.status     = document.getElementById('dr-f-status').value;
       filters.search     = document.getElementById('dr-f-search').value.toLowerCase().trim();
       // ⚠️ Discard the filter-scoped collapse state on every filter change. Without
@@ -837,7 +886,7 @@ window.DrawingRegister = (function () {
       fCollapsed = {};
       syncClearFilt();
     }
-    ['dr-f-phase','dr-f-discipline','dr-f-scheme','dr-f-scope','dr-f-status'].forEach(function (id) {
+    ['dr-f-phase','dr-f-discipline','dr-f-scheme','dr-f-scope','dr-f-status','dr-f-package'].forEach(function (id) {
       var el = document.getElementById(id); if (!el) return;
       el.onchange = function () { readFilters(); render(); };
     });
@@ -850,7 +899,7 @@ window.DrawingRegister = (function () {
     if (cf) cf.onclick = function () {
       clearTimeout(sT);
       filters.dupsOnly = false;
-      ['dr-f-phase','dr-f-discipline','dr-f-scheme','dr-f-scope','dr-f-status','dr-f-search'].forEach(function (id) {
+      ['dr-f-phase','dr-f-discipline','dr-f-scheme','dr-f-scope','dr-f-status','dr-f-package','dr-f-search'].forEach(function (id) {
         var el = document.getElementById(id); if (el) el.value = '';
       });
       readFilters(); render();
@@ -878,6 +927,9 @@ window.DrawingRegister = (function () {
     document.getElementById('dr-f-search').value = f.search||'';
     filters.phase=f.phase||''; filters.discipline=f.discipline||''; filters.scheme=f.scheme||'';
     filters.scope=f.scope||''; filters.status=f.status||''; filters.search=(f.search||'').toLowerCase().trim();
+    // The package lens is repainted rather than assigned: its options are mirrored
+    // data that may not have loaded when a saved view is applied.
+    filters.pkg=f.pkg||''; paintPackageFilter();
     render();
   }
   function renderViewsMenu(){
@@ -899,7 +951,7 @@ window.DrawingRegister = (function () {
       // filter was set reopened showing every scope, silently wider than the view
       // the user named.
       var v = getViews(); v.push({ name:name, f:{ phase:filters.phase, discipline:filters.discipline,
-        scheme:filters.scheme, scope:filters.scope, status:filters.status,
+        scheme:filters.scheme, scope:filters.scope, status:filters.status, pkg:filters.pkg,
         search:document.getElementById('dr-f-search').value } });
       setViews(v); renderViewsMenu();
     };
@@ -931,7 +983,11 @@ window.DrawingRegister = (function () {
 
   async function load(opts) {
     opts = opts || {};
-    if (!pid) { rows = []; render(); return; }
+    if (!pid) { rows = []; PKGS = []; paintPackageFilter(); render(); return; }
+    // Mirrored reference data, fetched alongside the register. Not awaited: the
+    // package lens is a convenience, and blocking the whole register on it would
+    // make an un-migrated database look like a broken module.
+    loadPackages();
     // Only on a FRESH view (project switch / init / import / clear). A bare
     // load() is a refresh after an edit — flashing a skeleton there would make
     // every save look like a full reload.
@@ -1281,7 +1337,7 @@ window.DrawingRegister = (function () {
   function drawingRows(){ return rows.filter(function (r){ return !isNode(r) && !isSheet(r); }); }
   function sheetRows(){ return rows.filter(function (r){ return !isNode(r) && isSheet(r); }); }
   function structuralNodes(){ return rows.filter(isNode); }
-  function anyFilter(){ return !!(filters.phase || filters.discipline || filters.scheme || filters.scope || filters.status || filters.search || filters.dupsOnly); }
+  function anyFilter(){ return !!(filters.phase || filters.discipline || filters.scheme || filters.scope || filters.status || filters.search || filters.dupsOnly || filters.pkg); }
 
   // Shared by the Registry filter bar AND the Backlog tab (dupsOnly is Registry-only).
   function matchesFilters(r, opts) {
@@ -1293,6 +1349,10 @@ window.DrawingRegister = (function () {
     // tree would make every drawing under a level match every scheme.
     if (filters.scheme && (r.scheme || '') !== filters.scheme) return false;
     if (filters.scope && scopeOfRow(r) !== filters.scope) return false;
+    /* Contract package. ⚠️ A separate axis from scope above — a change order
+       belongs to a package, so both filters compose rather than competing. */
+    if (filters.pkg === '__none__') { if (r.planners_package_id) return false; }
+    else if (filters.pkg && String(r.planners_package_id || '') !== String(filters.pkg)) return false;
     if (filters.discipline &&
         r.discipline !== filters.discipline &&
         disciplineName(r.discipline) !== filters.discipline) return false;
@@ -4489,6 +4549,7 @@ window.DrawingRegister = (function () {
     };
     set('dr-f-phase', filters.phase); set('dr-f-discipline', filters.discipline);
     set('dr-f-scope', filters.scope);
+    set('dr-f-package', filters.pkg);
     set('dr-f-status', filters.status); set('dr-f-search', '');
     // ⚠️ This used to be `collapsed = {}` — a workaround for the same defect the
     // filter-scoped collapse map now fixes properly. It was destructive: clicking a

@@ -2357,3 +2357,34 @@ byte-identical to the pre-change parser** on all 1,372 records — 6 phases, 245
 discipline, 894 planned approvals — except the 3 `w/ Comments` rows the status fix reclassifies.
 Sheet ranking re-checked on both workbooks: the 0-drawing sheets no longer win. `node --check` clean.
 ⚠️ Not verified signed-in.
+
+### 2026-08-26 — Drawings can be read per CONTRACT package
+A project is bought as several contract packages — "Package 1 — Tower 1 and General Requirements",
+"Package 2 — Towers 2-7". The Planners app owns them (they come off the contract documents); this app
+now files drawings under them, so "what is outstanding for Package 2" becomes answerable.
+
+⚠️ **This app and the Planners app are SEPARATE Supabase projects** (`zkxzaijznutmiueeurbb` vs
+`bgupuqnkqhixpuctyder`) and share no tables, so the package list is **mirrored** in by the Planners
+`push-packages` Edge Function — the same shape the Planners app's own `sync-eng` mirror uses in the
+opposite direction.
+
+- `migrations/0021-planners-packages.sql` — the `planners_packages` mirror +
+  `drawing_register.planners_package_id`.
+- ⚠️ **Writes are service-role only**: a contract package invented in a browser could end up cited in
+  a submittal log nobody agreed to. **No foreign key** (the mirror refreshes delete-then-insert per
+  project, so a FK would block the refresh or cascade real drawings away). **NULL = not yet assigned**,
+  no back-fill.
+- Drawing Register gains an **All packages** lens beside the existing Main Contract / Change Order one.
+- ⚠️ **The two are orthogonal and compose.** A change order BELONGS TO a package — `planners_package_id`
+  says which contract lot, the scope filter says main-contract vs change-order, and neither is derived
+  from the other.
+- ⚠️ **The lens is hidden entirely when the project has no packages.** A filter that can only ever match
+  nothing reads as broken.
+- ⚠️ A drawing filed against a package since retired upstream reads **“⚠ no longer in Planners”**, never
+  blank: "no package" and "a package that vanished" are different facts.
+- ⚠️ `loadPackages()` returns quietly on ANY failure including "table does not exist", and is **not
+  awaited** — an un-run migration must degrade to "no package lens", never a broken register.
+- The lens is saved into and restored from named views, alongside scheme and scope.
+
+⚠️ **Not run and not clicked through**: the migration must be run in this project, and the Planners side
+must deploy `push-packages` and press **Share with Procurement & Engineering** before the lens appears.
