@@ -141,6 +141,32 @@
     return 'eng-c-ns';
   }
 
+  // ---- Request for Approval vocabulary (mirrors module.js) -----------------
+  // ⚠️ The RFA module's STATUSES array is the definition; these are its `open` /
+  // `closed` / `approved` flags in the shape the rest of this file uses. They must
+  // stay a PARTITION — open and closed together cover every name, and neither
+  // contains a name the other does. The module asserts that at load and warns if it
+  // drifts, because the failure is silent: an unbucketed status simply stops being
+  // counted and the portfolio under-reports outstanding RFAs.
+  // ⚠️ A blank status is a DRAFT, not open — an RFA nobody marked as submitted has
+  // not been submitted. That is the register's rule and it is reproduced here.
+  var RFA_STATUSES = ['Draft', 'Submitted', 'Under Review', 'Approved w/ comments',
+                      'Approved', 'Resubmit', 'Rejected', 'Cancelled'];
+  var RFA_OPEN     = { 'Submitted': 1, 'Under Review': 1, 'Resubmit': 1 };
+  var RFA_CLOSED   = { 'Approved w/ comments': 1, 'Approved': 1, 'Rejected': 1, 'Cancelled': 1 };
+  var RFA_APPROVED = { 'Approved w/ comments': 1, 'Approved': 1 };
+  function rfaStatus(s) { return (s || '').trim() || 'Draft'; }
+  function rfaStatusCls(s) {
+    s = rfaStatus(s);
+    if (s === 'Approved') return 'eng-c-ok';
+    if (s === 'Approved w/ comments') return 'eng-c-okc';
+    if (s === 'Resubmit') return 'eng-c-warn';
+    if (s === 'Rejected') return 'eng-c-bad';
+    if (s === 'Cancelled') return 'eng-c-off';
+    if (s === 'Under Review' || s === 'Submitted') return 'eng-c-wip';
+    return 'eng-c-ns';
+  }
+
   // ---- Method Register vocabulary (mirrors module.js) ----------------------
   // ⚠️ `counts` (the workbook's N=1 flag) gates EVERY figure here, exactly as it
   // does in the module — a register that ignored it would over-report the
@@ -210,6 +236,18 @@
     return out;
   }
 
+  // A register the signed-in user cannot read, or whose migration has not been run,
+  // must not take the whole portfolio down with it. ⚠️ It returns null, NOT [] — the
+  // page has to be able to say "not available" rather than draw an empty chart that
+  // claims the department has raised no submittals.
+  async function tryAllOrgWide(table, cols) {
+    try { return await fetchAllOrgWide(table, cols); }
+    catch (e) {
+      console.warn('[portfolio] could not read ' + table + ':', e && e.message || e);
+      return null;
+    }
+  }
+
   // ==========================================================================
   // PORTFOLIO — the same drawing model, read across EVERY accessible project
   // --------------------------------------------------------------------------
@@ -240,6 +278,17 @@
   // (partial sheet credit), so ISD figures here match the register exactly — which is
   // precisely why ISD gets its own reporting on the portfolio.
   var PORTFOLIO_WARN_ROWS = 40000;
+
+  // ⚠️ MOVEMENT IS COMPUTED FOR FIXED WINDOWS AT AGGREGATION TIME, not stored as a
+  // list of dates. A "what changed" view needs day-level detail, and keeping every
+  // approval date per project so the UI could window it later would mean carrying
+  // thousands of strings for three numbers. The windows are a closed set, so the counts
+  // are cheap; the UI just picks one.
+  var MOVE_WINDOWS = [7, 30, 90];
+  function shiftDays(iso, n) {
+    var q = String(iso).slice(0, 10).split('-');
+    return new Date(Date.UTC(+q[0], +q[1] - 1, +q[2] + n)).toISOString().slice(0, 10);
+  }
 
   function validApprovalDate(d) {
     // Same guard, same range, as the register's validDate(): a legacy import
@@ -288,7 +337,7 @@
     var today = todayISO();
     var rows = await fetchAllOrgWide('drawing_register',
       'id,project_id,drawing_no,drawing_code,title,status,node_kind,parent_id,phase,' +
-      'no_of_sheets,approved_sheets,planned_approval,actual_approval,updated_at');
+      'no_of_sheets,approved_sheets,planned_approval,actual_approval,updated_at,created_at,discipline');
 
     // Said out loud rather than silently truncated — the planning app's cross-project
     // S-Curve warns the same way above 20,000 activities.
@@ -311,8 +360,12 @@
     }
 
     var proj = {};                       // project_id -> aggregate
-    function bucketFor(pidKey, phase) {
-      var p = proj[pidKey] || (proj[pidKey] = {
+    // ⚠️ Separate from bucketFor because a project can now reach this list WITHOUT
+    // any drawings — one holding only submittals or VE proposals is still a project
+    // the engineering department is working on, and dropping it would make the other
+    // registers' totals disagree with their own modules.
+    function projFor(pidKey) {
+      return proj[pidKey] || (proj[pidKey] = {
         project_id: pidKey, drawings: 0, approvedDrawings: 0, sheets: 0, approvedSheets: 0,
         overdue: 0, minPlanned: null, maxPlanned: null, maxActual: null,
         levels: {}, isd: null,
@@ -322,8 +375,22 @@
         // while the page claimed to show one group.
         months: {},     // 'YYYY-MM' -> { planned, actual }  (approvals, for the S-curve)
         status: {},     // drStatus label -> count
-        aging: {}       // aging bucket -> count, OPEN drawings only
+        aging: {},      // aging bucket -> count, OPEN drawings only
+        // discipline -> { drawings, approved, overdue }. ⚠️ Counted in DRAWINGS, like
+        // every other design figure here — see the two-bases note in the module.
+        disc: {},
+        // fixed-window movement, see MOVE_WINDOWS
+        moved: { 7:  { approved: 0, raised: 0, overdue: 0 },
+                 30: { approved: 0, raised: 0, overdue: 0 },
+                 90: { approved: 0, raised: 0, overdue: 0 } },
+        // the other registers, filled in after the drawing pass. Null until read, so
+        // the UI can tell "none" from "not loaded" — a register whose table is missing
+        // must not report zero as though it were empty.
+        ms: null, rfa: null, mr: null, ve: null
       });
+    }
+    function bucketFor(pidKey, phase) {
+      var p = projFor(pidKey);
       var L = p.levels[phase] || (p.levels[phase] = {
         phase: phase, drawings: 0, approvedDrawings: 0, sheets: 0, approvedSheets: 0,
         overdue: 0, minPlanned: null, maxPlanned: null, maxActual: null
@@ -385,6 +452,29 @@
       var st = drStatus(r.status);
       p.status[st] = (p.status[st] || 0) + 1;
 
+      // ---- by discipline -----------------------------------------------------
+      // A blank discipline is its own bucket, not dropped: on a real register plenty of
+      // rows have none, and hiding them makes the breakdown fail to add up to the total.
+      var dk = (r.discipline || '').trim() || '(none)';
+      var D = p.disc[dk] || (p.disc[dk] = { drawings: 0, approved: 0, overdue: 0 });
+      D.drawings++;
+      if (drApproved(r.status)) D.approved++;
+      if (validApprovalDate(pl) && pl < today && !drApproved(r.status)) D.overdue++;
+
+      // ---- movement, per window ----------------------------------------------
+      // ⚠️ `overdue` here means BECAME overdue inside the window — its planned date
+      // fell in that window and it is still not approved. That is a different question
+      // from the standing overdue count, which is every unapproved drawing whose date
+      // has ever passed. Reporting the standing total as "newly overdue" would make a
+      // long-running backlog look like it appeared this week.
+      MOVE_WINDOWS.forEach(function (w) {
+        var from = shiftDays(today, -w);
+        var M = p.moved[w];
+        if (validApprovalDate(ac) && ac > from && ac <= today) M.approved++;
+        if (r.created_at && String(r.created_at).slice(0, 10) > from) M.raised++;
+        if (validApprovalDate(pl) && pl > from && pl <= today && !drApproved(r.status)) M.overdue++;
+      });
+
       // ---- aging of the OPEN queue -------------------------------------------
       // ⚠️ The open test mirrors the register's own: not approved, OR sent back for
       // rework. `Resubmit` is not an approved status so the second clause is redundant
@@ -394,6 +484,115 @@
         var ab = agingBucket(ad);
         p.aging[ab] = (p.aging[ab] || 0) + 1;
       }
+    });
+
+    // ======================================================================
+    // THE OTHER REGISTERS, read org-wide and kept PER PROJECT
+    // ----------------------------------------------------------------------
+    // ⚠⚠ EACH REGISTER'S OWN DEFINITION OF "done" / "open" / "overdue" IS REUSED,
+    // never re-derived. MS_DONE, RFA_OPEN, MR item-eligibility (`counts`) and
+    // VE_OPEN/VE_WON are the same maps the per-project stat functions above read,
+    // which are in turn mirrors of the modules'. A portfolio that invented its own
+    // "open" would report a number the module it links to contradicts, and this
+    // repo's history is a list of exactly that failure.
+    //
+    // ⚠️ READ IN PARALLEL, and each one tolerantly. A register whose migration is
+    // not run (request_for_approval, today) or that RLS hides must leave its own
+    // card saying "not available" and must not stop the drawings from rendering.
+    var regs = await Promise.all([
+      tryAllOrgWide('material_submittal',
+        'id,project_id,status,plan_approval_date,date_approved,discipline,created_at'),
+      tryAllOrgWide('request_for_approval',
+        'id,project_id,status,date_required,date_returned,decision_date,discipline,created_at'),
+      tryAllOrgWide('method_register',
+        'id,project_id,status,node_kind,counts,trade_code,target_date,created_at'),
+      tryAllOrgWide('value_engineering',
+        'id,project_id,status,baseline_cost,proposed_cost,actual_cost,decision_date,created_at')
+    ]);
+    var msRows = regs[0], rfaRows = regs[1], mrRows = regs[2], veRows = regs[3];
+
+    // Shared shape so the page can render four cards from one template. `total` is
+    // rows this project holds; `open`/`overdue` are the chase numbers; `moved` is the
+    // same fixed-window movement the drawings carry, so "what changed this week" can
+    // span every register rather than only the drawing board.
+    function regBucket() {
+      // ⚠️ Every field starts at 0, including the ones only one register fills in.
+      // Leaving `saving` undefined until a VE row happens to set it made a project
+      // with only rejected proposals read `undefined` where a project with none read
+      // 0 — the same fact printed two different ways, and one of them formats as
+      // "undefined" in a spreadsheet.
+      return { total: 0, open: 0, done: 0, overdue: 0, approved: 0, pipeline: 0, saving: 0,
+               moved: { 7: { closed: 0, raised: 0 }, 30: { closed: 0, raised: 0 },
+                        90: { closed: 0, raised: 0 } } };
+    }
+    // `raised` reads created_at, i.e. when the ROW appeared in this app. ⚠️ On a
+    // register that was bulk-imported that is the import date, not the real issue
+    // date, so a freshly imported register shows a spike. Said on the page rather
+    // than smoothed away — the alternative is silently under-reporting real activity
+    // on registers that were entered by hand.
+    function feedReg(B, r, closedISO, isOpen, isDone, overdueISO) {
+      B.total++;
+      if (isDone) B.done++;
+      if (isOpen) B.open++;
+      if (isOpen && validApprovalDate(overdueISO) && overdueISO < today) B.overdue++;
+      MOVE_WINDOWS.forEach(function (w) {
+        var from = shiftDays(today, -w), M = B.moved[w];
+        if (isDone && validApprovalDate(closedISO) && closedISO > from && closedISO <= today) M.closed++;
+        if (r.created_at && String(r.created_at).slice(0, 10) > from) M.raised++;
+      });
+    }
+    function feed(rows, key, fn) {
+      if (!rows) return;               // null = not readable; leave the field null
+      rows.forEach(function (r) {
+        var p = projFor(r.project_id || '(none)');
+        var B = p[key] || (p[key] = regBucket());
+        fn(B, r, p);
+      });
+      // A register that read cleanly but holds nothing for a project must still say
+      // "0", not "unavailable" — so every project in the list gets an empty bucket.
+      Object.keys(proj).forEach(function (k) {
+        if (!proj[k][key]) proj[k][key] = regBucket();
+      });
+    }
+
+    feed(msRows, 'ms', function (B, r) {
+      var st = msStatus(r.status);
+      // Overdue mirrors submittalStats(): a planned approval date in the past on
+      // something not yet approved. No plan date = no commitment to miss.
+      feedReg(B, r, r.date_approved, !MS_DONE[st], !!MS_DONE[st], r.plan_approval_date);
+    });
+
+    feed(rfaRows, 'rfa', function (B, r) {
+      var st = rfaStatus(r.status);
+      // ⚠️ Closed is not the negation of open: a Draft is neither. Passing !RFA_OPEN
+      // as "done" would count every unsubmitted draft as an answered RFA.
+      var closedOn = validApprovalDate(r.date_returned) ? r.date_returned : r.decision_date;
+      feedReg(B, r, closedOn, !!RFA_OPEN[st], !!RFA_CLOSED[st], r.date_required);
+      if (RFA_APPROVED[st]) B.approved++;
+    });
+
+    feed(mrRows, 'mr', function (B, r) {
+      // ⚠️ The tree nodes and the workbook's N=0 rows are NOT method statements.
+      // methodStats() filters on exactly this and every MR figure in the app depends
+      // on it; counting raw rows would inflate the total by the whole level tree.
+      if (r.node_kind || r.counts === false) return;
+      var st = mrStatus(r.status);
+      var done = (st === 'Approved' || st === 'Approved w/ Comments');
+      feedReg(B, r, null, !done && st !== 'Disapproved', done, r.target_date);
+    });
+
+    feed(veRows, 've', function (B, r) {
+      var st = veStatus(r.status);
+      feedReg(B, r, r.decision_date, !!VE_OPEN[st], !!VE_WON[st], null);
+      var b = n(r.baseline_cost), q = n(r.proposed_cost);
+      var sav = (b == null || q == null) ? null : b - q;
+      if (sav == null) return;
+      // ⚠️ PIPELINE AND BANKED ARE NEVER ADDED. A saving on a proposal nobody has
+      // approved is not money saved, and veStats() keeps them apart for the same
+      // reason: a combined figure would report a project as having saved what it has
+      // only suggested.
+      if (VE_OPEN[st]) B.pipeline += sav;
+      else if (VE_WON[st]) B.saving += sav;
     });
 
     // Finish each project: percentages, the ordered level list, and ISD pulled out.
@@ -422,7 +621,21 @@
     });
 
     return { projects: list, rowsRead: rows.length, warning: warning, today: today,
-             TOP_LEVELS: TOP_LEVELS, ISD: ISD, AGING_ORDER: AGING_ORDER };
+             TOP_LEVELS: TOP_LEVELS, ISD: ISD, AGING_ORDER: AGING_ORDER,
+             MOVE_WINDOWS: MOVE_WINDOWS,
+             // ⚠️ null vs 0: `available:false` means the table could not be read, so
+             // the page says so instead of drawing an empty chart that reads as
+             // "nobody has raised one".
+             registers: {
+               ms:  { key: 'ms',  label: 'Material Submittals', href: 'material-submittal',
+                      available: !!msRows },
+               rfa: { key: 'rfa', label: 'Requests for Approval', href: 'request-for-approval',
+                      available: !!rfaRows },
+               mr:  { key: 'mr',  label: 'Method Statements', href: 'method-register',
+                      available: !!mrRows },
+               ve:  { key: 've',  label: 'Value Engineering', href: 'value-engineering',
+                      available: !!veRows }
+             } };
   }
 
   function tally(rows, keyFn, order, clsFn) {
@@ -449,6 +662,8 @@
     veStatus: veStatus, veStatusCls: veStatusCls,
     inStatus: inStatus, inStatusCls: inStatusCls,
     mrStatus: mrStatus, mrStatusCls: mrStatusCls,
+    RFA_STATUSES: RFA_STATUSES, RFA_OPEN: RFA_OPEN, RFA_CLOSED: RFA_CLOSED,
+    RFA_APPROVED: RFA_APPROVED, rfaStatus: rfaStatus, rfaStatusCls: rfaStatusCls,
 
     // ---- Drawing Register ------------------------------------------------
     async drawingStats(pid) {
@@ -887,9 +1102,21 @@
     drApproved: drApproved, PORTFOLIO_WARN_ROWS: PORTFOLIO_WARN_ROWS,
     // Runs the real aggregation over rows supplied by the caller, bypassing only the
     // network. Keeps the maths under test while the fetch is not.
-    aggregate: function (rows, today) {
+    // ⚠️ The stub is PER TABLE. It used to answer every table with the same array,
+    // which was harmless while only drawing_register was read — now that the other
+    // registers are rolled in, one array for all five would feed drawing rows into
+    // the submittal roll-up and quietly "pass". `regs` maps table name -> rows;
+    // an unnamed table reads as EMPTY, and an explicit null makes it UNREADABLE, so
+    // a harness can exercise the not-available path.
+    aggregate: function (rows, today, regs) {
+      regs = regs || {};
       var _f = fetchAllOrgWide, _t = todayISO;
-      fetchAllOrgWide = function () { return Promise.resolve(rows); };
+      fetchAllOrgWide = function (table) {
+        if (table === 'drawing_register') return Promise.resolve(rows);
+        if (!(table in regs)) return Promise.resolve([]);
+        if (regs[table] == null) return Promise.reject(new Error('stubbed unreadable: ' + table));
+        return Promise.resolve(regs[table]);
+      };
       if (today) todayISO = function () { return today; };
       return portfolio().then(function (out) {
         fetchAllOrgWide = _f; todayISO = _t; return out;

@@ -458,3 +458,44 @@ body.pf-fit .pf-tablecard { flex:1; min-height:0; }
 @media print {
   .pf-seg { display:none !important; }
 }
+
+/* ---- Roll-ups, movement and disciplines (2026-08-26) ---------------------
+   ⚠️ ONE definition per selector. Both stylesheets in this app have already been
+   bitten by a second, conflicting block appended below the first — see the empty
+   state note. Extend these rules; do not re-declare them further down. */
+.pf-sech { margin:26px 0 12px; font-size:var(--pf-fs-lg); }
+
+/* register roll-up cards */
+.pf-regs { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:16px; }
+.pf-reg { padding:16px 18px; }
+.pf-reg h4 { margin:0 0 10px; font-size:var(--pf-fs-base); }
+.pf-reg-row { display:flex; gap:18px; flex-wrap:wrap; }
+.pf-reg-m { display:flex; flex-direction:column; font-size:var(--pf-fs-micro);
+  color:var(--pd-muted); text-transform:uppercase; letter-spacing:.04em; }
+.pf-reg-m b { font-size:var(--pf-fs-xl); color:var(--pd-text); font-variant-numeric:tabular-nums;
+  letter-spacing:0; text-transform:none; }
+.pf-reg-m.pf-reg-bad b { color:#C42127; }
+.pf-reg-x { display:flex; gap:18px; flex-wrap:wrap; margin-top:12px; padding-top:10px;
+  border-top:1px solid var(--pd-line); font-size:var(--pf-fs-micro); color:var(--pd-muted); }
+.pf-reg-x strong { color:var(--pd-text); font-variant-numeric:tabular-nums; }
+.pf-reg-n { margin:10px 0 0; font-size:var(--pf-fs-micro); line-height:1.5; }
+/* ⚠️ Visually distinct from an empty register: "could not be read" and "nothing
+   raised" are different facts and must not look the same. */
+.pf-reg-off { border-style:dashed; opacity:.85; }
+
+/* movement */
+.pf-winbar { display:flex; align-items:center; gap:8px; margin:0 0 16px; flex-wrap:wrap; }
+.pf-win { border:1px solid var(--pd-line); background:var(--pd-card); color:var(--pd-text);
+  border-radius:999px; padding:5px 14px; font-size:var(--pf-fs-micro); cursor:pointer; }
+.pf-win:hover { background:var(--pd-bg); }
+.pf-win.active { background:var(--pd-text); color:var(--pd-card); border-color:var(--pd-text); }
+.pf-ok  { color:#12693A; }
+.pf-bad { color:#C42127; }
+.pf-kpi.pf-kpi-warn::before { background:#B45309; }
+
+/* disciplines */
+.pf-dim td { opacity:.7; }
+.pf-dbar { width:34%; min-width:120px; }
+.pf-dbar-t { display:block; height:9px; border-radius:999px; background:var(--pd-line);
+  overflow:hidden; }
+.pf-dbar-f { display:block; height:100%; border-radius:999px; background:#12693A; }

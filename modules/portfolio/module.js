@@ -139,6 +139,8 @@ window.Portfolio = (function () {
     syncFilterChip();
     if (view === 'gantt') renderGantt();
     else if (view === 'isd') renderISD();
+    else if (view === 'moved') renderMovement();
+    else if (view === 'disc') renderDisc();
     else renderOverview();
   }
 
@@ -201,6 +203,7 @@ window.Portfolio = (function () {
           'planned approval</span></h3>' + agingHTML(list) + '</div>' +
       '</div>' +
       '<div class="pd-card"><h3>Where to look first</h3>' + topListsHTML(list) + '</div>' +
+      '<h3 class="pf-sech">Across the other registers</h3>' + registersHTML(list) +
       '<div class="pd-card"><h3>High-level programme <span class="pf-mut">— one lane per project</span></h3>' +
         ganttHTML(list, { compact: true }) + '</div>' +
       '<div class="pd-card pf-tblcard"><h3>By project</h3>' + tableHTML(list) + '</div>' +
@@ -860,11 +863,297 @@ window.Portfolio = (function () {
       'here.</p></div>';
   }
 
+
+  // ==========================================================================
+  // THE OTHER REGISTERS
+  // --------------------------------------------------------------------------
+  // ⚠️ FOUR SEPARATE CARDS, NEVER ONE COMBINED "ENGINEERING ITEMS" TOTAL. A
+  // drawing, a material submittal, a method statement and a VE proposal are not
+  // units of the same thing, and adding them would produce a headline number that
+  // means nothing and cannot be reconciled against any module in the app. This page
+  // already refuses to blend two counting bases for drawings alone; the same rule
+  // applies here, more strongly.
+  // ⚠️ Each card drills into ITS OWN module. See drill().
+  var REG_ORDER = ['ms', 'rfa', 'mr', 've'];
+  function regTotals(list, key) {
+    var t = { total: 0, open: 0, done: 0, overdue: 0, approved: 0,
+              pipeline: 0, saving: 0, closed7: 0, raised7: 0, projects: 0 };
+    var any = false;
+    list.forEach(function (p) {
+      var B = p[key]; if (!B) return;
+      any = true;
+      t.total += B.total; t.open += B.open; t.done += B.done; t.overdue += B.overdue;
+      t.approved += B.approved || 0;
+      t.pipeline += B.pipeline || 0; t.saving += B.saving || 0;
+      if (B.total) t.projects++;
+    });
+    return any ? t : null;
+  }
+  function money(v) {
+    if (!v) return '\u20b10';
+    var a = Math.abs(v);
+    if (a >= 1e9) return '\u20b1' + (v / 1e9).toFixed(2) + 'B';
+    if (a >= 1e6) return '\u20b1' + (v / 1e6).toFixed(2) + 'M';
+    if (a >= 1e3) return '\u20b1' + Math.round(v / 1e3) + 'k';
+    return '\u20b1' + Math.round(v);
+  }
+  function regCardHTML(list, meta) {
+    var t = regTotals(list, meta.key);
+    // ⚠️ UNAVAILABLE IS NOT ZERO. A register whose table could not be read must say
+    // so; drawing "0 open" would report the department as having nothing outstanding
+    // when in fact nothing was read at all.
+    if (!data.registers || !data.registers[meta.key] || !data.registers[meta.key].available) {
+      return '<div class="pd-card pf-reg pf-reg-off"><h4>' + esc(meta.label) + '</h4>' +
+        '<p class="pf-mut">Not available \u2014 this register could not be read. It may not be ' +
+        'set up yet, or your role may not have access to it. <strong>This is not a count of zero.</strong></p></div>';
+    }
+    if (!t || !t.total) {
+      return '<div class="pd-card pf-reg"><h4>' + esc(meta.label) + '</h4>' +
+        '<p class="pf-mut">Nothing raised yet across the projects shown.</p></div>';
+    }
+    var extra = '';
+    if (meta.key === 've') {
+      extra = '<div class="pf-reg-x"><span>Banked <strong>' + money(t.saving) + '</strong></span>' +
+        '<span>Pipeline <strong>' + money(t.pipeline) + '</strong></span></div>' +
+        '<p class="pf-mut pf-reg-n">Banked and pipeline are never added \u2014 an approved saving ' +
+        'and a suggested one are different things.</p>';
+    } else if (meta.key === 'rfa') {
+      extra = '<div class="pf-reg-x"><span>Approved <strong>' + t.approved.toLocaleString() +
+        '</strong></span><span>Drafts <strong>' +
+        Math.max(0, t.total - t.open - t.done).toLocaleString() + '</strong></span></div>' +
+        '<p class="pf-mut pf-reg-n">A draft is neither open nor answered \u2014 an RFA nobody ' +
+        'submitted has not been submitted.</p>';
+    }
+    var one = list.length === 1;
+    return '<div class="pd-card pf-reg' + (one ? ' pf-drill' : '') + '"' +
+        (one ? ' data-drill="' + esc(list[0].project_id) + '" data-mod="' + esc(meta.href) +
+               '" role="button" tabindex="0" title="Open this project’s ' + esc(meta.label) + '"' : '') + '>' +
+      '<h4>' + esc(meta.label) + '</h4>' +
+      '<div class="pf-reg-row">' +
+        '<span class="pf-reg-m"><b>' + t.total.toLocaleString() + '</b>total</span>' +
+        '<span class="pf-reg-m"><b>' + t.open.toLocaleString() + '</b>open</span>' +
+        '<span class="pf-reg-m' + (t.overdue ? ' pf-reg-bad' : '') + '"><b>' +
+          t.overdue.toLocaleString() + '</b>overdue</span>' +
+      '</div>' + extra +
+      '<p class="pf-mut pf-reg-n">Across ' + t.projects + ' project' + (t.projects === 1 ? '' : 's') + '.</p>' +
+    '</div>';
+  }
+  function registersHTML(list) {
+    return '<div class="pf-regs">' + REG_ORDER.map(function (k) {
+      return regCardHTML(list, (data.registers && data.registers[k]) || { key: k, label: k, href: k });
+    }).join('') + '</div>';
+  }
+
+  // ==========================================================================
+  // WHAT CHANGED — movement over a fixed window
+  // --------------------------------------------------------------------------
+  // ⚠️ "NEWLY OVERDUE" IS NOT THE OVERDUE COUNT. A drawing counts here only if its
+  // planned date fell INSIDE the window and it is still unapproved. The standing
+  // overdue figure on the Overview includes everything that has ever slipped, and
+  // reporting that as "this week" would make a two-year backlog look like it
+  // appeared on Monday — which is exactly the number that gets escalated wrongly.
+  // ⚠️ "RAISED" READS created_at, i.e. when the row appeared IN THIS APP. On a
+  // bulk-imported register that is the import date, not the real issue date, so the
+  // week of an import shows a spike. Said on the page rather than quietly smoothed.
+  var moveWin = 7;
+  var WIN_LABEL = { 7: 'the last 7 days', 30: 'the last 30 days', 90: 'the last 90 days' };
+  function moveTotals(list, w) {
+    var t = { approved: 0, raised: 0, overdue: 0 };
+    list.forEach(function (p) {
+      var M = (p.moved || {})[w]; if (!M) return;
+      t.approved += M.approved; t.raised += M.raised; t.overdue += M.overdue;
+    });
+    return t;
+  }
+  function moveRegTotals(list, key, w) {
+    var t = { closed: 0, raised: 0 }, any = false;
+    list.forEach(function (p) {
+      var B = p[key]; if (!B) return;
+      any = true;
+      var M = B.moved[w]; t.closed += M.closed; t.raised += M.raised;
+    });
+    return any ? t : null;
+  }
+  function moveTableHTML(list, w) {
+    var rows = list.map(function (p) {
+      var M = (p.moved || {})[w] || { approved: 0, raised: 0, overdue: 0 };
+      return { p: p, a: M.approved, r: M.raised, o: M.overdue, net: M.approved - M.overdue };
+    }).filter(function (r) { return r.a || r.r || r.o; });
+    if (!rows.length) {
+      return '<p class="pf-mut">No drawing moved in ' + WIN_LABEL[w] + ' on any project shown. ' +
+        'That is a real answer, not a missing one \u2014 nothing was approved, raised or newly ' +
+        'missed in that period.</p>';
+    }
+    // Worst first: the point of this view is what needs chasing, not an alphabet.
+    rows.sort(function (a, b) { return a.net - b.net || b.o - a.o; });
+    return '<table class="pd-table pf-tbl"><thead><tr>' +
+      '<th>Project</th><th class="pf-r">Approved</th><th class="pf-r">Newly overdue</th>' +
+      '<th class="pf-r">Raised</th><th class="pf-r">Net</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var net = r.net;
+        return '<tr class="pf-drill" data-drill="' + esc(r.p.project_id) + '" role="button" tabindex="0">' +
+          '<td>' + esc(projName(r.p.project_id)) + '</td>' +
+          '<td class="pf-r">' + r.a.toLocaleString() + '</td>' +
+          '<td class="pf-r' + (r.o ? ' pf-bad' : '') + '">' + r.o.toLocaleString() + '</td>' +
+          '<td class="pf-r">' + r.r.toLocaleString() + '</td>' +
+          '<td class="pf-r ' + (net > 0 ? 'pf-ok' : net < 0 ? 'pf-bad' : '') + '">' +
+            (net > 0 ? '+' : '') + net.toLocaleString() + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+  function renderMovement() {
+    var list = scoped();
+    var host = document.getElementById('pf-view');
+    if (!list.length) { host.innerHTML = emptyHTML(); return; }
+    var w = moveWin, t = moveTotals(list, w);
+    var wins = [7, 30, 90].map(function (x) {
+      return '<button class="pf-win' + (x === w ? ' active' : '') + '" data-win="' + x + '">' +
+        x + ' days</button>';
+    }).join('');
+
+    var regRows = REG_ORDER.map(function (k) {
+      var meta = (data.registers && data.registers[k]) || null;
+      if (!meta || !meta.available) {
+        return '<tr><td>' + esc(meta ? meta.label : k) + '</td>' +
+          '<td class="pf-r pf-mut" colspan="2">not available</td></tr>';
+      }
+      var m = moveRegTotals(list, k, w) || { closed: 0, raised: 0 };
+      return '<tr><td>' + esc(meta.label) + '</td>' +
+        '<td class="pf-r">' + m.closed.toLocaleString() + '</td>' +
+        '<td class="pf-r">' + m.raised.toLocaleString() + '</td></tr>';
+    }).join('');
+
+    host.innerHTML =
+      '<div class="pf-eyebrow">WHAT CHANGED \u2014 ' + WIN_LABEL[w].toUpperCase() + '</div>' +
+      '<div class="pf-winbar" role="group" aria-label="Period">' + wins +
+        '<span class="pf-mut">to ' + esc(fmtDate(data.today)) + '</span></div>' +
+      '<div class="pf-kpis">' +
+        kpi(t.approved.toLocaleString(), 'Drawings approved', 'in ' + WIN_LABEL[w],
+            t.approved ? 'pf-kpi-ok' : '') +
+        kpi(t.overdue.toLocaleString(), 'Newly overdue', 'due in this window, still not approved',
+            t.overdue ? 'pf-kpi-bad' : 'pf-kpi-ok') +
+        kpi(t.raised.toLocaleString(), 'Drawings added', 'rows created in this window') +
+        kpi((t.approved - t.overdue > 0 ? '+' : '') + (t.approved - t.overdue).toLocaleString(),
+            'Net movement', 'approved less newly overdue',
+            (t.approved - t.overdue) < 0 ? 'pf-kpi-bad' : 'pf-kpi-ok') +
+      '</div>' +
+      '<div class="pd-card pf-tblcard"><h3>By project <span class="pf-mut">\u2014 worst net movement ' +
+        'first</span></h3>' + moveTableHTML(list, w) + '</div>' +
+      '<div class="pd-card pf-tblcard"><h3>The other registers</h3>' +
+        '<table class="pd-table pf-tbl"><thead><tr><th>Register</th>' +
+        '<th class="pf-r">Closed</th><th class="pf-r">Raised</th></tr></thead><tbody>' +
+        regRows + '</tbody></table></div>' +
+      '<details class="pd-card pf-note" open><summary>How this period is measured</summary><ul>' +
+        '<li><strong>Approved</strong> counts drawings whose <em>actual</em> approval date falls in ' +
+          'the window. A drawing approved long ago does not reappear.</li>' +
+        '<li><strong>Newly overdue</strong> is not the overdue total. It counts only drawings whose ' +
+          '<em>planned</em> date fell inside this window and that are still unapproved \u2014 the ' +
+          'standing total on the Overview includes everything that has ever slipped.</li>' +
+        '<li><strong>Raised</strong> reads when the row was created <em>in this app</em>. After a ' +
+          'bulk import that is the import date, not the real issue date, so an import week will ' +
+          'show a spike.</li>' +
+        '<li><strong>Net</strong> is approved less newly overdue. It is a direction of travel, not ' +
+          'a balance of anything.</li>' +
+      '</ul></details>';
+    wireGantt(host);          // binds [data-drill]; the movement rows are drill-throughs
+    host.querySelectorAll('.pf-win').forEach(function (b) {
+      b.onclick = function () { moveWin = +b.dataset.win; render(); };
+    });
+  }
+
+  // ==========================================================================
+  // BY DISCIPLINE
+  // --------------------------------------------------------------------------
+  // ⚠️ ONE BASIS ONLY: DRAWINGS, every level including ISD. The Overview keeps ISD
+  // on its own sheet basis precisely because the two cannot be added — here they
+  // deliberately are not separated, because a discipline cuts ACROSS levels and a
+  // per-level split would multiply into a table nobody reads. The cost is that these
+  // percentages are drawing-based throughout and so will not equal the ISD figure on
+  // the Overview. That is stated on the page, not left to be discovered.
+  // ⚠️ A BLANK DISCIPLINE IS ITS OWN ROW, never dropped: on a real register plenty
+  // of rows carry none, and hiding them makes the table fail to add up to the total.
+  function discTotals(list) {
+    var m = {};
+    list.forEach(function (p) {
+      Object.keys(p.disc || {}).forEach(function (k) {
+        var D = m[k] || (m[k] = { key: k, drawings: 0, approved: 0, overdue: 0, projects: 0 });
+        D.drawings += p.disc[k].drawings;
+        D.approved += p.disc[k].approved;
+        D.overdue += p.disc[k].overdue;
+        D.projects++;
+      });
+    });
+    return Object.keys(m).map(function (k) {
+      var D = m[k];
+      D.pct = D.drawings ? Math.round(D.approved / D.drawings * 100) : 0;
+      return D;
+    }).sort(function (a, b) {
+      // Unclassified last however big it is: it is a data-quality row, not a trade.
+      if ((a.key === '(none)') !== (b.key === '(none)')) return a.key === '(none)' ? 1 : -1;
+      return b.drawings - a.drawings;
+    });
+  }
+  function discHTML(list) {
+    var rows = discTotals(list);
+    if (!rows.length) return '<p class="pf-mut">No drawings to break down.</p>';
+    var max = Math.max.apply(null, rows.map(function (r) { return r.drawings; })) || 1;
+    return '<table class="pd-table pf-tbl"><thead><tr>' +
+      '<th>Discipline</th><th>Scope</th><th class="pf-r">Drawings</th>' +
+      '<th class="pf-r">Approved</th><th class="pf-r">%</th><th class="pf-r">Overdue</th>' +
+      '<th class="pf-r">Projects</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var lbl = r.key === '(none)' ? 'Not classified' : r.key;
+        return '<tr' + (r.key === '(none)' ? ' class="pf-dim"' : '') + '>' +
+          '<td>' + esc(lbl) + '</td>' +
+          '<td class="pf-dbar"><span class="pf-dbar-t" title="' +
+            esc(r.approved + ' of ' + r.drawings + ' approved') + '" style="width:' +
+            (r.drawings / max * 100).toFixed(1) + '%"><span class="pf-dbar-f" style="width:' +
+            r.pct + '%"></span></span></td>' +
+          '<td class="pf-r">' + r.drawings.toLocaleString() + '</td>' +
+          '<td class="pf-r">' + r.approved.toLocaleString() + '</td>' +
+          '<td class="pf-r">' + r.pct + '%</td>' +
+          '<td class="pf-r' + (r.overdue ? ' pf-bad' : '') + '">' + r.overdue.toLocaleString() + '</td>' +
+          '<td class="pf-r">' + r.projects + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+  function renderDisc() {
+    var list = scoped();
+    var host = document.getElementById('pf-view');
+    if (!list.length) { host.innerHTML = emptyHTML(); return; }
+    var rows = discTotals(list);
+    var classified = rows.filter(function (r) { return r.key !== '(none)'; });
+    var none = rows.filter(function (r) { return r.key === '(none)'; })[0];
+    var tot = rows.reduce(function (a, r) { return a + r.drawings; }, 0);
+
+    host.innerHTML =
+      '<div class="pf-eyebrow">PROGRESS BY DISCIPLINE \u2014 ' + classified.length + ' TRADE' +
+        (classified.length === 1 ? '' : 'S') + '</div>' +
+      '<div class="pf-kpis">' +
+        kpi(classified.length, 'Disciplines', 'in use across the projects shown') +
+        kpi(tot.toLocaleString(), 'Drawings', 'every level, counted in drawings') +
+        kpi(none ? Math.round(none.drawings / (tot || 1) * 100) + '%' : '0%', 'Not classified',
+            (none ? none.drawings.toLocaleString() : '0') + ' drawings carry no discipline',
+            none && none.drawings ? 'pf-kpi-warn' : 'pf-kpi-ok') +
+      '</div>' +
+      '<div class="pd-card pf-tblcard"><h3>By discipline <span class="pf-mut">\u2014 bar length is ' +
+        'scope, fill is approved</span></h3>' + discHTML(list) + '</div>' +
+      '<details class="pd-card pf-note" open><summary>How to read this</summary><ul>' +
+        '<li><strong>Counted in drawings throughout</strong>, every level including ISD. A discipline ' +
+          'cuts across levels, so it cannot use the Overview\u2019s split of sheet-based ISD and ' +
+          'drawing-based design \u2014 which means <em>these percentages will not equal the ISD ' +
+          'figure on the Overview</em>. Both are right about different things.</li>' +
+        '<li><strong>Not classified is a real row.</strong> Drawings with no discipline are shown, ' +
+          'not hidden, so the table adds up to the register. A large figure there is a ' +
+          'data-quality finding, not a trade.</li>' +
+        '<li><strong>Overdue</strong> is the same test as everywhere else: a planned approval date ' +
+          'in the past on something not approved.</li>' +
+      '</ul></details>';
+  }
+
   // ---- wiring --------------------------------------------------------------
   // Drill-through sets the shell's project and opens the Drawing Register — the same
   // hand-off planning-app's portfolio uses, and the reason the register can be
   // project-scoped while this page is not.
-  function drill(id) {
+  function drill(id, mod) {
     if (!id) return;
     sessionStorage.setItem('pd_project', id);
     var p = projects.find(function (x) { return String(x.id) === String(id); });
@@ -872,11 +1161,14 @@ window.Portfolio = (function () {
       sessionStorage.setItem('pd_project_name', p.name || p.id);
       if (p.group_head) sessionStorage.setItem('pd_group_head', p.group_head);
     }
-    location.href = '../drawing-register/index.html';
+    // ⚠️ The target module is a parameter now that the registers roll up here: a
+    // card reporting 12 open submittals that opens the DRAWING register is worse than
+    // no link at all — the reader arrives somewhere the number does not exist.
+    location.href = '../' + (mod || 'drawing-register') + '/index.html';
   }
   function wireGantt(host) {
     host.querySelectorAll('[data-drill]').forEach(function (el) {
-      var go = function (e) { if (e) e.stopPropagation(); drill(el.dataset.drill); };
+      var go = function (e) { if (e) e.stopPropagation(); drill(el.dataset.drill, el.dataset.mod); };
       el.onclick = go;
       el.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
     });
@@ -1018,9 +1310,75 @@ window.Portfolio = (function () {
     aoa.push(['Design % counts DRAWINGS approved / drawings. The project\'s own Overview counts ' +
       'Concept/SD/FCD/TWD in TRACKING UNITS, so those figures differ legitimately. ISD % counts ' +
       'SHEETS with partial credit and matches the register exactly.']);
-    var ws = XLSX.utils.aoa_to_sheet(aoa);
     var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Portfolio');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Portfolio');
+
+    // ---- Registers ---------------------------------------------------------
+    // ⚠️ ONE ROW PER PROJECT PER REGISTER, never a combined engineering total. The
+    // same refusal the page makes: these are not units of the same thing. A register
+    // that could not be read is written as the word "not available", NOT as 0 — a
+    // zero in a spreadsheet is indistinguishable from a real zero forever after.
+    var ra = [['Group head', 'Project', 'Register', 'Total', 'Open', 'Overdue', 'Closed',
+               'Approved saving', 'Pipeline saving']];
+    byGroupHead(list).forEach(function (g) {
+      sortRows(g[1]).forEach(function (p) {
+        REG_ORDER.forEach(function (k) {
+          var meta = (data.registers || {})[k] || { label: k };
+          if (!meta.available) {
+            ra.push([ghLabel(ghIdOf(p.project_id)), projName(p.project_id), meta.label,
+                     'not available', '', '', '', '', '']);
+            return;
+          }
+          var B = p[k] || { total: 0, open: 0, overdue: 0, done: 0 };
+          ra.push([ghLabel(ghIdOf(p.project_id)), projName(p.project_id), meta.label,
+                   B.total, B.open, B.overdue, B.done,
+                   k === 've' ? (B.saving || 0) : '', k === 've' ? (B.pipeline || 0) : '']);
+        });
+      });
+    });
+    ra.push([]);
+    ra.push(['Value Engineering: approved and pipeline savings are kept in separate columns and ' +
+      'must not be added \u2014 a saving on a proposal nobody has approved is not money saved.']);
+    ra.push(['\"not available\" means the register could not be read (not set up, or outside your ' +
+      'access). It is NOT a count of zero.']);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ra), 'Registers');
+
+    // ---- By discipline -----------------------------------------------------
+    var da = [['Discipline', 'Drawings', 'Approved', 'Approved %', 'Overdue', 'Projects']];
+    discTotals(list).forEach(function (r) {
+      da.push([r.key === '(none)' ? 'Not classified' : r.key,
+               r.drawings, r.approved, r.pct, r.overdue, r.projects]);
+    });
+    da.push([]);
+    da.push(['Counted in DRAWINGS throughout, every level including ISD \u2014 a discipline cuts ' +
+      'across levels. These percentages therefore will not equal the ISD % on the Portfolio ' +
+      'sheet, which counts sheets with partial credit.']);
+    da.push(['\"Not classified\" is drawings carrying no discipline. It is shown so the table adds ' +
+      'up to the register; a large figure there is a data-quality finding, not a trade.']);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(da), 'By discipline');
+
+    // ---- Movement ----------------------------------------------------------
+    var ma = [['Window', 'Group head', 'Project', 'Drawings approved', 'Newly overdue',
+               'Drawings added', 'Net']];
+    (data.MOVE_WINDOWS || [7, 30, 90]).forEach(function (w) {
+      byGroupHead(list).forEach(function (g) {
+        sortRows(g[1]).forEach(function (p) {
+          var M = (p.moved || {})[w] || { approved: 0, raised: 0, overdue: 0 };
+          if (!M.approved && !M.raised && !M.overdue) return;
+          ma.push(['last ' + w + ' days', ghLabel(ghIdOf(p.project_id)), projName(p.project_id),
+                   M.approved, M.overdue, M.raised, M.approved - M.overdue]);
+        });
+      });
+    });
+    ma.push([]);
+    ma.push(['Measured to ' + data.today + '.']);
+    ma.push(['\"Newly overdue\" counts only drawings whose PLANNED date fell inside the window and ' +
+      'that are still unapproved. It is not the standing overdue total on the Portfolio sheet, ' +
+      'which includes everything that has ever slipped.']);
+    ma.push(['\"Drawings added\" reads when the row was created in this app. After a bulk import ' +
+      'that is the import date, not the real issue date.']);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ma), 'Movement');
+
     XLSX.writeFile(wb, 'Engineering Portfolio.xlsx');
   }
 
@@ -1044,7 +1402,12 @@ window.Portfolio = (function () {
         GH.forEach(function (g, i) { ghById[g.id] = g; ghRank[g.id] = i; });
       },
       NO_GH: NO_GH,
-      setSort: function (s) { sort = s; }
+      setSort: function (s) { sort = s; },
+      // the register roll-up, movement and discipline additions (2026-08-26)
+      regTotals: regTotals, registersHTML: registersHTML, REG_ORDER: REG_ORDER,
+      moveTotals: moveTotals, moveRegTotals: moveRegTotals, moveTableHTML: moveTableHTML,
+      renderMovement: renderMovement, setMoveWin: function (w) { moveWin = w; },
+      discTotals: discTotals, discHTML: discHTML, renderDisc: renderDisc, money: money
     }
   };
 })();

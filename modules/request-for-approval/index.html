@@ -69,7 +69,13 @@
   <script src="../../assets/js/perm.js?v=20260824a"></script>
   <script src="../../assets/js/nav.js?v=20260825g"></script>
   <script src="../../assets/js/topsheet.js?v=20260825d"></script>
-  <script src="module.js?v=20260825h"></script>
+  <!-- Loaded for the STATUS VOCABULARY MIRROR CHECK only (2026-08-26). The
+       portfolio counts outstanding RFAs from engdata.js's copy of this
+       register's open/closed flags; module.js compares the two at load and
+       warns if they have drifted. Without this file the check silently
+       no-ops, which is the failure it exists to catch. -->
+  <script src="../../assets/js/engdata.js?v=20260826a"></script>
+  <script src="module.js?v=20260826a"></script>
   <script>
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);

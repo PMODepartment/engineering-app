@@ -224,3 +224,79 @@ the RLS scoping is reasoned rather than observed. **No screenshot**: this enviro
 stalled (a long-standing limit noted throughout these files), so UI claims are measured geometry and
 asserted content.
 - Assets `module.css/js?v=20260824a`, `engdata.js?v=20260824a`.
+
+## Three additions (2026-08-26) — registers, movement, disciplines — fmlozano
+Chosen by the owner from a list of candidates. All three are read model work in
+`EngData.portfolio()`; the page only draws what that returns.
+
+### 1. The other registers roll up here
+`portfolio()` now also reads `material_submittal`, `request_for_approval`, `method_register` and
+`value_engineering` **org-wide**, per project, into `p.ms` / `p.rfa` / `p.mr` / `p.ve`.
+- ⚠⚠ **EACH REGISTER'S OWN DEFINITION OF open / done / overdue IS REUSED, NEVER RE-DERIVED.**
+  `MS_DONE`, `RFA_OPEN`, the method register's `counts !== false && !node_kind` eligibility and
+  `VE_OPEN`/`VE_WON` are the same maps `submittalStats()` / `methodStats()` / `veStats()` read, which
+  are themselves mirrors of the modules'. A portfolio that invented its own "open" would print a
+  number the module it links to contradicts — the exact failure this repo has hit repeatedly.
+- ⚠️ **FOUR SEPARATE CARDS, NEVER A COMBINED TOTAL.** A drawing, a submittal, a method statement
+  and a VE proposal are not units of the same thing. The page already refuses to blend two counting
+  bases for drawings alone; this is the same rule, more strongly.
+- ⚠️ **UNAVAILABLE IS NOT ZERO.** Each read is tolerant (`tryAllOrgWide`) and returns **null**,
+  not `[]`, when the table cannot be read — `request_for_approval` is exactly this today, since
+  migration 0020 has not been run. The card says so, and the Excel export writes the words
+  *not available*. Drawing "0 open" would report the department as having nothing outstanding when
+  in fact nothing was read.
+- ⚠️ **A project with registers but NO drawings now appears in the list.** `projFor()` was split
+  out of `bucketFor()` for this: a project holding only submittals is still a project, and dropping
+  it would make these totals disagree with the modules'. It has no Gantt span and draws none.
+- ⚠️ **VE banked and pipeline are never added**, on the page or in the export.
+- ⚠️ **Each card drills into ITS OWN module** — `drill()` takes the module now. A card reporting
+  12 open submittals that opened the *drawing* register would land the reader where the number does
+  not exist.
+
+### 2. What changed — movement over a fixed window
+`MOVE_WINDOWS = [7, 30, 90]`, computed at aggregation time into `p.moved[w]`.
+- ⚠️ **COUNTS, NOT DATE LISTS.** Keeping every approval date per project so the UI could window
+  it later would carry thousands of strings for three numbers. The windows are a closed set.
+- ⚠⚠ **"NEWLY OVERDUE" IS NOT THE OVERDUE COUNT.** A drawing counts only if its *planned* date
+  fell inside the window and it is still unapproved. The standing figure on the Overview includes
+  everything that has ever slipped; reporting that as "this week" would make a two-year backlog look
+  like it appeared on Monday — which is the number that gets escalated wrongly.
+- ⚠️ **"Raised" reads `created_at`, i.e. when the row appeared IN THIS APP.** After a bulk import
+  that is the import date, not the real issue date, so an import week shows a spike. **Said on the
+  page and in the export**, not smoothed away — smoothing would under-report hand-entered work.
+- Rows are ordered **worst net movement first**. This is a chase list, not an alphabet.
+
+### 3. Progress by discipline
+`p.disc[discipline] = { drawings, approved, overdue }`, from `drawing_register.discipline`.
+- ⚠️ **ONE BASIS: DRAWINGS, EVERY LEVEL INCLUDING ISD.** A discipline cuts *across* levels, so it
+  cannot use the Overview's sheet-based-ISD / drawing-based-design split without multiplying into a
+  table nobody reads. The cost — **these percentages will not equal the ISD figure on the
+  Overview** — is stated on the page and in the export rather than left to be discovered.
+- ⚠️ **A BLANK DISCIPLINE IS ITS OWN ROW** ("Not classified"), never dropped: on a real register
+  plenty of rows carry none, and hiding them makes the table fail to add up to the register. It
+  sorts **last** however large it is — it is a data-quality finding, not a trade.
+
+### The RFA vocabulary now lives in two places, and the drift is checked
+`engdata.js` gained `RFA_STATUSES` / `RFA_OPEN` / `RFA_CLOSED` / `RFA_APPROVED` so the portfolio can
+count outstanding RFAs without loading that module. **`modules/request-for-approval/module.js`'s
+`STATUSES` array remains the definition**; it compares itself against the mirror at load and
+`console.warn`s if they disagree. ⚠️ **`request-for-approval/index.html` therefore loads
+`engdata.js`** — without it the check silently no-ops, which is the failure it exists to catch.
+⚠️ **A Draft is neither open nor closed.** `closed` is not the negation of `open`; treating it as
+one would count every unsubmitted draft as an answered RFA.
+
+### Verification — 76 more checks (`pf3.html`), 112 + 108 re-run green
+Movement windows (approved / newly-overdue / raised, sentinel excluded, sheets never counted);
+discipline totals adding up to the project total and summing across projects; every register's
+open/done/overdue against its own vocabulary; unavailable vs empty vs zero; both new views rendered
+with matching header/body column counts; a hostile discipline name escaped; all four Excel sheets
+including their caveats; the RFA mirror's partition properties.
+⚠️ `EngData._portfolio.aggregate()` is now **per table** (`aggregate(rows, today, regs)`). It used
+to answer every table with the same array — harmless while only `drawing_register` was read, and
+silently wrong now that it is not.
+⚠️ A harness artefact worth remembering: `pf.html`'s XLSX stub recorded only the **last**
+`aoa_to_sheet` call. The moment the export grew from one sheet to four, four passing assertions
+started testing the *Movement* sheet while claiming to test *Portfolio*. Capture by sheet name.
+⚠️ **Still not verified signed-in**, and still no screenshot — same limits as above. In
+particular the RFA card **will** render as "not available" in production until migration 0020 is run.
+- Assets `module.css/js?v=20260826a`, `engdata.js?v=20260826a`.

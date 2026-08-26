@@ -8,7 +8,7 @@
   <script src="../../assets/js/theme.js?v=20260824a"></script>
   <title>Portfolio · Engineering App</title>
   <link rel="stylesheet" href="../../assets/css/dashboard.css?v=20260825g" />
-  <link rel="stylesheet" href="module.css?v=20260825h" />
+  <link rel="stylesheet" href="module.css?v=20260826a" />
 </head>
 <body>
   <div class="pd-app">
@@ -43,6 +43,8 @@
           <button class="pf-tab active" data-view="overview">Overview</button>
           <button class="pf-tab" data-view="gantt">Programme</button>
           <button class="pf-tab" data-view="isd">ISD status</button>
+          <button class="pf-tab" data-view="moved">What changed</button>
+          <button class="pf-tab" data-view="disc">By discipline</button>
         </div>
 
         <div class="pf-topbar-tools" id="pf-topbar-tools">
@@ -69,8 +71,8 @@
   <script src="../../assets/js/perm.js?v=20260824a"></script>
   <script src="../../assets/js/nav.js?v=20260825g"></script>
   <!-- The cross-project read model. Must load BEFORE module.js. -->
-  <script src="../../assets/js/engdata.js?v=20260825e"></script>
-  <script src="module.js?v=20260825h"></script>
+  <script src="../../assets/js/engdata.js?v=20260826a"></script>
+  <script src="module.js?v=20260826a"></script>
   <script>
     AppAuth.requireLogin(function (user, profile) {
       UI.renderUserBar(profile);

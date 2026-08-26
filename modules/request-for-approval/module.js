@@ -63,6 +63,31 @@ window.RequestForApproval = (function () {
   ];
   var STATUS_ORDER = STATUSES.map(function (s) { return s.name; });
 
+  // ⚠️ STATUSES ABOVE IS THE DEFINITION. `engdata.js` mirrors its open/closed/
+  // approved flags so the PORTFOLIO can count outstanding RFAs without loading this
+  // module, exactly as it mirrors the submittal and VE vocabularies. The mirror can
+  // drift — and the drift is silent, because an unmirrored status simply stops being
+  // counted and the portfolio quietly under-reports — so it is checked here, where
+  // the definition lives, rather than trusted.
+  (function checkVocabMirror() {
+    var E = window.EngData;
+    if (!E || !E.RFA_OPEN) return;                 // engdata not loaded on this page
+    var bad = [];
+    STATUSES.forEach(function (st) {
+      if (E.RFA_STATUSES.indexOf(st.name) === -1) { bad.push(st.name + ' (missing)'); return; }
+      if (!!E.RFA_OPEN[st.name] !== !!st.open) bad.push(st.name + ' (open)');
+      if (!!E.RFA_CLOSED[st.name] !== !!st.closed) bad.push(st.name + ' (closed)');
+      if (!!E.RFA_APPROVED[st.name] !== !!st.approved) bad.push(st.name + ' (approved)');
+    });
+    E.RFA_STATUSES.forEach(function (nm) {
+      if (STATUS_ORDER.indexOf(nm) === -1) bad.push(nm + ' (extra in engdata)');
+    });
+    if (bad.length) {
+      console.warn('\u26a0\ufe0f RFA status vocabulary has DRIFTED from engdata.js, so the ' +
+        'portfolio is counting these differently from this register:', bad);
+    }
+  })();
+
   var DISCIPLINES = ['Architectural', 'Structural', 'Civil', 'Mechanical', 'Electrical',
     'Plumbing', 'Fire Protection', 'Landscape', 'Temporary Works', 'Other'];
 
